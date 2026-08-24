@@ -1,0 +1,1148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0004-3 — shrines of SPIRIT</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{
+    --bg:#101012; --panel:#17171a; --edge:#2a2a2e; --ink:#e9e6db; --dim:#8a877c;
+    --amber:#c9973a;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);}
+  body{padding:24px 16px 40px;display:flex;flex-direction:column;align-items:center;}
+  h1{font-size:13px;font-weight:400;letter-spacing:.08em;color:var(--dim);text-transform:uppercase;margin:0 0 4px;}
+  h1 b{color:var(--ink);font-weight:600;}
+  .subtitle{font-size:10px;color:var(--dim);margin:0 0 16px;text-align:center;}
+
+  .shrine{width:1040px;max-width:100%;display:flex;flex-direction:column;gap:20px;}
+  .panels{display:grid;grid-template-columns:240px 1fr 260px;gap:20px;}
+
+  .viz-wrap{width:240px;}
+  #viz{width:240px;height:240px;background:#08080a;border:1px solid var(--edge);display:block;
+    image-rendering:pixelated;image-rendering:crisp-edges;}
+  .viz-caption{font-size:9px;color:var(--dim);margin-top:6px;line-height:1.5;}
+
+  .fields{display:flex;flex-direction:column;gap:8px;}
+  .field{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:6px 8px;
+    display:flex;flex-direction:column;gap:4px;
+    box-shadow:0 0 0 0 var(--flash-color,transparent);
+    transition:box-shadow .4s ease-out, background-color .4s ease-out;}
+  .field.firing{box-shadow:0 0 14px 2px var(--flash-color,#fff);
+    background-color:color-mix(in srgb, var(--flash-color,#fff) 14%, var(--panel));
+    transition:none;}
+  .flabel{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);}
+  .legend-row{font-size:10px;line-height:1.5;color:var(--ink);padding:2px 0;cursor:default;}
+  .legend-row b{font-weight:600;}
+  .param-group{padding:2px 0;}
+  .field-header{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;}
+  .field-summary{font-size:9px;color:var(--dim);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;text-align:right;display:none;}
+  .collapse-arrow{font-size:9px;color:var(--dim);flex:none;width:8px;}
+  .field-body{display:flex;flex-direction:column;gap:4px;margin-top:4px;}
+  .field.collapsed{padding-top:6px;padding-bottom:6px;}
+  .field.collapsed .field-body{display:none;}
+  .field.collapsed .field-summary{display:block;}
+  .knob-row{display:flex;align-items:center;gap:6px;font-size:10px;padding:1px 0;}
+  .knob-row .klabel{width:56px;flex:none;color:var(--ink);}
+  .knob-row input[type=range]{flex:1;min-width:0;}
+  .knob-row select{flex:1;min-width:0;background:var(--panel);color:var(--ink);border:1px solid var(--edge);
+    font-family:var(--mono);font-size:10px;}
+  .knob-row .kval{width:46px;flex:none;text-align:right;color:var(--dim);}
+  .knob-row .chord-check{display:flex;align-items:center;gap:3px;cursor:pointer;white-space:nowrap;}
+  .knob-row .chord-check input{margin:0;flex:none;}
+
+  .controls{display:flex;align-items:center;gap:10px;}
+  button{background:var(--panel);color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);
+    font-size:11px;padding:8px 14px;cursor:pointer;}
+  button:hover{border-color:#555;}
+
+  .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
+    align-items:center;justify-content:center;z-index:20;}
+  .modal-overlay.open{display:flex;}
+  .modal-box{width:520px;max-width:90vw;background:var(--panel);border:1px solid var(--edge);
+    border-radius:2px;padding:16px;display:flex;flex-direction:column;gap:10px;}
+  .modal-title{font-size:11px;letter-spacing:.04em;color:var(--ink);}
+  #modalText{width:100%;height:260px;background:#0c0c0d;color:var(--ink);border:1px solid var(--edge);
+    font-family:var(--mono);font-size:11px;padding:8px;resize:vertical;}
+  .modal-row{display:flex;gap:8px;}
+  .modal-msg{font-size:10px;color:var(--dim);min-height:12px;}
+
+  .explainer{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:10px 12px;
+    align-self:start;position:sticky;top:12px;}
+  .explain-title{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;}
+  .explain-body{font-size:10px;line-height:1.6;color:var(--ink);}
+  .explain-body .tk-p{margin:0 0 8px;}
+  .explain-body .tk-p:last-child{margin-bottom:0;}
+  .explain-body .tk-block{background:#0c0c0d;border:1px solid var(--edge);border-radius:2px;
+    padding:6px 7px;margin:0 0 8px;font-family:var(--mono);white-space:pre-wrap;overflow-wrap:break-word;}
+  .explain-body .tk-num{color:var(--amber);}
+  .explain-body .tk-var{color:#7fb3ff;}
+  .explain-body .tk-kw{color:#8fd0a0;}
+  .explain-body .tk-live{color:#fff;background:#242427;border-radius:2px;padding:0 3px;}
+
+  footer{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:var(--dim);flex-wrap:wrap;gap:6px;}
+  footer a{color:var(--dim);}
+</style>
+</head>
+<body>
+
+<h1>1000 - shrines - /of/ - SPIRIT · <b>rune_d</b></h1>
+<div class="subtitle">drawn from <a href="https://johnoestmannmusic.com/rune_b/" target="_blank" rel="noreferrer noopener"><i>rune_b</i></a> — live JS Web Audio — click an instrument to edit.</div>
+
+<div class="shrine">
+  <div class="panels">
+    <div class="viz-wrap">
+      <canvas id="viz" width="240" height="240"></canvas>
+      <!-- <div class="viz-caption">Live — 32×32 pixel grid, 4×4 Bayer dithered, blue→fuchsia ground. The magenta ring pulses outward from center with the Tone layer's gate and two envelope circles; each coloured ring is one Rain layer completing a flicker cycle, one evenly-spaced column per layer.</div> -->
+    </div>
+
+    <div class="fields" id="legend"></div>
+
+    <div class="explainer" id="explainer">
+      <div class="explain-title" id="explainTitle">Explainer</div>
+      <div class="explain-body" id="explainBody">Hover a row to see the exact mechanism — with the live current value — for that part of the piece.</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="playBtn" type="button">▶ play</button>
+    <button id="exportBtn" type="button">Export JSON</button>
+  </div>
+
+  <footer>
+    <span>CC0 · <a href="https://github.com/johnoestmannmusic/1000-shrines-of-spirit" target="_blank" rel="noreferrer noopener">view source</a></span>
+    <span>live JS synthesis — runs indefinitely</span>
+  </footer>
+</div>
+
+<div class="modal-overlay" id="presetModal">
+  <div class="modal-box">
+    <div class="modal-title" id="modalTitle">Export</div>
+    <textarea id="modalText" spellcheck="false" readonly></textarea>
+    <div class="modal-row">
+      <button id="modalCopy" type="button">Copy</button>
+      <button id="modalClose" type="button">Close</button>
+    </div>
+    <div class="modal-msg" id="modalMsg"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  function midiToHz(m){ return 440 * Math.pow(2, (m-69)/12); }
+
+  // levels/times/curve straight out of the SC source: Env.circle loops its
+  // last level back to its first forever, which is why this piece never
+  // "finishes" — the two Tone envelopes (100s and 270s periods) and the one
+  // Rain envelope (270s period) just keep drifting in and out against each
+  // other for as long as the page stays open. curveExp 0 = SC's \curve 'lin';
+  // a nonzero curveExp approximates SC's numeric \curve (a mild exponential
+  // ease) — close enough for a browser reinterpretation, not a bit-exact port.
+  function envCircle(levels, times, curveExp, tSec){
+    var total = 0; for(var i=0;i<times.length;i++) total += times[i];
+    var t = ((tSec % total) + total) % total;
+    var acc = 0;
+    for(i=0;i<times.length;i++){
+      var segDur = times[i];
+      if(t < acc+segDur){
+        var localT = (t-acc)/segDur;
+        var v0 = levels[i], v1 = levels[(i+1)%levels.length];
+        var shaped = curveExp ? (1-Math.exp(-curveExp*localT))/(1-Math.exp(-curveExp)) : localT;
+        return v0 + (v1-v0)*shaped;
+      }
+      acc += segDur;
+    }
+    return levels[levels.length-1];
+  }
+  // Single source of truth for every instrument. The 4 fields John asked to
+  // be editable — waveType, pitch, maxVolume, lfoFreq — are meant to be
+  // tweaked live from the legend UI below and copied back out via Export
+  // JSON; everything else here (pan, envelopes, the fast flicker rate) is
+  // fixed, not exposed as a knob. maxVolume is deliberately a single peak
+  // scalar for BOTH roles now (Rain used to have a separate fixed carrier
+  // "mul" of 0.1 plus a symmetric add/mul level LFO — since every Rain
+  // layer in rune_b already has add==mul, folding all of that into one
+  // maxVolume (level swings 0..maxVolume via 0.5·maxVolume·(1+sin(...))) is
+  // an exact, lossless reformulation of the original values, not an
+  // approximation, and it's what makes maxVolume mean the same thing —
+  // "this instrument's loudest possible moment" — for every card.
+  var INSTRUMENTS = [
+  {
+    "id": "l1",
+    "n": 1,
+    "role": "tone",
+    "color": "#c9973a",
+    "waveType": "triangle",
+    "pitch": 46,
+    "pitch2": 53,
+    "pitch2Enabled": true,
+    "maxVolume": 0.05,
+    "lfoFreq": 0.165,
+    "lfoPhase": 0,
+    "pan": -0.3,
+    "vibRate": 0.05,
+    "vibDepth": 2,
+    "pulseHz": 4,
+    "envA": {
+      "levels": [
+        0,
+        1,
+        1,
+        0,
+        0
+      ],
+      "times": [
+        25,
+        35,
+        25,
+        15
+      ],
+      "curve": 2
+    },
+    "envB": {
+      "levels": [
+        0,
+        1,
+        1,
+        0,
+        0
+      ],
+      "times": [
+        15,
+        200,
+        25,
+        30
+      ],
+      "curve": 0
+    }
+  },
+  {
+    "id": "rain2",
+    "n": 2,
+    "role": "rain",
+    "color": "#4a6fd6",
+    "waveType": "sawtooth",
+    "pitch": 70,
+    "pitch2": 77,
+    "pitch2Enabled": false,
+    "maxVolume": 0.041,
+    "lfoFreq": 0.05,
+    "lfoPhase": 3.141592653589793,
+    "pan": 0.3,
+    "sawRate": 0.25
+  },
+  {
+    "id": "rain3",
+    "n": 3,
+    "role": "rain",
+    "color": "#5ec8d8",
+    "waveType": "sawtooth",
+    "pitch": 75,
+    "pitch2": 82,
+    "pitch2Enabled": false,
+    "maxVolume": 0.02,
+    "lfoFreq": 0.04,
+    "lfoPhase": 3.141592653589793,
+    "pan": 0.1,
+    "sawRate": 0.24
+  },
+  {
+    "id": "rain4",
+    "n": 4,
+    "role": "rain",
+    "color": "#6fb582",
+    "waveType": "square",
+    "pitch": 65,
+    "pitch2": 73,
+    "pitch2Enabled": true,
+    "maxVolume": 0.02,
+    "lfoFreq": 0.03,
+    "lfoPhase": 3.141592653589793,
+    "pan": -0.1,
+    "sawRate": 0.23
+  },
+  {
+    "id": "rain5",
+    "n": 5,
+    "role": "rain",
+    "color": "#8a7fd6",
+    "waveType": "sine",
+    "pitch": 82,
+    "pitch2": 89,
+    "pitch2Enabled": true,
+    "maxVolume": 0.007,
+    "lfoFreq": 0.018,
+    "lfoPhase": 4.71238898038469,
+    "pan": 0.6,
+    "sawRate": 0.1
+  },
+  {
+    "id": "rain6",
+    "n": 6,
+    "role": "rain",
+    "color": "#4fd6c4",
+    "waveType": "square",
+    "pitch": 80,
+    "pitch2": 87,
+    "pitch2Enabled": false,
+    "maxVolume": 0.009,
+    "lfoFreq": 0.02,
+    "lfoPhase": 9.42477796076938,
+    "pan": 0.2,
+    "sawRate": 0.18
+  }
+];
+
+  var FX = {
+    "roomSize": 0.45,
+    "wet": 0.65,
+    "dry": 1,
+    "delayTime": 0.3,
+    "delayFeedback": 0.35,
+    "delayMix": 0.67
+  };
+
+  // pitch2: an optional second note for a 2-note chord, off by default —
+  // the Chord checkbox + Pitch2 slider live in each card's first param-group.
+  // The second oscillator is always built (see buildGraph) and silenced via
+  // chord2Gain when disabled, so toggling it is instant with no rebuild.
+  INSTRUMENTS.forEach(function(inst){
+    if(inst.pitch2===undefined || inst.pitch2===null) inst.pitch2 = inst.pitch+7; // default a fifth up, once enabled
+    if(inst.pitch2Enabled===undefined) inst.pitch2Enabled = false;
+  });
+  var TONE = INSTRUMENTS[0];
+  var RAIN_LIST = INSTRUMENTS.filter(function(i){ return i.role==='rain'; });
+  RAIN_LIST.forEach(function(inst, i){ inst.colIdx = i; });
+  var RAIN_ENV = { levels:[0,0,1,1,0], times:[30,15,200,25], curve:0 };
+  var WAVE_TYPES = ['sine','triangle','sawtooth','square'];
+
+  // --- legend: 4 knobs per instrument (Wave/Pitch/Max Vol/LFO Freq), the
+  // rest stays read-only text. Edits write straight into the INSTRUMENTS
+  // objects above and, where relevant, push live onto the running graph
+  // (see applyLiveParam) — everything else (envelopes, flicker rate,
+  // gain-based amplitude) already reads INSTRUMENTS fresh every rAF frame,
+  // so those need no special-case push at all.
+  function waveOptionsHTML(selected){
+    return WAVE_TYPES.map(function(w){ return '<option value="'+w+'"'+(w===selected?' selected':'')+'>'+w+'</option>'; }).join('');
+  }
+  function knobRowHTML(label, id, kind, min, max, step, value, dec){
+    if(kind==='select') return '<div class="knob-row"><span class="klabel">'+label+'</span><select id="k-'+id+'">'+waveOptionsHTML(value)+'</select></div>';
+    return '<div class="knob-row"><span class="klabel">'+label+'</span>'+
+      '<input type="range" id="k-'+id+'" min="'+min+'" max="'+max+'" step="'+step+'" value="'+value+'">'+
+      '<span class="kval" id="kv-'+id+'">'+Number(value).toFixed(dec)+'</span></div>';
+  }
+  function summaryText(inst){
+    var volDec = inst.role==='tone' ? 2 : 3;
+    return inst.waveType+' · '+inst.pitch+(inst.pitch2Enabled?'+'+inst.pitch2:'')+' · vol '+inst.maxVolume.toFixed(volDec)+' · lfo '+inst.lfoFreq.toFixed(3)+'Hz';
+  }
+  function chordRowHTML(inst, pitchRange){
+    return '<div class="knob-row">'+
+      '<label class="klabel chord-check"><input type="checkbox" id="k-'+inst.id+'-chorden"'+(inst.pitch2Enabled?' checked':'')+'> Chord</label>'+
+      '<input type="range" id="k-'+inst.id+'-pitch2" min="'+pitchRange.min+'" max="'+pitchRange.max+'" step="'+pitchRange.step+'" value="'+inst.pitch2+'">'+
+      '<span class="kval" id="kv-'+inst.id+'-pitch2">'+inst.pitch2+'</span>'+
+    '</div>';
+  }
+  function instrumentFieldHTML(inst){
+    var roleLabel = inst.role==='tone' ? 'tone' : 'rain';
+    var volRange = inst.role==='tone' ? {min:0,max:1,step:0.01,dec:2} : {min:0,max:0.1,step:0.001,dec:3};
+    var lfoRange = {min:0.005,max:2,step:0.005,dec:3};
+    var pitchRange = {min:24,max:96,step:1,dec:0};
+    var sourceKey = inst.role==='tone' ? 'l1-source' : 'rain-'+inst.n;
+    var shapeKey = inst.role==='tone' ? 'l1-shape' : 'rain-'+inst.n+'-level';
+    var body = '<div class="param-group" data-explain="'+sourceKey+'">'+
+        knobRowHTML('Wave', inst.id+'-wave', 'select', null,null,null, inst.waveType) +
+        knobRowHTML('Pitch', inst.id+'-pitch', 'range', pitchRange.min, pitchRange.max, pitchRange.step, inst.pitch, pitchRange.dec) +
+        chordRowHTML(inst, pitchRange) +
+      '</div>'+
+      '<div class="param-group" data-explain="'+shapeKey+'">'+
+        knobRowHTML('Max Vol', inst.id+'-vol', 'range', volRange.min, volRange.max, volRange.step, inst.maxVolume, volRange.dec) +
+        knobRowHTML('LFO Freq', inst.id+'-lfo', 'range', lfoRange.min, lfoRange.max, lfoRange.step, inst.lfoFreq, lfoRange.dec) +
+      '</div>';
+    if(inst.role==='tone'){
+      body += '<div class="legend-row" data-explain="l1-pulse">Pulse gate <b>4Hz</b> · pan <b>-0.3</b></div>'+
+        '<div class="legend-row" data-explain="l1-vibrato">Vibrato: fixed <b>'+inst.vibRate+'Hz</b> ±<b>'+inst.vibDepth+'Hz</b></div>'+
+        '<div class="legend-row" data-explain="l1-env">Env.circle <b>25/35/25/15</b>s × Env.circle <b>15/200/25/30</b>s</div>';
+    } else {
+      body += '<div class="legend-row" data-explain="rain-'+inst.n+'-flicker">Flicker: saw 8±7Hz swept by <b>'+inst.sawRate+'Hz</b> sine · pan <b>'+inst.pan+'</b></div>';
+    }
+    var summaryKey = inst.role==='tone' ? 'l1-summary' : 'rain-'+inst.n+'-summary';
+    return '<div class="field collapsed" id="field-'+inst.id+'" style="border-color:'+inst.color+';--flash-color:'+inst.color+';">'+
+      '<div class="field-header" data-toggle="'+inst.id+'" data-explain="'+summaryKey+'">'+
+        '<span class="flabel">'+inst.n+' · '+roleLabel+'</span>'+
+        '<span class="field-summary" id="summary-'+inst.id+'">'+summaryText(inst)+'</span>'+
+        '<span class="collapse-arrow">▸</span>'+
+      '</div>'+
+      '<div class="field-body">'+body+'</div>'+
+    '</div>';
+  }
+  // FX (var FX declared up near INSTRUMENTS, right above — the two live
+  // side by side deliberately, since Export JSON hands back both together
+  // and they need to land in the same paste). Reverb is a synthetic-impulse
+  // ConvolverNode, delay is ping-pong — both entirely native Web Audio, no
+  // external IR file (this is still one self-contained HTML file). Replaces
+  // the old read-only "rain bus" card; that card's Env.circle description
+  // didn't lose any function — the shared Rain envelope itself is untouched,
+  // just no longer has its own legend slot.
+  function fxSummaryText(){
+    return 'room '+FX.roomSize.toFixed(2)+' · wet '+FX.wet.toFixed(2)+' · dry '+FX.dry.toFixed(2)+' · delay '+(FX.delayTime*1000).toFixed(0)+'ms/'+FX.delayMix.toFixed(2);
+  }
+  function fxFieldHTML(){
+    var pct = {min:0,max:1,step:0.01,dec:2};
+    var timeRange = {min:0.05,max:1,step:0.01,dec:2};
+    var fbRange = {min:0,max:0.9,step:0.01,dec:2};
+    return '<div class="field collapsed" id="field-fx" style="border-color:#8a877c;--flash-color:#8a877c;">'+
+      '<div class="field-header" data-toggle="fx" data-explain="fx-summary">'+
+        '<span class="flabel">fx</span>'+
+        '<span class="field-summary" id="summary-fx">'+fxSummaryText()+'</span>'+
+        '<span class="collapse-arrow">▸</span>'+
+      '</div>'+
+      '<div class="field-body">'+
+        '<div class="param-group" data-explain="fx-delay">'+
+          knobRowHTML('Delay Time', 'fx-delaytime', 'range', timeRange.min, timeRange.max, timeRange.step, FX.delayTime, timeRange.dec) +
+          knobRowHTML('Feedback', 'fx-delayfb', 'range', fbRange.min, fbRange.max, fbRange.step, FX.delayFeedback, fbRange.dec) +
+          knobRowHTML('Delay Mix', 'fx-delaymix', 'range', pct.min, pct.max, pct.step, FX.delayMix, pct.dec) +
+        '</div>'+
+        '<div class="param-group" data-explain="fx-reverb">'+
+          knobRowHTML('Room Size', 'fx-room', 'range', pct.min, pct.max, pct.step, FX.roomSize, pct.dec) +
+          knobRowHTML('Wet', 'fx-wet', 'range', pct.min, pct.max, pct.step, FX.wet, pct.dec) +
+          knobRowHTML('Dry', 'fx-dry', 'range', pct.min, pct.max, pct.step, FX.dry, pct.dec) +
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }
+  var legend = document.getElementById('legend');
+  legend.innerHTML = INSTRUMENTS.map(instrumentFieldHTML).join('') + fxFieldHTML();
+
+  // --- collapsible accordion: all cards start collapsed (1 header line);
+  // expanding one collapses every other card, so max screen height stays
+  // bounded regardless of how many instruments there are. ---
+  var ALL_CARD_IDS = INSTRUMENTS.map(function(i){ return i.id; }).concat(['fx']);
+  function setCollapsed(id, collapsed){
+    var el = document.getElementById('field-'+id);
+    if(!el) return;
+    el.classList.toggle('collapsed', collapsed);
+    var arrow = el.querySelector('.collapse-arrow');
+    if(arrow) arrow.textContent = collapsed ? '▸' : '▾';
+  }
+  document.querySelectorAll('.field-header').forEach(function(header){
+    header.addEventListener('click', function(){
+      var id = header.getAttribute('data-toggle');
+      var el = document.getElementById('field-'+id);
+      var wasCollapsed = el.classList.contains('collapsed');
+      if(wasCollapsed) ALL_CARD_IDS.forEach(function(otherId){ setCollapsed(otherId, otherId!==id); });
+      else setCollapsed(id, true);
+    });
+  });
+
+  // A live-built oscillator's .type and .frequency are both settable at any
+  // time without tearing anything down — so editing Wave or Pitch just
+  // reaches straight into the already-running node when one exists.
+  function applyLiveParam(inst){
+    var nodes = inst.role==='tone' ? toneNodes : rainNodes[inst.id];
+    if(!nodes) return;
+    nodes.carrier.type = inst.waveType;
+    nodes.carrier.frequency.value = midiToHz(inst.pitch);
+    if(nodes.carrier2) nodes.carrier2.type = inst.waveType; // shares the same timbre
+  }
+  function applyLiveChord(inst){
+    var nodes = inst.role==='tone' ? toneNodes : rainNodes[inst.id];
+    if(!nodes) return;
+    nodes.carrier2.frequency.value = midiToHz(inst.pitch2);
+    nodes.chord2Gain.gain.value = inst.pitch2Enabled ? 1 : 0;
+  }
+  INSTRUMENTS.forEach(function(inst){
+    var volDec = inst.role==='tone' ? 2 : 3;
+    var waveSel = document.getElementById('k-'+inst.id+'-wave');
+    var pitchIn = document.getElementById('k-'+inst.id+'-pitch');
+    var volIn = document.getElementById('k-'+inst.id+'-vol');
+    var lfoIn = document.getElementById('k-'+inst.id+'-lfo');
+    var summaryEl = document.getElementById('summary-'+inst.id);
+    waveSel.addEventListener('change', function(){ inst.waveType = waveSel.value; applyLiveParam(inst); summaryEl.textContent = summaryText(inst); });
+    pitchIn.addEventListener('input', function(){
+      inst.pitch = parseFloat(pitchIn.value);
+      document.getElementById('kv-'+inst.id+'-pitch').textContent = inst.pitch.toFixed(0);
+      applyLiveParam(inst);
+      summaryEl.textContent = summaryText(inst);
+    });
+    volIn.addEventListener('input', function(){
+      inst.maxVolume = parseFloat(volIn.value);
+      document.getElementById('kv-'+inst.id+'-vol').textContent = inst.maxVolume.toFixed(volDec);
+      summaryEl.textContent = summaryText(inst);
+    });
+    lfoIn.addEventListener('input', function(){
+      inst.lfoFreq = parseFloat(lfoIn.value);
+      document.getElementById('kv-'+inst.id+'-lfo').textContent = inst.lfoFreq.toFixed(3);
+      // Every instrument's LFO Freq is now a volume LFO, computed fresh from
+      // inst.lfoFreq every rafLoop frame (see there) — no live-push needed
+      // for Tone or Rain. Tone's vibrato is a separate, fixed vibRate now.
+      summaryEl.textContent = summaryText(inst);
+    });
+
+    var chordEnIn = document.getElementById('k-'+inst.id+'-chorden');
+    var pitch2In = document.getElementById('k-'+inst.id+'-pitch2');
+    chordEnIn.addEventListener('change', function(){
+      inst.pitch2Enabled = chordEnIn.checked;
+      applyLiveChord(inst);
+      summaryEl.textContent = summaryText(inst);
+    });
+    pitch2In.addEventListener('input', function(){
+      inst.pitch2 = parseFloat(pitch2In.value);
+      document.getElementById('kv-'+inst.id+'-pitch2').textContent = inst.pitch2.toFixed(0);
+      applyLiveChord(inst);
+      summaryEl.textContent = summaryText(inst);
+    });
+  });
+
+  // --- FX knob wiring ---
+  (function(){
+    var roomIn = document.getElementById('k-fx-room');
+    var wetIn = document.getElementById('k-fx-wet');
+    var dryIn = document.getElementById('k-fx-dry');
+    var delayTimeIn = document.getElementById('k-fx-delaytime');
+    var delayFbIn = document.getElementById('k-fx-delayfb');
+    var delayMixIn = document.getElementById('k-fx-delaymix');
+    var summaryEl = document.getElementById('summary-fx');
+    roomIn.addEventListener('input', function(){
+      FX.roomSize = parseFloat(roomIn.value);
+      document.getElementById('kv-fx-room').textContent = FX.roomSize.toFixed(2);
+      // No plain AudioParam for "impulse response length" — regenerating and
+      // reassigning the buffer is the only way to change it live, so Room
+      // Size (unlike Wet/Dry/delay) causes a small audible reset of the
+      // reverb's tail rather than a smooth glide.
+      if(fxNodes) fxNodes.convolver.buffer = makeImpulseResponse(FX.roomSize);
+      summaryEl.textContent = fxSummaryText();
+    });
+    wetIn.addEventListener('input', function(){
+      FX.wet = parseFloat(wetIn.value);
+      document.getElementById('kv-fx-wet').textContent = FX.wet.toFixed(2);
+      if(fxNodes) fxNodes.wetGain.gain.value = FX.wet;
+      summaryEl.textContent = fxSummaryText();
+    });
+    dryIn.addEventListener('input', function(){
+      FX.dry = parseFloat(dryIn.value);
+      document.getElementById('kv-fx-dry').textContent = FX.dry.toFixed(2);
+      if(fxNodes) fxNodes.dryGain.gain.value = FX.dry;
+      summaryEl.textContent = fxSummaryText();
+    });
+    delayTimeIn.addEventListener('input', function(){
+      FX.delayTime = parseFloat(delayTimeIn.value);
+      document.getElementById('kv-fx-delaytime').textContent = FX.delayTime.toFixed(2);
+      if(fxNodes){ fxNodes.delayL.delayTime.value = FX.delayTime; fxNodes.delayR.delayTime.value = FX.delayTime; }
+      summaryEl.textContent = fxSummaryText();
+    });
+    delayFbIn.addEventListener('input', function(){
+      FX.delayFeedback = parseFloat(delayFbIn.value);
+      document.getElementById('kv-fx-delayfb').textContent = FX.delayFeedback.toFixed(2);
+      if(fxNodes){ fxNodes.fbL.gain.value = FX.delayFeedback; fxNodes.fbR.gain.value = FX.delayFeedback; }
+      summaryEl.textContent = fxSummaryText();
+    });
+    delayMixIn.addEventListener('input', function(){
+      FX.delayMix = parseFloat(delayMixIn.value);
+      document.getElementById('kv-fx-delaymix').textContent = FX.delayMix.toFixed(2);
+      if(fxNodes) fxNodes.delayMixGain.gain.value = FX.delayMix;
+      summaryEl.textContent = fxSummaryText();
+    });
+  })();
+
+  // --- export: paste-back-into-source JSON, matching INSTRUMENTS' own shape ---
+  function exportInstrument(inst){
+    var base = { id:inst.id, n:inst.n, role:inst.role, color:inst.color,
+      waveType:inst.waveType, pitch:inst.pitch, pitch2:inst.pitch2, pitch2Enabled:inst.pitch2Enabled,
+      maxVolume:inst.maxVolume, lfoFreq:inst.lfoFreq, lfoPhase:inst.lfoPhase, pan:inst.pan };
+    if(inst.role==='tone'){ base.vibRate=inst.vibRate; base.vibDepth=inst.vibDepth; base.pulseHz=inst.pulseHz; base.envA=inst.envA; base.envB=inst.envB; }
+    else { base.sawRate=inst.sawRate; }
+    return base;
+  }
+  var presetModal = document.getElementById('presetModal');
+  var modalText = document.getElementById('modalText');
+  var modalMsg = document.getElementById('modalMsg');
+  document.getElementById('exportBtn').addEventListener('click', function(){
+    // Full state — INSTRUMENTS (every editable AND fixed field, per
+    // instrument) plus FX — so this can be pasted straight back over both
+    // declarations in source as the new baked-in default, no manual merging.
+    modalText.value =
+      'var INSTRUMENTS = ' + JSON.stringify(INSTRUMENTS.map(exportInstrument), null, 2) + ';\n\n' +
+      'var FX = ' + JSON.stringify(FX, null, 2) + ';';
+    modalMsg.textContent = '';
+    presetModal.classList.add('open');
+    modalText.focus(); modalText.select();
+  });
+  document.getElementById('modalClose').addEventListener('click', function(){ presetModal.classList.remove('open'); });
+  document.getElementById('modalCopy').addEventListener('click', function(){
+    modalText.select();
+    try{
+      navigator.clipboard.writeText(modalText.value).then(function(){ modalMsg.textContent = 'copied to clipboard'; }, function(){ modalMsg.textContent = 'clipboard blocked — text is selected, press Ctrl/Cmd+C'; });
+    }catch(e){ modalMsg.textContent = 'text is selected — press Ctrl/Cmd+C'; }
+  });
+
+  // --- explainer ---
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function N(x){ return '<span class="tk-num">'+esc(x)+'</span>'; }
+  function VR(x){ return '<span class="tk-var">'+esc(x)+'</span>'; }
+  function KW(x){ return '<span class="tk-kw">'+esc(x)+'</span>'; }
+  function LIVE(x){ return '<span class="tk-live">'+esc(x)+'</span>'; }
+  function CODE(x){ return '<div class="tk-block">'+x+'</div>'; }
+  function P(x){ return '<p class="tk-p">'+x+'</p>'; }
+
+  var EXPLAIN = {
+    'l1-source': function(){
+      var chord = TONE.pitch2Enabled ? P('2-note chord active: a second '+N(TONE.waveType)+' voice at Pitch2 = '+N(TONE.pitch2)+' (MIDI) ≈ '+N(midiToHz(TONE.pitch2).toFixed(1))+'Hz, sharing this layer\'s vibrato, gate and envelopes.') : P('No second voice — Chord is unchecked. Check it (Pitch2 = '+N(TONE.pitch2)+') to turn this into a 2-note chord.');
+      return { title:'Layer 1 · Tone — Wave + Pitch',
+        html: CODE(VR('carrier')+' = OscillatorNode('+VR('type')+': "'+TONE.waveType+'", '+VR('freq')+': midiToHz('+N(TONE.pitch)+'))') +
+          P('Wave = '+N(TONE.waveType)+', Pitch = '+N(TONE.pitch)+' (MIDI) ≈ '+N(midiToHz(TONE.pitch).toFixed(1))+'Hz. Both are live-settable on the already-running oscillator — editing either applies instantly, no rebuild.') +
+          P('Right now (incl. fixed vibrato): '+LIVE((midiToHz(TONE.pitch)+TONE.vibDepth*Math.sin(2*Math.PI*TONE.vibRate*nowSec())).toFixed(2)+'Hz')+'.') +
+          chord };
+    },
+    'l1-shape': function(){
+      var a = envCircle(TONE.envA.levels, TONE.envA.times, TONE.envA.curve, nowSec());
+      var b = envCircle(TONE.envB.levels, TONE.envB.times, TONE.envB.curve, nowSec());
+      var vol = 0.5*(1+Math.sin(2*Math.PI*TONE.lfoFreq*nowSec()+TONE.lfoPhase));
+      return { title:'Layer 1 · Tone — Max Volume + LFO',
+        html: CODE(VR('gated amp')+' = '+VR('MaxVolume')+KW('·')+'gate(t)'+KW('·')+'envA(t)'+KW('·')+'envB(t)'+KW('·')+'volLFO(t)') +
+          P('Max Volume = '+N(TONE.maxVolume)+' — the ceiling everything else multiplies against. LFO Freq = '+N(TONE.lfoFreq)+'Hz — same volume-LFO shape as every Rain layer: '+VR('0.5(1+sin(2π·LFOFreq·t))')+', riding 0 to Max Volume, independent of the 4Hz gate and the two envelope circles.') +
+          P('Right now: volLFO ≈ '+LIVE(vol.toFixed(3))+', envelope ceiling ≈ '+LIVE((TONE.maxVolume*a*b*vol).toFixed(4))+'.') };
+    },
+    'l1-pulse': function(){
+      return { title:'Layer 1 · Pulse Gate',
+        html: CODE(VR('gate(t)')+' = 0.5'+KW('·')+'square(4Hz, t) + 0.5') +
+          P('A 4Hz square wave rescaled to a 0/1 gate (lightly lowpassed to soften the edge) — this is what gives the Tone layer its throb instead of a sustained drone. Fixed — not one of the 4 editable knobs.') +
+          P('Right now: '+LIVE(Math.sin(2*Math.PI*4*nowSec())>=0 ? 'ON' : 'off')+'.') };
+    },
+    'l1-vibrato': function(){
+      return { title:'Layer 1 · Vibrato (fixed)',
+        html: CODE(VR('freq(t)')+' = midiToHz(Pitch) + '+N(TONE.vibDepth)+KW('·')+'sin(2π'+KW('·')+N(TONE.vibRate)+KW('·')+'t)') +
+          P('A native sine LFO wired straight into the carrier\'s '+VR('frequency')+' AudioParam — '+N(TONE.vibRate)+'Hz, ±'+N(TONE.vibDepth)+'Hz. Fixed: LFO Freq (the editable knob above) controls the volume LFO instead, matching every Rain layer.') +
+          P('Right now: '+LIVE((TONE.vibDepth*Math.sin(2*Math.PI*TONE.vibRate*nowSec())).toFixed(2)+'Hz')+' offset from center.') };
+    },
+    'l1-summary': function(){
+      var a = envCircle(TONE.envA.levels, TONE.envA.times, TONE.envA.curve, nowSec());
+      var b = envCircle(TONE.envB.levels, TONE.envB.times, TONE.envB.curve, nowSec());
+      var vol = 0.5*(1+Math.sin(2*Math.PI*TONE.lfoFreq*nowSec()+TONE.lfoPhase));
+      var gate = Math.sin(2*Math.PI*TONE.pulseHz*nowSec())>=0 ? 1 : 0;
+      return { title:'Layer 1 · Tone — Overview',
+        html: P('Wave = '+N(TONE.waveType)+', Pitch = '+N(TONE.pitch)+', Max Volume = '+N(TONE.maxVolume)+', LFO Freq = '+N(TONE.lfoFreq)+'Hz (volume). Fixed: '+N(TONE.pulseHz)+'Hz pulse gate, '+N(TONE.vibRate)+'Hz vibrato ±'+N(TONE.vibDepth)+'Hz, two Env.circles (100s/270s periods).'+(TONE.pitch2Enabled?' 2-note chord active (Pitch2 = '+N(TONE.pitch2)+').':'')) +
+          P('Right now: amplitude ≈ '+LIVE((TONE.maxVolume*a*b*vol*gate).toFixed(4))+'.') +
+          P('Click to expand for the individual controls.') };
+    },
+    'l1-env': function(){
+      var a = envCircle(TONE.envA.levels, TONE.envA.times, TONE.envA.curve, nowSec());
+      var b = envCircle(TONE.envB.levels, TONE.envB.times, TONE.envB.curve, nowSec());
+      return { title:'Layer 1 · Two Envelope Circles',
+        html: CODE('EnvGen(circle([0,1,1,0,0], [25,35,25,15])) '+KW('×')+' EnvGen(circle([0,1,1,0,0], [15,200,25,30]))') +
+          P('Two independent LOOPING envelopes multiply together — 100s and 270s periods — so Tone\'s presence drifts in a long, non-repeating-feeling arc even though each one individually loops forever. Fixed — not editable here.') +
+          P('Right now: A = '+LIVE(a.toFixed(3))+', B = '+LIVE(b.toFixed(3))+', combined = '+LIVE((a*b).toFixed(3))+'.') };
+    },
+    'fx-delay': function(){
+      return { title:'FX · Ping-Pong Delay (1st in the chain)',
+        html: CODE(VR('delayL')+' ← input.L, feeds back into '+VR('delayR')+'\n'+VR('delayR')+' ← input.R, feeds back into '+VR('delayL')) +
+          P('Two DelayNodes cross-feed each other\'s output as the other\'s feedback — that\'s what makes the echoes alternate left/right instead of repeating in place like a plain delay. Delay Time = '+N((FX.delayTime*1000).toFixed(0))+'ms, Feedback = '+N(FX.delayFeedback)+' (capped under 1 so it decays, not runs away), Delay Mix = '+N(FX.delayMix)+'.') +
+          P('The echoes get their own direct path to the output (audible even with Reverb Wet at 0) AND feed into the Reverb stage below — so the reverb hears the delay, not just the dry signal.') +
+          P('Delay Time and Feedback are plain AudioParams — both glide live, same as Wet/Dry.') };
+    },
+    'fx-reverb': function(){
+      return { title:'FX · Reverb (2nd in the chain — Room Size / Wet / Dry)',
+        html: CODE(VR('impulse[i]')+' = noise() '+KW('·')+' (1 − i/length)'+KW('^')+N('2.5')) +
+          P('A synthetic impulse response — exponentially-decaying white noise, no external audio file — fed through a native ConvolverNode. Room Size = '+N(FX.roomSize)+' → decay ≈ '+N((0.2+FX.roomSize*3.8).toFixed(2))+'s.') +
+          P('Its input is the dry mix PLUS the Delay stage\'s echoes (Delay comes first in the chain) — so reverberated echoes are part of the tail, not just the plain dry signal.') +
+          P('Wet = '+N(FX.wet)+' (reverberated signal level), Dry = '+N(FX.dry)+' (fully unprocessed original, a separate bypass) — independent, not a crossfade, so both can sit anywhere 0–1 at once.') +
+          P('Changing Room Size regenerates the impulse and swaps it in, which resets the reverb tail — Wet/Dry glide instead.') };
+    },
+    'fx-summary': function(){
+      return { title:'FX — Overview',
+        html: P('Chain order: Delay '+KW('→')+' Reverb '+KW('→')+' output, plus a separate Dry bypass. Ping-pong delay: Time = '+N((FX.delayTime*1000).toFixed(0))+'ms, Feedback = '+N(FX.delayFeedback)+', Mix = '+N(FX.delayMix)+'. Reverb: Room Size = '+N(FX.roomSize)+', Wet = '+N(FX.wet)+', Dry = '+N(FX.dry)+'.') +
+          P('The reverb hears the delay\'s echoes (not just the dry signal) since Delay comes first — Wet/Dry/Mix are all independent levels, not crossfades.') +
+          P('Click to expand for the individual controls.') };
+    }
+  };
+  RAIN_LIST.forEach(function(inst){
+    EXPLAIN['rain-'+inst.n] = function(){
+      var chord = inst.pitch2Enabled ? P('2-note chord active: a second '+N(inst.waveType)+' voice at Pitch2 = '+N(inst.pitch2)+' (MIDI) ≈ '+N(midiToHz(inst.pitch2).toFixed(1))+'Hz, sharing this layer\'s flicker and level LFO.') : P('No second voice — Chord is unchecked. Check it (Pitch2 = '+N(inst.pitch2)+') for a 2-note chord.');
+      return { title:'Rain Layer '+inst.n+' — Wave + Pitch',
+        html: CODE(VR('carrier')+' = OscillatorNode('+VR('type')+': "'+inst.waveType+'", '+VR('freq')+': midiToHz('+N(inst.pitch)+'))') +
+          P('Wave = '+N(inst.waveType)+', Pitch = '+N(inst.pitch)+' (MIDI) ≈ '+N(midiToHz(inst.pitch).toFixed(1))+'Hz — both live-settable, no rebuild. Panned to '+N(inst.pan)+' ('+(inst.pan<0?'left':'right')+' of center, fixed).') +
+          P('Amplitude-shaped entirely by its flicker × level LFO × the shared rain envelope (see the other two rows in this card).') +
+          chord };
+    };
+    EXPLAIN['rain-'+inst.n+'-flicker'] = function(){
+      var freq = 8 + 7*Math.sin(2*Math.PI*inst.sawRate*nowSec());
+      return { title:'Rain '+inst.n+' · Flicker',
+        html: CODE(VR('flickerHz(t)')+' = 8 + 7'+KW('·')+'sin(2π'+KW('·')+N(inst.sawRate)+KW('·')+'t)') +
+          P('A sawtooth oscillator whose own frequency is swept 1-15Hz by a '+N(inst.sawRate)+'Hz sine — so the flicker itself speeds up and slows down. Each completed saw cycle is one "drop" spawned in the visual. Fixed — only the slower Level LFO below is editable.') +
+          P('Right now: flicker ≈ '+LIVE(freq.toFixed(2)+'Hz')+' ('+LIVE((1000/freq).toFixed(0)+'ms/drop')+').') };
+    };
+    EXPLAIN['rain-'+inst.n+'-level'] = function(){
+      var v = 0.5*inst.maxVolume*(1+Math.sin(2*Math.PI*inst.lfoFreq*nowSec()+inst.lfoPhase));
+      return { title:'Rain '+inst.n+' — Max Volume + LFO',
+        html: CODE(VR('level(t)')+' = 0.5'+KW('·')+VR('MaxVolume')+KW('·')+'(1 + sin(2π'+KW('·')+VR('LFOFreq')+KW('·')+'t + φ))') +
+          P('Max Volume = '+N(inst.maxVolume)+' — the ceiling of this layer\'s loudness swell (level ranges 0 to Max Volume). LFO Freq = '+N(inst.lfoFreq)+'Hz — the slow clock riding it up and down, independent of every other layer\'s clock.') +
+          P('Right now: '+LIVE(v.toFixed(4))+'.') };
+    };
+    EXPLAIN['rain-'+inst.n+'-summary'] = function(){
+      var lvl = 0.5*inst.maxVolume*(1+Math.sin(2*Math.PI*inst.lfoFreq*nowSec()+inst.lfoPhase));
+      var rEnvNow = envCircle(RAIN_ENV.levels, RAIN_ENV.times, RAIN_ENV.curve, nowSec());
+      return { title:'Rain '+inst.n+' — Overview',
+        html: P('Wave = '+N(inst.waveType)+', Pitch = '+N(inst.pitch)+', Max Volume = '+N(inst.maxVolume)+', LFO Freq = '+N(inst.lfoFreq)+'Hz. Fixed: pan '+N(inst.pan)+', flicker swept by '+N(inst.sawRate)+'Hz.'+(inst.pitch2Enabled?' 2-note chord active (Pitch2 = '+N(inst.pitch2)+').':'')) +
+          P('Right now: level ≈ '+LIVE(lvl.toFixed(4))+' × shared rain envelope ('+LIVE(rEnvNow.toFixed(3))+').') +
+          P('Click to expand for the individual controls.') };
+    };
+  });
+
+  var currentExplainKey = null;
+  function showExplain(key){
+    var fn = EXPLAIN[key]; if(!fn) return;
+    currentExplainKey = key;
+    var e = fn();
+    document.getElementById('explainTitle').textContent = e.title;
+    document.getElementById('explainBody').innerHTML = e.html;
+  }
+  document.querySelectorAll('[data-explain]').forEach(function(el){
+    el.addEventListener('mouseenter', function(){ showExplain(el.getAttribute('data-explain')); });
+  });
+
+  // --- clock: "piece time," not wall-clock time — only advances while
+  // actually playing, so Pause is a real pause (everything, audio and
+  // visual alike, freezes exactly where it was) rather than a mute that
+  // leaves the composition's own clock running silently in the background.
+  var accumSec = 0, playStartedAt = null;
+  function nowSec(){ return playStartedAt!==null ? accumSec + (performance.now()-playStartedAt)/1000 : accumSec; }
+
+  // --- live Web Audio graph (built lazily on first Enter click) ---
+  var ac = null, master = null, rainEnvGain = null, l1EnvAGain = null, l1EnvBGain = null;
+  var toneNodes = null, rainNodes = {}, fxNodes = null;
+
+  // A synthetic impulse response — exponentially-decaying white noise, no
+  // external audio file needed — fed into a native ConvolverNode. Room Size
+  // just scales how long that decay runs.
+  function makeImpulseResponse(roomSize){
+    var duration = 0.2 + roomSize*3.8, decay = 2.5;
+    var rate = ac.sampleRate;
+    var length = Math.max(1, Math.floor(rate*duration));
+    var buf = ac.createBuffer(2, length, rate);
+    for(var ch=0; ch<2; ch++){
+      var data = buf.getChannelData(ch);
+      for(var i=0;i<length;i++){ data[i] = (Math.random()*2-1) * Math.pow(1-i/length, decay); }
+    }
+    return buf;
+  }
+  // Stereo width via mid/side: split to mid=0.5(L+R) and side=0.5(L-R),
+  // scale side by Width, recombine as L'=mid+side, R'=mid-side. Then Wet/Dry
+  // is a plain parallel split into a ConvolverNode vs straight through —
+  // both sides are independent gains, not a crossfade, so both can be
+  // cranked at once if that's the sound someone wants.
+  // Three parallel sends off the dry tone+rain mix: straight through (dry),
+  // through a reverb (wet), and through a ping-pong delay (delayMix) — all
+  // three sum at the destination.
+  // Delay comes first in the chain, Reverb second — the reverb's input is
+  // the dry mix PLUS the delay's echoes, so it actually reverberates the
+  // echoes too (a washier, more blended tail) rather than only ever hearing
+  // the plain dry signal. Dry stays a fully separate, unprocessed bypass,
+  // and the delay's echoes also get their own direct path to the output so
+  // they're audible on their own even with Wet at 0.
+  function buildFXChain(){
+    var dryGain = ac.createGain(); dryGain.gain.value = FX.dry;
+    master.connect(dryGain); dryGain.connect(ac.destination);
+
+    // --- 1) Delay stage ---
+    // Ping-pong: the input's L and R halves each feed their OWN delay line,
+    // and each delay's output feeds back into the OPPOSITE line
+    // (cross-feedback) — that's what makes the echoes alternate left/right
+    // instead of just repeating in place like a plain stereo delay.
+    var splitter = ac.createChannelSplitter(2);
+    master.connect(splitter);
+    var delayL = ac.createDelay(2.0); delayL.delayTime.value = FX.delayTime;
+    var delayR = ac.createDelay(2.0); delayR.delayTime.value = FX.delayTime;
+    var fbL = ac.createGain(); fbL.gain.value = FX.delayFeedback;
+    var fbR = ac.createGain(); fbR.gain.value = FX.delayFeedback;
+    splitter.connect(delayL, 0);
+    splitter.connect(delayR, 1);
+    delayL.connect(fbL); fbL.connect(delayR);
+    delayR.connect(fbR); fbR.connect(delayL);
+    var delayMerger = ac.createChannelMerger(2);
+    delayL.connect(delayMerger, 0, 0);
+    delayR.connect(delayMerger, 0, 1);
+    var delayMixGain = ac.createGain(); delayMixGain.gain.value = FX.delayMix;
+    delayMerger.connect(delayMixGain);
+    delayMixGain.connect(ac.destination); // echoes audible on their own
+
+    // --- 2) Reverb stage, fed by dry + the delay's echoes ---
+    var reverbIn = ac.createGain();
+    master.connect(reverbIn);
+    delayMixGain.connect(reverbIn);
+
+    var convolver = ac.createConvolver();
+    convolver.normalize = true;
+    convolver.buffer = makeImpulseResponse(FX.roomSize);
+    var wetGain = ac.createGain(); wetGain.gain.value = FX.wet;
+    reverbIn.connect(convolver); convolver.connect(wetGain); wetGain.connect(ac.destination);
+
+    fxNodes = { dryGain:dryGain, wetGain:wetGain, convolver:convolver,
+      delayL:delayL, delayR:delayR, fbL:fbL, fbR:fbR, delayMixGain:delayMixGain };
+  }
+
+  function buildGraph(){
+    ac = new (window.AudioContext||window.webkitAudioContext)();
+    master = ac.createGain(); master.gain.value = 1;
+    var startables = [];
+
+    var l1Carrier = ac.createOscillator(); l1Carrier.type=TONE.waveType; l1Carrier.frequency.value = midiToHz(TONE.pitch);
+    var l1VibLFO = ac.createOscillator(); l1VibLFO.type='sine'; l1VibLFO.frequency.value = TONE.vibRate;
+    var l1VibGain = ac.createGain(); l1VibGain.gain.value = TONE.vibDepth;
+    l1VibLFO.connect(l1VibGain); l1VibGain.connect(l1Carrier.frequency);
+
+    var l1PulseOsc = ac.createOscillator(); l1PulseOsc.type='square'; l1PulseOsc.frequency.value = TONE.pulseHz;
+    var l1PulseScale = ac.createGain(); l1PulseScale.gain.value = 0.5;
+    var l1PulseOffset = ac.createConstantSource(); l1PulseOffset.offset.value = 0.5;
+    var l1PulseGain = ac.createGain(); l1PulseGain.gain.value = 0;
+    l1PulseOsc.connect(l1PulseScale); l1PulseScale.connect(l1PulseGain.gain);
+    l1PulseOffset.connect(l1PulseGain.gain);
+    var l1Smooth = ac.createBiquadFilter(); l1Smooth.type='lowpass'; l1Smooth.frequency.value = 600;
+
+    // maxVolume folds straight into l1EnvAGain each frame (see rafLoop) —
+    // no separate fixed "mul" node needed, so editing Max Volume live needs
+    // no special-case push here, unlike Wave/Pitch.
+    l1EnvAGain = ac.createGain(); l1EnvAGain.gain.value = 0;
+    l1EnvBGain = ac.createGain(); l1EnvBGain.gain.value = 0;
+    var l1Pan = ac.createStereoPanner(); l1Pan.pan.value = TONE.pan;
+
+    l1Carrier.connect(l1PulseGain);
+    l1PulseGain.connect(l1Smooth);
+    l1Smooth.connect(l1EnvAGain);
+    l1EnvAGain.connect(l1EnvBGain);
+    l1EnvBGain.connect(l1Pan);
+    l1Pan.connect(master);
+    startables.push(l1Carrier, l1VibLFO, l1PulseOsc, l1PulseOffset);
+
+    // pitch2: an optional second voice, summed into the SAME pulse gate so
+    // it plays as one chord rather than a second independent instrument —
+    // shares the vibrato LFO too. Always built (cheap — one more oscillator)
+    // and gated through chord2Gain so the Chord checkbox can toggle it live
+    // with no rebuild, rather than only taking effect via a JSON edit.
+    var l1Carrier2 = ac.createOscillator(); l1Carrier2.type = TONE.waveType; l1Carrier2.frequency.value = midiToHz(TONE.pitch2);
+    l1VibGain.connect(l1Carrier2.frequency);
+    var l1Chord2Gain = ac.createGain(); l1Chord2Gain.gain.value = TONE.pitch2Enabled ? 1 : 0;
+    l1Carrier2.connect(l1Chord2Gain); l1Chord2Gain.connect(l1PulseGain);
+    startables.push(l1Carrier2);
+    toneNodes = { carrier: l1Carrier, carrier2: l1Carrier2, chord2Gain: l1Chord2Gain, vibLFO: l1VibLFO };
+
+    var rainBus = ac.createGain(); rainBus.gain.value = 1;
+    rainEnvGain = ac.createGain(); rainEnvGain.gain.value = 0;
+    rainBus.connect(rainEnvGain); rainEnvGain.connect(master);
+
+    rainNodes = {};
+    RAIN_LIST.forEach(function(inst){
+      var carrier = ac.createOscillator(); carrier.type=inst.waveType; carrier.frequency.value = midiToHz(inst.pitch);
+      var saw = ac.createOscillator(); saw.type='sawtooth'; saw.frequency.value = 8;
+      var sawLFO = ac.createOscillator(); sawLFO.type='sine'; sawLFO.frequency.value = inst.sawRate;
+      var sawLFOGain = ac.createGain(); sawLFOGain.gain.value = 7;
+      sawLFO.connect(sawLFOGain); sawLFOGain.connect(saw.frequency);
+
+      var sawScale = ac.createGain(); sawScale.gain.value = 0.5;
+      var sawOffset = ac.createConstantSource(); sawOffset.offset.value = 0.5;
+      var flickerGain = ac.createGain(); flickerGain.gain.value = 0;
+      saw.connect(sawScale); sawScale.connect(flickerGain.gain);
+      sawOffset.connect(flickerGain.gain);
+      var smooth = ac.createBiquadFilter(); smooth.type='lowpass'; smooth.frequency.value = 1200;
+
+      // levelGain is driven every frame from 0.5·maxVolume·(1+sin(...)) in
+      // rafLoop — that's where maxVolume/lfoFreq edits actually take effect.
+      var levelGain = ac.createGain(); levelGain.gain.value = 0;
+      var panner = ac.createStereoPanner(); panner.pan.value = inst.pan;
+
+      carrier.connect(flickerGain);
+      flickerGain.connect(smooth);
+      smooth.connect(levelGain);
+      levelGain.connect(panner);
+      panner.connect(rainBus);
+      startables.push(carrier, saw, sawLFO, sawOffset);
+
+      // pitch2: optional second voice, summed into the same flicker/level
+      // chain so it chords with the first note rather than adding a whole
+      // separate rhythm. Always built and gated through chord2Gain so the
+      // Chord checkbox toggles it live, no rebuild needed.
+      var carrier2 = ac.createOscillator(); carrier2.type = inst.waveType; carrier2.frequency.value = midiToHz(inst.pitch2);
+      var chord2Gain = ac.createGain(); chord2Gain.gain.value = inst.pitch2Enabled ? 1 : 0;
+      carrier2.connect(chord2Gain); chord2Gain.connect(flickerGain);
+      startables.push(carrier2);
+      rainNodes[inst.id] = { carrier:carrier, carrier2:carrier2, chord2Gain:chord2Gain, levelGain:levelGain, sawPhase: Math.random() };
+    });
+
+    buildFXChain();
+    startables.forEach(function(n){ n.start(); });
+  }
+
+  // Playing = the graph exists AND the AudioContext is actually running —
+  // Pause suspends it outright (stops audio processing, not just gain-to-0)
+  // rather than muting, since a suspended context is what "paused" should
+  // mean, and it's also the single source of truth the visual gates on: no
+  // spawning splashes/ripples for a synth that isn't actually audible.
+  var playBtn = document.getElementById('playBtn');
+  function isPlaying(){ return !!ac && ac.state === 'running'; }
+  playBtn.addEventListener('click', function(){
+    if(!ac){
+      buildGraph();
+      playStartedAt = performance.now();
+      playBtn.textContent = '❚❚ pause';
+    } else if(ac.state === 'running'){
+      ac.suspend();
+      accumSec += (performance.now()-playStartedAt)/1000;
+      playStartedAt = null;
+      playBtn.textContent = '▶ play';
+    } else {
+      ac.resume();
+      playStartedAt = performance.now();
+      playBtn.textContent = '❚❚ pause';
+    }
+  });
+
+  // --- canvas: 32x32 pixel grid, blue→fuchsia ground, dithered ---
+  // Everything is composited at native 32x32 resolution into a float RGB
+  // buffer, ordered-dithered with a 4x4 Bayer matrix down to a handful of
+  // levels per channel (this is what removes gradient banding at this low a
+  // resolution while keeping the blocky, retro-pixel read), then blitted up
+  // to the visible 240x240 canvas with smoothing off — same low-res-buffer +
+  // nearest-neighbour-scale technique the original 0004 waterfall used.
+  var GRID = 32, CELL = 240/GRID;
+  var vctx = document.getElementById('viz').getContext('2d');
+  var gridCanvas = document.createElement('canvas'); gridCanvas.width = GRID; gridCanvas.height = GRID;
+  var gctx = gridCanvas.getContext('2d');
+  var gridImg = gctx.createImageData(GRID, GRID);
+
+  function bayer4(){
+    var m = [[0,2],[3,1]], n = 2;
+    while(n < 4){
+      var nm = []; for(var y=0;y<n;y++){ nm.push([]); nm.push([]); }
+      for(y=0;y<n;y++){ for(var x=0;x<n;x++){
+        var v = m[y][x]*4;
+        nm[y][x]=v; nm[y][x+n]=v+2; nm[y+n][x]=v+3; nm[y+n][x+n]=v+1;
+      }}
+      m = nm; n *= 2;
+    }
+    var flat = new Float32Array(16);
+    for(y=0;y<4;y++) for(var x=0;x<4;x++) flat[y*4+x] = (m[y][x]+0.5)/16;
+    return flat;
+  }
+  var BAYER4 = bayer4();
+  var DITHER_LEVELS = 6;
+  function ditherChannel(v, x, y){
+    v = v<0?0:(v>255?255:v);
+    var step = 255/(DITHER_LEVELS-1);
+    var t = BAYER4[(y&3)*4 + (x&3)];
+    var idx = v/step;
+    var base = Math.floor(idx);
+    var q = ((idx-base) > t) ? base+1 : base;
+    if(q > DITHER_LEVELS-1) q = DITHER_LEVELS-1;
+    return Math.round(q*step);
+  }
+
+  function hexToRgb(hex){ var n = parseInt(hex.slice(1),16); return [(n>>16)&255, (n>>8)&255, n&255]; }
+  RAIN_LIST.forEach(function(d){ d.rgb = hexToRgb(d.color); });
+
+  var BLUE = [40,80,220], FUCHSIA = [214,48,196];
+  var bgBuf = new Float32Array(GRID*GRID*3);
+  (function initBackground(){
+    for(var y=0;y<GRID;y++){
+      for(var x=0;x<GRID;x++){
+        var t = (x+y)/(2*(GRID-1));
+        var idx = (y*GRID+x)*3;
+        bgBuf[idx]   = BLUE[0] + (FUCHSIA[0]-BLUE[0])*t;
+        bgBuf[idx+1] = BLUE[1] + (FUCHSIA[1]-BLUE[1])*t;
+        bgBuf[idx+2] = BLUE[2] + (FUCHSIA[2]-BLUE[2])*t;
+      }
+    }
+  })();
+  var gridBuf = new Float32Array(GRID*GRID*3);
+
+  // Additive ring stamp — only touches cells inside the ring's own bounding
+  // box, so drawing dozens of concurrent splashes stays cheap. cx/cy/radius
+  // are all in grid units (0..31), not pixels.
+  function addRing(cx, cy, radius, ringWidth, color, intensity){
+    if(intensity <= 0) return;
+    var rOuter = radius + ringWidth;
+    var x0 = Math.max(0, Math.floor(cx-rOuter)), x1 = Math.min(GRID-1, Math.ceil(cx+rOuter));
+    var y0 = Math.max(0, Math.floor(cy-rOuter)), y1 = Math.min(GRID-1, Math.ceil(cy+rOuter));
+    for(var y=y0;y<=y1;y++){
+      for(var x=x0;x<=x1;x++){
+        var dx=x-cx, dy=y-cy, d=Math.sqrt(dx*dx+dy*dy);
+        var falloff = 1 - Math.abs(d-radius)/ringWidth;
+        if(falloff<=0) continue;
+        var amt = falloff*intensity;
+        var idx = (y*GRID+x)*3;
+        gridBuf[idx]   += color[0]*amt;
+        gridBuf[idx+1] += color[1]*amt;
+        gridBuf[idx+2] += color[2]*amt;
+      }
+    }
+  }
+
+  var MAGENTA = [255,60,220];
+  var splashes = [];   // rain drops: {gx, gy, age, maxAge, color, maxR}
+  var toneRipples = []; // tone pulse: {age, maxAge, peak}
+  // The audible flicker this mirrors can hit 15Hz — spawning a visible ring
+  // that often turns the picture into an overlapping solid blob rather than
+  // readable drops, so the VISUAL trigger rate is capped independently of
+  // the real (audio-linked) one via a short per-layer cooldown.
+  var lastSpawnAt = {};
+  RAIN_LIST.forEach(function(inst){ lastSpawnAt[inst.id] = -1; });
+  var SPAWN_COOLDOWN = 0.16;
+
+  // One flash per firing instrument, on its own legend box — instant snap in
+  // (transition:none while .firing is applied), then a plain CSS transition
+  // fades it back out once the class is removed a beat later.
+  function flashField(id){
+    var el = document.getElementById(id);
+    if(!el) return;
+    el.classList.remove('firing');
+    void el.offsetWidth; // restart the flash if it's still fading from the last one
+    el.classList.add('firing');
+    clearTimeout(el._flashTimer);
+    el._flashTimer = setTimeout(function(){ el.classList.remove('firing'); }, 90);
+  }
+
+  // Evenly spaced across the grid by layer index (one column per rain
+  // layer), pan only nudges it slightly — a direct fix for the earlier
+  // version, which placed drops by raw pan and ended up clustered since
+  // rune_b's actual pan values (-0.1..0.6) aren't evenly spread themselves.
+  // Canvas visuals only — the legend-card flash is a separate, ungated
+  // signal (see rafLoop): the flash fires on every trigger regardless of
+  // audibility, since it's telling you "this instrument just fired," while
+  // these two are telling you "and it was loud enough to actually hear."
+  function spawnSplash(inst, levelNow){
+    var baseGX = (inst.colIdx+0.5) * (GRID/RAIN_LIST.length);
+    // Ring size is a FRACTION of this instrument's own maxVolume, not the
+    // raw level — so dragging Max Volume up/down changes loudness without
+    // making every splash balloon or shrink to invisibility.
+    var levelFrac = inst.maxVolume>0 ? levelNow/inst.maxVolume : 0;
+    splashes.push({
+      gx: baseGX + inst.pan*3 + (Math.random()*3-1.5),
+      gy: 2 + Math.random()*(GRID-4),
+      age: 0, maxAge: 0.55 + Math.random()*0.3,
+      color: inst.rgb, maxR: 1.5 + levelFrac*10
+    });
+  }
+  function spawnToneRipple(peak){
+    toneRipples.push({ age:0, maxAge: 1.1, peak: peak });
+  }
+
+  function drawFrame(){
+    gridBuf.set(bgBuf);
+
+    for(var i=toneRipples.length-1;i>=0;i--){
+      var r = toneRipples[i];
+      if(r.age >= r.maxAge){ toneRipples.splice(i,1); continue; }
+      var t = r.age/r.maxAge;
+      addRing(GRID/2, GRID/2, t*(GRID*0.62), 1.6, MAGENTA, r.peak*(1-t)*1.4);
+    }
+    for(i=splashes.length-1;i>=0;i--){
+      var s = splashes[i];
+      if(s.age >= s.maxAge){ splashes.splice(i,1); continue; }
+      var st = s.age/s.maxAge;
+      addRing(s.gx, s.gy, st*s.maxR, 1.0, s.color, (1-st)*1.3);
+    }
+
+    var data = gridImg.data;
+    for(var y=0;y<GRID;y++){
+      for(var x=0;x<GRID;x++){
+        var idx = (y*GRID+x)*3, o = (y*GRID+x)*4;
+        data[o]   = ditherChannel(gridBuf[idx],   x, y);
+        data[o+1] = ditherChannel(gridBuf[idx+1], x, y);
+        data[o+2] = ditherChannel(gridBuf[idx+2], x, y);
+        data[o+3] = 255;
+      }
+    }
+    gctx.putImageData(gridImg, 0, 0);
+    vctx.imageSmoothingEnabled = false;
+    vctx.clearRect(0,0,240,240);
+    vctx.drawImage(gridCanvas, 0, 0, 240, 240);
+  }
+
+  // A layer only gets to spawn a visual if it's actually contributing
+  // meaningfully to the mix right now: relative to that layer's OWN
+  // maxVolume (not a shared absolute number, since Tone and each Rain layer
+  // have very different natural ranges) AND above a small absolute floor —
+  // maxVolume is user-editable now, so "fraction of its own max" alone
+  // would happily keep flashing at 100% of a max someone's turned down to
+  // near-silent; the floor is what actually anchors "audible" to "audible."
+  var AUDIBLE_FRACTION = 0.15;
+  var AUDIBLE_FLOOR = 0.0008;
+
+  var lastFrame = null;
+  var l1PulsePhase = 0;
+  function rafLoop(now){
+    var tSec = now/1000;
+    if(lastFrame===null) lastFrame = tSec;
+    var rafDt = Math.min(0.1, tSec-lastFrame); lastFrame = tSec;
+    // dt for anything gated on playback — 0 while paused, so phases, ring
+    // ages, and spawn timers all freeze in place rather than drifting.
+    var dt = isPlaying() ? rafDt : 0;
+
+    var envA = envCircle(TONE.envA.levels, TONE.envA.times, TONE.envA.curve, nowSec());
+    var envB = envCircle(TONE.envB.levels, TONE.envB.times, TONE.envB.curve, nowSec());
+    var rEnv = envCircle(RAIN_ENV.levels, RAIN_ENV.times, RAIN_ENV.curve, nowSec());
+    // Every instrument's LFO Freq is a volume LFO now, Tone included —
+    // 0.5·(1+sin(...)) rides 0..1, same shape Rain already used.
+    var toneVolLFO = 0.5*(1+Math.sin(2*Math.PI*TONE.lfoFreq*nowSec()+TONE.lfoPhase));
+    if(isPlaying()){
+      l1EnvAGain.gain.value = TONE.maxVolume*envA*toneVolLFO; l1EnvBGain.gain.value = envB; rainEnvGain.gain.value = rEnv;
+
+      l1PulsePhase += TONE.pulseHz*dt;
+      if(l1PulsePhase >= 1){
+        l1PulsePhase -= Math.floor(l1PulsePhase);
+        // The legend flash fires on every trigger, gated only on playback —
+        // it's telling you "this instrument just fired." The ripple/splash
+        // on the canvas is a SEPARATE, audibility-gated signal telling you
+        // "and it was loud enough to actually hear" — so a quiet instrument
+        // still visibly flashes its own card, it just doesn't paint anything.
+        flashField('field-l1');
+        var toneAmp = TONE.maxVolume*envA*envB*toneVolLFO;
+        if(toneAmp > TONE.maxVolume*AUDIBLE_FRACTION && toneAmp > AUDIBLE_FLOOR) spawnToneRipple(envA*envB*toneVolLFO);
+      }
+
+      RAIN_LIST.forEach(function(inst){
+        var lvl = 0.5*inst.maxVolume*(1+Math.sin(2*Math.PI*inst.lfoFreq*nowSec()+inst.lfoPhase));
+        var nodes = rainNodes[inst.id];
+        if(nodes) nodes.levelGain.gain.value = lvl;
+        var freq = 8 + 7*Math.sin(2*Math.PI*inst.sawRate*nowSec());
+        var wrapped = false;
+        if(nodes){
+          nodes.sawPhase += freq*dt;
+          if(nodes.sawPhase >= 1){
+            nodes.sawPhase -= Math.floor(nodes.sawPhase);
+            wrapped = true;
+          }
+        }
+        if(wrapped){
+          flashField('field-'+inst.id);
+          var rainAmp = lvl*rEnv;
+          if(rainAmp > inst.maxVolume*AUDIBLE_FRACTION && rainAmp > AUDIBLE_FLOOR && (tSec - lastSpawnAt[inst.id]) >= SPAWN_COOLDOWN){
+            lastSpawnAt[inst.id] = tSec;
+            spawnSplash(inst, lvl);
+          }
+        }
+      });
+    }
+
+    // Ageing/fading an already-spawned ripple or splash is NOT gated on
+    // isPlaying() — only spawning new ones is. So pausing mid-piece lets
+    // whatever's already in flight finish resolving on its own, using real
+    // (wall-clock) rafDt rather than the paused-aware dt above.
+    toneRipples.forEach(function(r){ r.age += rafDt; });
+    splashes.forEach(function(s){ s.age += rafDt; });
+
+    drawFrame();
+    if(currentExplainKey) showExplain(currentExplainKey);
+    requestAnimationFrame(rafLoop);
+  }
+  requestAnimationFrame(rafLoop);
+
+  try{ document.getElementById('srcLink').href = 'view-source:' + location.href; }catch(e){}
+
+})();
+</script>
+</body>
+</html>
