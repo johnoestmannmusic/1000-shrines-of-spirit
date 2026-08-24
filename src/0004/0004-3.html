@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0004-3 — shrines of SPIRIT</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{
+    --bg:#101012; --panel:#17171a; --edge:#2a2a2e; --ink:#e9e6db; --dim:#8a877c;
+    --amber:#c9973a;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);}
+  body{padding:24px 16px 40px;display:flex;flex-direction:column;align-items:center;}
+  h1{font-size:13px;font-weight:400;letter-spacing:.08em;color:var(--dim);text-transform:uppercase;margin:0 0 4px;}
+  h1 b{color:var(--ink);font-weight:600;}
+  .subtitle{font-size:10px;color:var(--dim);margin:0 0 16px;text-align:center;}
+
+  .shrine{width:1040px;max-width:100%;display:flex;flex-direction:column;gap:20px;}
+  .panels{display:grid;grid-template-columns:240px 1fr 260px;gap:20px;}
+
+  .viz-wrap{width:240px;}
+  #viz{width:240px;height:240px;background:#08080a;border:1px solid var(--edge);display:block;}
+  .viz-caption{font-size:9px;color:var(--dim);margin-top:6px;line-height:1.5;}
+
+  .fields{display:flex;flex-direction:column;gap:8px;}
+  .field{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:6px 8px;
+    display:flex;flex-direction:column;gap:4px;}
+  .flabel{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);}
+  .legend-row{font-size:10px;line-height:1.5;color:var(--ink);padding:2px 0;cursor:default;}
+  .legend-row b{font-weight:600;}
+
+  .controls{display:flex;align-items:center;gap:10px;}
+  button{background:var(--panel);color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);
+    font-size:11px;padding:8px 14px;cursor:pointer;}
+  button:hover{border-color:#555;}
+
+  .explainer{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:10px 12px;
+    align-self:start;position:sticky;top:12px;}
+  .explain-title{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;}
+  .explain-body{font-size:10px;line-height:1.6;color:var(--ink);}
+  .explain-body .tk-p{margin:0 0 8px;}
+  .explain-body .tk-p:last-child{margin-bottom:0;}
+  .explain-body .tk-block{background:#0c0c0d;border:1px solid var(--edge);border-radius:2px;
+    padding:6px 7px;margin:0 0 8px;font-family:var(--mono);white-space:pre-wrap;overflow-wrap:break-word;}
+  .explain-body .tk-num{color:var(--amber);}
+  .explain-body .tk-var{color:#7fb3ff;}
+  .explain-body .tk-kw{color:#8fd0a0;}
+  .explain-body .tk-live{color:#fff;background:#242427;border-radius:2px;padding:0 3px;}
+
+  footer{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:var(--dim);flex-wrap:wrap;gap:6px;}
+  footer a{color:var(--dim);}
+</style>
+</head>
+<body>
+
+<h1>1000 shrines of SPIRIT · <b>shrine 0004-3</b></h1>
+<div class="subtitle">a direct recreation of "rune_b" (John Oestmann, Oct 2024) — live Web Audio, no controls to tweak</div>
+
+<div class="shrine">
+  <div class="panels">
+    <div class="viz-wrap">
+      <canvas id="viz" width="240" height="240"></canvas>
+      <div class="viz-caption">Live — the amber glow pulses with the Tone layer's gate and two envelope circles; each ring is one Rain layer completing a flicker cycle, positioned by that layer's pan.</div>
+    </div>
+
+    <div class="fields" id="legend"></div>
+
+    <div class="explainer" id="explainer">
+      <div class="explain-title" id="explainTitle">Explainer</div>
+      <div class="explain-body" id="explainBody">Hover a row to see the exact mechanism — with the live current value — for that part of the piece.</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="enterBtn" type="button">▶ enter</button>
+  </div>
+
+  <footer>
+    <span>CC0 · <a id="srcLink" href="#">view source</a></span>
+    <span>live synthesis — no render, no export; runs indefinitely</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  function midiToHz(m){ return 440 * Math.pow(2, (m-69)/12); }
+
+  // levels/times/curve straight out of the SC source: Env.circle loops its
+  // last level back to its first forever, which is why this piece never
+  // "finishes" — the two Tone envelopes (100s and 270s periods) and the one
+  // Rain envelope (270s period) just keep drifting in and out against each
+  // other for as long as the page stays open. curveExp 0 = SC's \curve 'lin';
+  // a nonzero curveExp approximates SC's numeric \curve (a mild exponential
+  // ease) — close enough for a browser reinterpretation, not a bit-exact port.
+  function envCircle(levels, times, curveExp, tSec){
+    var total = 0; for(var i=0;i<times.length;i++) total += times[i];
+    var t = ((tSec % total) + total) % total;
+    var acc = 0;
+    for(i=0;i<times.length;i++){
+      var segDur = times[i];
+      if(t < acc+segDur){
+        var localT = (t-acc)/segDur;
+        var v0 = levels[i], v1 = levels[(i+1)%levels.length];
+        var shaped = curveExp ? (1-Math.exp(-curveExp*localT))/(1-Math.exp(-curveExp)) : localT;
+        return v0 + (v1-v0)*shaped;
+      }
+      acc += segDur;
+    }
+    return levels[levels.length-1];
+  }
+  function sineLFO(rate, phase, mul, add, tSec){ return add + mul*Math.sin(2*Math.PI*rate*tSec + phase); }
+
+  var L1 = { note:46, vibRate:0.05, vibDepth:2, pulseHz:4, mul:0.27, pan:-0.3,
+    envA:{levels:[0,1,1,0,0], times:[25,35,25,15], curve:2},
+    envB:{levels:[0,1,1,0,0], times:[15,200,25,30], curve:0} };
+  var RAIN_ENV = { levels:[0,0,1,1,0], times:[30,15,200,25], curve:0 };
+  var RAIN_DEFS = [
+    {n:2, note:70, sawRate:0.25, pan:0.3,  lvl:{rate:0.05, phase:Math.PI,     mul:0.1,  add:0.1 }, color:'#4a6fd6'},
+    {n:3, note:75, sawRate:0.24, pan:0.1,  lvl:{rate:0.04, phase:Math.PI,     mul:0.1,  add:0.1 }, color:'#5ec8d8'},
+    {n:4, note:77, sawRate:0.23, pan:-0.1, lvl:{rate:0.03, phase:Math.PI,     mul:0.1,  add:0.1 }, color:'#6fb582'},
+    {n:5, note:82, sawRate:0.1,  pan:0.6,  lvl:{rate:0.018,phase:1.5*Math.PI, mul:0.04, add:0.04}, color:'#8a7fd6'},
+    {n:6, note:80, sawRate:0.18, pan:0.2,  lvl:{rate:0.02, phase:3*Math.PI,   mul:0.06, add:0.06}, color:'#4fd6c4'}
+  ];
+
+  // --- legend (read-only — scaffolding of the old knob rows, no inputs) ---
+  var legend = document.getElementById('legend');
+  legend.innerHTML =
+    '<div class="field" style="border-color:'+'#c9973a'+'">'+
+      '<div class="flabel">1 · tone</div>'+
+      '<div class="legend-row" data-explain="l1-tone">Note <b>46</b> (≈'+midiToHz(46).toFixed(1)+'Hz) · vibrato <b>0.05Hz</b> ±<b>2Hz</b></div>'+
+      '<div class="legend-row" data-explain="l1-pulse">Pulse gate <b>4Hz</b> · level ×<b>0.27</b> · pan <b>-0.3</b></div>'+
+      '<div class="legend-row" data-explain="l1-env">Env.circle <b>25/35/25/15</b>s × Env.circle <b>15/200/25/30</b>s</div>'+
+    '</div>'+
+    RAIN_DEFS.map(function(d){
+      return '<div class="field" style="border-color:'+d.color+'">'+
+        '<div class="flabel">'+d.n+' · rain</div>'+
+        '<div class="legend-row" data-explain="rain-'+d.n+'">Note <b>'+d.note+'</b> (≈'+midiToHz(d.note).toFixed(1)+'Hz) · pan <b>'+d.pan+'</b></div>'+
+        '<div class="legend-row" data-explain="rain-'+d.n+'-flicker">Flicker: saw 8±7Hz swept by <b>'+d.sawRate+'Hz</b> sine</div>'+
+        '<div class="legend-row" data-explain="rain-'+d.n+'-level">Level LFO: <b>'+d.lvl.rate+'Hz</b>, '+d.lvl.add+'±'+d.lvl.mul+'</div>'+
+      '</div>';
+    }).join('') +
+    '<div class="field" style="border-color:'+'#8a877c'+'">'+
+      '<div class="flabel">rain bus</div>'+
+      '<div class="legend-row" data-explain="rain-env">Shared Env.circle <b>30/15/200/25</b>s over all 5 rain layers, summed</div>'+
+    '</div>';
+
+  // --- explainer ---
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function N(x){ return '<span class="tk-num">'+esc(x)+'</span>'; }
+  function VR(x){ return '<span class="tk-var">'+esc(x)+'</span>'; }
+  function KW(x){ return '<span class="tk-kw">'+esc(x)+'</span>'; }
+  function LIVE(x){ return '<span class="tk-live">'+esc(x)+'</span>'; }
+  function CODE(x){ return '<div class="tk-block">'+x+'</div>'; }
+  function P(x){ return '<p class="tk-p">'+x+'</p>'; }
+
+  var EXPLAIN = {
+    'l1-tone': function(){
+      return { title:'Layer 1 · Tone — Carrier + Vibrato',
+        html: CODE(VR('freq(t)')+' = midiToHz(Note) + '+VR('VibDepth')+KW('·')+'sin(2π'+KW('·')+VR('VibRate')+KW('·')+'t)') +
+          P('Two native OscillatorNodes: a 0.05Hz sine feeds directly into the carrier\'s '+VR('frequency')+' AudioParam, ±2Hz around '+N(midiToHz(46).toFixed(1))+'Hz.') +
+          P('Right now: '+LIVE((midiToHz(46)+L1.vibDepth*Math.sin(2*Math.PI*L1.vibRate*nowSec())).toFixed(2)+'Hz')+'.') };
+    },
+    'l1-pulse': function(){
+      return { title:'Layer 1 · Pulse Gate',
+        html: CODE(VR('gate(t)')+' = 0.5'+KW('·')+'square(4Hz, t) + 0.5') +
+          P('A 4Hz square wave rescaled to a 0/1 gate (lightly lowpassed to soften the edge) — this is what gives the Tone layer its throb instead of a sustained drone.') +
+          P('Right now: '+LIVE(Math.sin(2*Math.PI*4*nowSec())>=0 ? 'ON' : 'off')+'.') };
+    },
+    'l1-env': function(){
+      var a = envCircle(L1.envA.levels, L1.envA.times, L1.envA.curve, nowSec());
+      var b = envCircle(L1.envB.levels, L1.envB.times, L1.envB.curve, nowSec());
+      return { title:'Layer 1 · Two Envelope Circles',
+        html: CODE('EnvGen(circle([0,1,1,0,0], [25,35,25,15])) '+KW('×')+' EnvGen(circle([0,1,1,0,0], [15,200,25,30]))') +
+          P('Two independent LOOPING envelopes multiply together — 100s and 270s periods — so Tone\'s presence drifts in a long, non-repeating-feeling arc even though each one individually loops forever.') +
+          P('Right now: A = '+LIVE(a.toFixed(3))+', B = '+LIVE(b.toFixed(3))+', combined = '+LIVE((a*b).toFixed(3))+'.') };
+    },
+    'rain-env': function(){
+      var v = envCircle(RAIN_ENV.levels, RAIN_ENV.times, RAIN_ENV.curve, nowSec());
+      return { title:'Rain Bus · Shared Envelope Circle',
+        html: CODE('EnvGen(circle([0,0,1,1,0], [30,15,200,25]))') +
+          P('One shared envelope gates all 5 Rain layers together '+VR('after')+' they\'re summed — the times are arranged so the rain swells in around when Tone\'s second envelope (see Layer 1 · envelopes) swells out. Same 270s period, complementary shape.') +
+          P('Right now: '+LIVE(v.toFixed(3))+'.') };
+    }
+  };
+  RAIN_DEFS.forEach(function(d){
+    EXPLAIN['rain-'+d.n] = function(){
+      return { title:'Rain Layer '+d.n, draw:null,
+        html: CODE(VR('freq')+' = midiToHz('+N(d.note)+') ≈ '+N(midiToHz(d.note).toFixed(1))+'Hz') +
+          P('A plain sine tone — unlike Tone, no vibrato here. Panned to '+N(d.pan)+' ('+(d.pan<0?'left':'right')+' of center) and amplitude-shaped entirely by its flicker × level LFO × the shared rain envelope (see the other two rows in this card).') };
+    };
+    EXPLAIN['rain-'+d.n+'-flicker'] = function(){
+      var freq = 8 + 7*Math.sin(2*Math.PI*d.sawRate*nowSec());
+      return { title:'Rain '+d.n+' · Flicker',
+        html: CODE(VR('flickerHz(t)')+' = 8 + 7'+KW('·')+'sin(2π'+KW('·')+N(d.sawRate)+KW('·')+'t)') +
+          P('A sawtooth oscillator whose own frequency is swept 1-15Hz by a slower '+N(d.sawRate)+'Hz sine — so the flicker itself speeds up and slows down. Each completed saw cycle is one "drop" spawned in the visual.') +
+          P('Right now: flicker ≈ '+LIVE(freq.toFixed(2)+'Hz')+' ('+LIVE((1000/freq).toFixed(0)+'ms/drop')+').') };
+    };
+    EXPLAIN['rain-'+d.n+'-level'] = function(){
+      var v = sineLFO(d.lvl.rate, d.lvl.phase, d.lvl.mul, d.lvl.add, nowSec());
+      return { title:'Rain '+d.n+' · Level LFO',
+        html: CODE(VR('level(t)')+' = '+N(d.lvl.add)+' + '+N(d.lvl.mul)+KW('·')+'sin(2π'+KW('·')+N(d.lvl.rate)+KW('·')+'t + φ)') +
+          P('A slow sine (rate '+N(d.lvl.rate)+'Hz) rides this layer\'s overall loudness up and down, independent of every other layer — one more clock nobody else shares.') +
+          P('Right now: '+LIVE(v.toFixed(3))+'.') };
+    };
+  });
+
+  var currentExplainKey = null;
+  function showExplain(key){
+    var fn = EXPLAIN[key]; if(!fn) return;
+    currentExplainKey = key;
+    var e = fn();
+    document.getElementById('explainTitle').textContent = e.title;
+    document.getElementById('explainBody').innerHTML = e.html;
+  }
+  document.querySelectorAll('[data-explain]').forEach(function(el){
+    el.addEventListener('mouseenter', function(){ showExplain(el.getAttribute('data-explain')); });
+  });
+
+  // --- clock: performance.now()-based, independent of AudioContext state, so
+  // the visual (and Explainer's live values) keep running even before audio
+  // is entered or while it's muted. ---
+  var t0 = performance.now();
+  function nowSec(){ return (performance.now()-t0)/1000; }
+
+  // --- live Web Audio graph (built lazily on first Enter click) ---
+  var ac = null, master = null, rainEnvGain = null, l1EnvAGain = null, l1EnvBGain = null;
+  var rainLayers = [];
+  function buildGraph(){
+    ac = new (window.AudioContext||window.webkitAudioContext)();
+    master = ac.createGain(); master.gain.value = 1; master.connect(ac.destination);
+    var startables = [];
+
+    var l1Carrier = ac.createOscillator(); l1Carrier.type='sine'; l1Carrier.frequency.value = midiToHz(L1.note);
+    var l1VibLFO = ac.createOscillator(); l1VibLFO.type='sine'; l1VibLFO.frequency.value = L1.vibRate;
+    var l1VibGain = ac.createGain(); l1VibGain.gain.value = L1.vibDepth;
+    l1VibLFO.connect(l1VibGain); l1VibGain.connect(l1Carrier.frequency);
+
+    var l1PulseOsc = ac.createOscillator(); l1PulseOsc.type='square'; l1PulseOsc.frequency.value = L1.pulseHz;
+    var l1PulseScale = ac.createGain(); l1PulseScale.gain.value = 0.5;
+    var l1PulseOffset = ac.createConstantSource(); l1PulseOffset.offset.value = 0.5;
+    var l1PulseGain = ac.createGain(); l1PulseGain.gain.value = 0;
+    l1PulseOsc.connect(l1PulseScale); l1PulseScale.connect(l1PulseGain.gain);
+    l1PulseOffset.connect(l1PulseGain.gain);
+    var l1Smooth = ac.createBiquadFilter(); l1Smooth.type='lowpass'; l1Smooth.frequency.value = 600;
+
+    var l1Mul = ac.createGain(); l1Mul.gain.value = L1.mul;
+    l1EnvAGain = ac.createGain(); l1EnvAGain.gain.value = 0;
+    l1EnvBGain = ac.createGain(); l1EnvBGain.gain.value = 0;
+    var l1Pan = ac.createStereoPanner(); l1Pan.pan.value = L1.pan;
+
+    l1Carrier.connect(l1PulseGain);
+    l1PulseGain.connect(l1Smooth);
+    l1Smooth.connect(l1Mul);
+    l1Mul.connect(l1EnvAGain);
+    l1EnvAGain.connect(l1EnvBGain);
+    l1EnvBGain.connect(l1Pan);
+    l1Pan.connect(master);
+    startables.push(l1Carrier, l1VibLFO, l1PulseOsc, l1PulseOffset);
+
+    var rainBus = ac.createGain(); rainBus.gain.value = 1;
+    rainEnvGain = ac.createGain(); rainEnvGain.gain.value = 0;
+    rainBus.connect(rainEnvGain); rainEnvGain.connect(master);
+
+    rainLayers = RAIN_DEFS.map(function(def){
+      var carrier = ac.createOscillator(); carrier.type='sine'; carrier.frequency.value = midiToHz(def.note);
+      var saw = ac.createOscillator(); saw.type='sawtooth'; saw.frequency.value = 8;
+      var sawLFO = ac.createOscillator(); sawLFO.type='sine'; sawLFO.frequency.value = def.sawRate;
+      var sawLFOGain = ac.createGain(); sawLFOGain.gain.value = 7;
+      sawLFO.connect(sawLFOGain); sawLFOGain.connect(saw.frequency);
+
+      var sawScale = ac.createGain(); sawScale.gain.value = 0.5;
+      var sawOffset = ac.createConstantSource(); sawOffset.offset.value = 0.5;
+      var flickerGain = ac.createGain(); flickerGain.gain.value = 0;
+      saw.connect(sawScale); sawScale.connect(flickerGain.gain);
+      sawOffset.connect(flickerGain.gain);
+      var smooth = ac.createBiquadFilter(); smooth.type='lowpass'; smooth.frequency.value = 1200;
+
+      var mulGain = ac.createGain(); mulGain.gain.value = 0.1;
+      var levelGain = ac.createGain(); levelGain.gain.value = 0;
+      var panner = ac.createStereoPanner(); panner.pan.value = def.pan;
+
+      carrier.connect(flickerGain);
+      flickerGain.connect(smooth);
+      smooth.connect(mulGain);
+      mulGain.connect(levelGain);
+      levelGain.connect(panner);
+      panner.connect(rainBus);
+
+      startables.push(carrier, saw, sawLFO, sawOffset);
+      return { def:def, levelGain:levelGain, sawPhase: Math.random() };
+    });
+
+    startables.forEach(function(n){ n.start(); });
+  }
+
+  var enterBtn = document.getElementById('enterBtn');
+  var entered = false, muted = false;
+  enterBtn.addEventListener('click', function(){
+    if(!entered){
+      buildGraph();
+      entered = true;
+      enterBtn.textContent = '❚❚ mute';
+    } else {
+      muted = !muted;
+      master.gain.setTargetAtTime(muted ? 0 : 1, ac.currentTime, 0.05);
+      enterBtn.textContent = muted ? '▶ unmute' : '❚❚ mute';
+    }
+  });
+
+  // --- canvas: splashes + tone glow ---
+  var vctx = document.getElementById('viz').getContext('2d');
+  var splashes = [];
+  var l1PulseSmoothed = 0;
+  function spawnSplash(def, levelNow){
+    splashes.push({
+      x: 120 + def.pan*100 + (Math.random()*16-8),
+      y: 26 + Math.random()*188,
+      age: 0, maxAge: 0.55 + Math.random()*0.3,
+      color: def.color, size: 9 + levelNow*70
+    });
+  }
+  function drawFrame(dt){
+    vctx.fillStyle = 'rgba(8,8,10,0.16)';
+    vctx.fillRect(0,0,240,240);
+
+    var pulseRaw = Math.sin(2*Math.PI*L1.pulseHz*nowSec()) >= 0 ? 1 : 0;
+    l1PulseSmoothed += (pulseRaw - l1PulseSmoothed) * Math.min(1, dt*8);
+    var envA = envCircle(L1.envA.levels, L1.envA.times, L1.envA.curve, nowSec());
+    var envB = envCircle(L1.envB.levels, L1.envB.times, L1.envB.curve, nowSec());
+    var glowB = envA*envB*(0.35+0.65*l1PulseSmoothed);
+    var grad = vctx.createRadialGradient(120,120,0,120,120,150);
+    grad.addColorStop(0, 'rgba(201,151,58,'+(0.55*glowB).toFixed(3)+')');
+    grad.addColorStop(1, 'rgba(201,151,58,0)');
+    vctx.fillStyle = grad; vctx.fillRect(0,0,240,240);
+
+    for(var i=splashes.length-1;i>=0;i--){
+      var s = splashes[i]; s.age += dt;
+      if(s.age >= s.maxAge){ splashes.splice(i,1); continue; }
+      var t = s.age/s.maxAge, r = t*s.size;
+      vctx.strokeStyle = s.color; vctx.globalAlpha = (1-t)*0.85; vctx.lineWidth = 1.4;
+      vctx.beginPath(); vctx.arc(s.x, s.y, r, 0, 2*Math.PI); vctx.stroke();
+      vctx.globalAlpha = 1;
+    }
+  }
+
+  var lastFrame = null;
+  function rafLoop(now){
+    var tSec = now/1000;
+    if(lastFrame===null) lastFrame = tSec;
+    var dt = Math.min(0.1, tSec-lastFrame); lastFrame = tSec;
+
+    if(ac && !muted){
+      l1EnvAGain.gain.value = envCircle(L1.envA.levels, L1.envA.times, L1.envA.curve, nowSec());
+      l1EnvBGain.gain.value = envCircle(L1.envB.levels, L1.envB.times, L1.envB.curve, nowSec());
+      rainEnvGain.gain.value = envCircle(RAIN_ENV.levels, RAIN_ENV.times, RAIN_ENV.curve, nowSec());
+    }
+    RAIN_DEFS.forEach(function(def, idx){
+      var lvl = sineLFO(def.lvl.rate, def.lvl.phase, def.lvl.mul, def.lvl.add, nowSec());
+      if(ac && !muted && rainLayers[idx]) rainLayers[idx].levelGain.gain.value = lvl;
+      var freq = 8 + 7*Math.sin(2*Math.PI*def.sawRate*nowSec());
+      if(rainLayers[idx]){
+        rainLayers[idx].sawPhase += freq*dt;
+        if(rainLayers[idx].sawPhase >= 1){
+          rainLayers[idx].sawPhase -= Math.floor(rainLayers[idx].sawPhase);
+          spawnSplash(def, lvl);
+        }
+      } else if(Math.random() < freq*dt){
+        // before Enter is clicked there's no audio graph yet, but the visual
+        // still runs — approximate the same trigger rate probabilistically.
+        spawnSplash(def, lvl);
+      }
+    });
+
+    drawFrame(dt);
+    if(currentExplainKey) showExplain(currentExplainKey);
+    requestAnimationFrame(rafLoop);
+  }
+  requestAnimationFrame(rafLoop);
+
+  try{ document.getElementById('srcLink').href = 'view-source:' + location.href; }catch(e){}
+
+})();
+</script>
+</body>
+</html>
