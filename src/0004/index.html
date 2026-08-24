@@ -84,8 +84,21 @@
 
   .explainer{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:10px 12px;
     align-self:start;position:sticky;top:12px;}
-  .explain-title{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;}
-  .explain-body{font-size:10px;line-height:1.6;color:var(--ink);white-space:pre-wrap;}
+  .explain-viz{width:236px;height:90px;display:block;background:#0a0a0b;border:1px solid var(--edge);
+    border-radius:2px;margin-bottom:10px;}
+  .explain-title{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;
+    transition:color .1s;}
+  .explain-title.l1{color:var(--amber);} .explain-title.l2{color:var(--red);}
+  .explain-title.l3{color:var(--green);} .explain-title.l4{color:var(--blue);}
+  .explain-body{font-size:10px;line-height:1.6;color:var(--ink);}
+  .explain-body .tk-p{margin:0 0 8px;}
+  .explain-body .tk-p:last-child{margin-bottom:0;}
+  .explain-body .tk-block{background:#0c0c0d;border:1px solid var(--edge);border-radius:2px;
+    padding:6px 7px;margin:0 0 8px;font-family:var(--mono);white-space:pre-wrap;overflow-wrap:break-word;}
+  .explain-body .tk-num{color:var(--amber);}
+  .explain-body .tk-var{color:var(--blue);}
+  .explain-body .tk-kw{color:var(--green);}
+  .explain-body .tk-off{color:var(--red);font-weight:600;letter-spacing:.04em;}
 
   .lut-strip{display:flex;flex-direction:column;gap:4px;height:56px;justify-content:center;}
   .lut-strip .row{display:flex;align-items:center;gap:6px;}
@@ -281,6 +294,7 @@
     </div>
 
     <div class="explainer dev-only" id="explainer">
+      <canvas class="explain-viz" id="explainViz" width="236" height="90"></canvas>
       <div class="explain-title" id="explainTitle">Explainer</div>
       <div class="explain-body" id="explainBody">Hover a knob, checkbox, or modulator box to see the exact DSP mechanism — and the current values driving it — for that piece of the chain.</div>
     </div>
@@ -708,7 +722,7 @@ onmessage = function(e){
    'rawPng','ditherSize','swatches','seam','srcLink',
    'exportBtn','importBtn','presetModal','modalTitle','modalText',
    'modalApply','modalCopy','modalClose','modalMsg',
-   'explainer','explainTitle','explainBody'].forEach(function(id){
+   'explainer','explainViz','explainTitle','explainBody'].forEach(function(id){
     els[id.replace(/-([a-z0-9])/g, function(_,c){return c.toUpperCase();})] = document.getElementById(id);
   });
 
@@ -806,9 +820,21 @@ onmessage = function(e){
   });
 
   // --- explainer panel ---
-  // Text is generated from the DOM controls at hover time (not a snapshot),
-  // so dragging a slider while its explanation is showing updates the
-  // numbers live via refreshExplain() below, same idea as updateFormulaPreview.
+  // Two pieces per control: colour-coded "terminal" text (built from the DOM
+  // at hover time, not a snapshot, so dragging a slider updates the numbers
+  // live) and a small canvas visual. Formulas compiled via `new Function`
+  // resolve free identifiers through the REAL global scope (see workerSrc's
+  // own comment on this) — so a main-thread preview render needs
+  // window.triangleLFO/window.G_POS to exist under those exact names for the
+  // same modulated formula strings buildCodes() produces to evaluate here.
+  window.triangleLFO = triangleLFOMain;
+  window.G_POS = 0;
+  function compileLayerMain(code, C){
+    var names = Object.keys(C);
+    var vals = names.map(function(k){ return C[k]; });
+    var fn = new Function(names.join(","), "return (" + code + ")");
+    return fn.apply(null, vals);
+  }
   function liveModReading(layer, msValued){
     var enEl = els['modL'+layer+'En'];
     if(!enEl.checked) return null;
@@ -822,111 +848,339 @@ onmessage = function(e){
     return msValued ? Math.round(v*1000/CONSTS.SAMPLE_RATE) : v;
   }
 
+  // --- text token helpers: hand-authored "syntax highlighting" ---
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function N(x){ return '<span class="tk-num">'+esc(x)+'</span>'; }
+  function VR(x){ return '<span class="tk-var">'+esc(x)+'</span>'; }
+  function KW(x){ return '<span class="tk-kw">'+esc(x)+'</span>'; }
+  function CODE(x){ return '<div class="tk-block">'+x+'</div>'; }
+  function P(x){ return '<p class="tk-p">'+x+'</p>'; }
+  function OFF(){ return '<span class="tk-off">DISABLED</span>'; }
+
+  // --- preview render (main thread, small buffers only) ---
+  // Deliberately NOT tied to the actual playback position — these are
+  // "what does this mechanism look like right now with these knobs"
+  // previews starting fresh at t=0, cheap enough to recompute on every hover
+  // or slider drag without touching the worker.
+  function previewParts(){
+    var k = currentKnobs();
+    return { k:k, codes: buildCodes(k), consts: buildConsts(k) };
+  }
+  function computeWavetable(){
+    var p = previewParts();
+    var l1 = compileLayerMain(p.codes.l1, p.consts);
+    var T = new Uint8Array(256);
+    for(var i=0;i<256;i++) T[i] = l1(i) & 0xFF;
+    return T;
+  }
+  function computeBuf2(n){
+    var p = previewParts();
+    var l1 = compileLayerMain(p.codes.l1, p.consts);
+    var T = new Uint8Array(256);
+    var i;
+    for(i=0;i<256;i++) T[i] = l1(i) & 0xFF;
+    var l2 = compileLayerMain(p.codes.l2, p.consts);
+    var buf2 = new Uint8Array(n);
+    var s = { p:0, inc: p.consts.INIT_INC };
+    for(i=0;i<n;i++){ window.G_POS = i; buf2[i] = l2(i, T, s) & 0xFF; }
+    return buf2;
+  }
+  // Layer 3/4's clean/glitch alternation and stereo offset only become
+  // visible at real timescales (Cycle up to 10s, Offset up to 200ms) that
+  // are too big to render live on every hover — so these two isolate the
+  // MECHANISM directly (apply the formula unconditionally to a short window)
+  // rather than trying to land exactly on the right phase of a 90s render.
+  // l3-cycle's schematic (below) covers the real timing separately.
+  function computeL3Demo(mode){
+    // mode: true = always glitch, false = always clean, null = respect off-l3
+    var k = previewParts().k;
+    var buf2 = computeBuf2(700);
+    var buf3 = new Uint8Array(700);
+    var glitch = mode === true ? true : mode === false ? false : !k.l3off;
+    for(var i=0;i<700;i++){
+      buf3[i] = glitch ? buf2[(i*k.stride) % buf2.length] : buf2[i];
+    }
+    return { buf2:buf2, buf3:buf3 };
+  }
+  function computeL4Demo(){
+    var p = previewParts();
+    var offsetSamples = msToSamples(p.k.stereo);
+    var n = Math.min(20000, Math.max(2000, offsetSamples*2 + 400));
+    var l1 = compileLayerMain(p.codes.l1, p.consts);
+    var T = new Uint8Array(256);
+    var i;
+    for(i=0;i<256;i++) T[i] = l1(i) & 0xFF;
+    var l2 = compileLayerMain(p.codes.l2, p.consts);
+    var buf2 = new Uint8Array(n);
+    var s = { p:0, inc: p.consts.INIT_INC };
+    for(i=0;i<n;i++){ window.G_POS = i; buf2[i] = l2(i, T, s) & 0xFF; }
+    var l3 = compileLayerMain(p.codes.l3, p.consts);
+    var buf3 = new Uint8Array(n);
+    for(i=0;i<n;i++){ window.G_POS = i; buf3[i] = l3(buf2, i) & 0xFF; }
+    var l4 = compileLayerMain(p.codes.l4, p.consts);
+    var buf4 = new Uint8Array(n);
+    for(i=0;i<n;i++){ window.G_POS = i; buf4[i] = l4(buf3, i) & 0xFF; }
+    var win = Math.min(1400, n);
+    return { buf3: buf3.slice(n-win), buf4: buf4.slice(n-win) };
+  }
+
+  // --- canvas drawing primitives ---
+  var VIZ_W = 236, VIZ_H = 90;
+  var LCOLOR = { 1:'#c9973a', 2:'#d1554f', 3:'#6fb582', 4:'#4a6fd6' };
+  var DIM_COLOR = '#5a5a5e';
+  function vctx(){ return els.explainViz.getContext('2d'); }
+  function clearViz(ctx){
+    ctx.clearRect(0,0,VIZ_W,VIZ_H);
+    ctx.fillStyle = '#0a0a0b';
+    ctx.fillRect(0,0,VIZ_W,VIZ_H);
+    ctx.strokeStyle = '#222226';
+    ctx.beginPath(); ctx.moveTo(0,VIZ_H/2+0.5); ctx.lineTo(VIZ_W,VIZ_H/2+0.5); ctx.stroke();
+  }
+  function plotBytes(ctx, arr, color, opts){
+    opts = opts || {};
+    var n = arr.length; if(n<2) return;
+    var y0 = 6, y1 = VIZ_H-6, mid = (y0+y1)/2, amp = (y1-y0)/2;
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = opts.alpha===undefined ? 1 : opts.alpha;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for(var i=0;i<n;i++){
+      var x = i*VIZ_W/(n-1);
+      var y = mid - ((arr[i]-128)/128)*amp;
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // --- per-key visuals ---
+  function drawWavetable(ctx){ clearViz(ctx); plotBytes(ctx, computeWavetable(), LCOLOR[1]); }
+  function drawL2Pitch(ctx){ clearViz(ctx); plotBytes(ctx, computeBuf2(600), LCOLOR[2]); }
+  function drawL2Signal(ctx){
+    var n = 3*CONSTS.NOTE_LEN;
+    var buf2 = computeBuf2(n);
+    clearViz(ctx);
+    plotBytes(ctx, buf2, LCOLOR[2]);
+    ctx.strokeStyle = '#444'; ctx.setLineDash([2,3]);
+    for(var t=CONSTS.NOTE_LEN; t<n; t+=CONSTS.NOTE_LEN){
+      var x = t*VIZ_W/(n-1);
+      ctx.beginPath(); ctx.moveTo(x,2); ctx.lineTo(x,VIZ_H-2); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+  function drawL3Cycle(ctx){
+    var cycleMs = parseFloat(els.cycleMs.value) || 1;
+    clearViz(ctx);
+    var totalMs = cycleMs*3;
+    var barY = VIZ_H/2-14, barH = 28;
+    for(var x=0;x<VIZ_W;x++){
+      var ms = x/VIZ_W*totalMs;
+      var clean = (ms % cycleMs) < cycleMs/2;
+      ctx.globalAlpha = clean ? 0.85 : 0.55;
+      ctx.fillStyle = clean ? LCOLOR[3] : '#8a4a4a';
+      ctx.fillRect(x, barY, 1.2, barH);
+    }
+    ctx.globalAlpha = 1;
+  }
+  function drawL3Stride(ctx){
+    var d = computeL3Demo(true);
+    clearViz(ctx);
+    plotBytes(ctx, d.buf2, DIM_COLOR, {alpha:0.55});
+    plotBytes(ctx, d.buf3, LCOLOR[3]);
+  }
+  function drawL3Off(ctx){
+    var d = computeL3Demo(null);
+    clearViz(ctx);
+    plotBytes(ctx, d.buf2, DIM_COLOR, {alpha:0.55});
+    plotBytes(ctx, d.buf3, LCOLOR[3]);
+  }
+  function drawL4(ctx){
+    var d = computeL4Demo();
+    clearViz(ctx);
+    plotBytes(ctx, d.buf3, DIM_COLOR, {alpha:0.6});
+    plotBytes(ctx, d.buf4, LCOLOR[4]);
+  }
+  function drawModLFO(ctx, layer, msValued){
+    clearViz(ctx);
+    var enEl = els['modL'+layer+'En'];
+    var min = parseFloat(els['modL'+layer+'Min'].value);
+    var max = parseFloat(els['modL'+layer+'Max'].value);
+    var freqMs = parseFloat(els['modL'+layer+'Freq'].value) || 1;
+    var lo = Math.min(min,max), hi = Math.max(min,max), range = (hi-lo)||1;
+    var y0 = 10, y1 = VIZ_H-10;
+    ctx.strokeStyle = LCOLOR[layer];
+    ctx.lineWidth = 1;
+    if(!enEl.checked){
+      var staticVal = layer===2 ? parseFloat(els.kFeedback.value) : layer===3 ? parseFloat(els.kStride.value) : parseFloat(els.kStereo.value);
+      var yy = y1 - ((staticVal-lo)/range)*(y1-y0);
+      ctx.setLineDash([3,3]);
+      ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(VIZ_W,yy); ctx.stroke();
+      ctx.setLineDash([]);
+      return;
+    }
+    var freqSamples = msToSamples(freqMs);
+    var minS = msValued ? msToSamples(min) : min, maxS = msValued ? msToSamples(max) : max;
+    ctx.beginPath();
+    for(var x=0;x<VIZ_W;x++){
+      var idx = msToSamples(x/VIZ_W*freqMs);
+      var v = triangleLFOMain(minS, maxS, freqSamples, idx);
+      var disp = msValued ? (v*1000/CONSTS.SAMPLE_RATE) : v;
+      var y = y1 - ((disp-lo)/range)*(y1-y0);
+      if(x===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    if(state.rendered && state.playing){
+      var idxNow = currentSampleIndex();
+      var xNow = (idxNow % freqSamples)/freqSamples*VIZ_W;
+      ctx.strokeStyle = '#fff'; ctx.globalAlpha = 0.7;
+      ctx.beginPath(); ctx.moveTo(xNow,0); ctx.lineTo(xNow,VIZ_H); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+  function drawSequence(ctx){
+    clearViz(ctx);
+    var tokens = els.sequenceText.value.trim().split(/\s+/).filter(Boolean);
+    if(!tokens.length) return;
+    var cw = VIZ_W/tokens.length;
+    ctx.font = '9px monospace'; ctx.textAlign = 'center';
+    tokens.forEach(function(tok, i){
+      var x = i*cw;
+      var rest = tok === '.';
+      ctx.globalAlpha = rest ? 0.4 : (tok==='0' ? 0.55 : 0.85);
+      ctx.fillStyle = rest ? '#222226' : (tok==='0' ? '#333338' : LCOLOR[4]);
+      ctx.fillRect(x+1, 20, Math.max(1,cw-2), VIZ_H-30);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#e9e6db';
+      ctx.fillText(rest ? '·' : tok, x+cw/2, VIZ_H-10);
+    });
+  }
+
   var EXPLAIN = {
     'l1-timbre': function(){
-      return ['Layer 1 · Wavetable — Timbre',
-        'Builds a 256-entry table once: T[i] = (i XOR (i >> Timbre)) & 0xFF.\n\n' +
-        'Timbre = ' + els.kTimbre.value + '. Low (1) barely shifts the ramp — smooth, near-sawtooth. High (7) folds high and low bits together — jagged, aliased.\n\n' +
-        'No time axis here — layer 2 is what reads through this table to make sound.'];
+      return { layer:1, title:'Layer 1 · Wavetable — Timbre', draw:drawWavetable, html:
+        CODE(VR('T[i]')+' = ('+VR('i')+' '+KW('XOR')+' ('+VR('i')+' '+KW('>>')+' '+VR('Timbre')+')) '+KW('&')+' '+N('0xFF')) +
+        P('A 256-entry table, built once. '+VR('Timbre')+' = '+N(els.kTimbre.value)+'.') +
+        P('Low ('+N('1')+') barely shifts the ramp — smooth, near-sawtooth. High ('+N('7')+') folds high and low bits together — jagged, aliased.') +
+        P('No time axis here — layer 2 is what reads through this table to make sound.') };
     },
     'l1-off': function(){
       var off = els.offL1.checked;
-      return ['Layer 1 · Disable', off
-        ? 'Disabled — using the identity table T[i] = i instead of the XOR-fold. Timbre (' + els.kTimbre.value + ') is set but not applied. Uncheck to restore the fold.'
-        : 'Unchecked — layer 1 uses its XOR-fold table (Timbre = ' + els.kTimbre.value + '). Check this to bypass the fold and hear/see a plain ramp table instead, isolating what Timbre changes.'];
+      return { layer:1, title:'Layer 1 · Disable', draw:drawWavetable, html: off
+        ? CODE(VR('T[i]')+' = '+VR('i')+'  '+OFF()) + P('Identity table instead of the XOR-fold. '+VR('Timbre')+' ('+N(els.kTimbre.value)+') is set but not applied. Uncheck to restore the fold.')
+        : P('Layer 1 uses its XOR-fold table ('+VR('Timbre')+' = '+N(els.kTimbre.value)+'). Check '+VR('disable')+' to bypass the fold and see a plain ramp table instead, isolating what Timbre changes.') };
     },
     'l2-pitch': function(){
-      return ['Layer 2 · Index (R) — Pitch',
-        'A phase accumulator: s.p = (s.p + s.inc) % ' + CONSTS.PHASE_MOD + '; each sample reads T[(s.p >> 8) & 0xFF].\n\n' +
-        'Pitch sets the starting increment, INIT_INC = ' + els.kPitch.value + '. Higher runs the phase through the table faster — a higher tone. Feedback (below) can then change s.inc over time.'];
+      return { layer:2, title:'Layer 2 · Index (R) — Pitch', draw:drawL2Pitch, html:
+        CODE(VR('s.p')+' = ('+VR('s.p')+' + '+VR('s.inc')+') '+KW('%')+' '+N(CONSTS.PHASE_MOD)+'\n'+VR('T[(s.p >> 8) & 0xFF]')) +
+        P('A phase accumulator, read every sample. '+VR('Pitch')+' sets the starting increment, '+VR('INIT_INC')+' = '+N(els.kPitch.value)+'.') +
+        P('Higher runs the phase through the table faster — a higher tone. Feedback (below) can then change '+VR('s.inc')+' over time.') };
     },
     'l2-feedback': function(){
-      return ['Layer 2 · Index (R) — Feedback',
-        'Every ' + CONSTS.NOTE_LEN + 'ms (a fixed wall clock, independent of the phase\'s own wrap), the increment jumps:\ns.inc = (s.inc + (T[phase] >> Feedback)) % ' + CONSTS.INC_MOD + '.\n\n' +
-        'Feedback = ' + els.kFeedback.value + '. Low (1) shifts the table read very little away, so most of its value gets added each tick — chaotic pitch jumps. High (8) shifts nearly all of it away — tiny, smooth increments, a gentle vibrato instead of chaos.'];
+      return { layer:2, title:'Layer 2 · Index (R) — Feedback', draw:drawL2Signal, html:
+        CODE('every '+N(CONSTS.NOTE_LEN)+'ms:\n'+VR('s.inc')+' = ('+VR('s.inc')+' + (T[phase] '+KW('>>')+' '+VR('Feedback')+')) '+KW('%')+' '+N(CONSTS.INC_MOD)) +
+        P('A fixed wall clock — independent of the phase\'s own wrap. '+VR('Feedback')+' = '+N(els.kFeedback.value)+'.') +
+        P('Low ('+N('1')+') shifts the table read very little away, so most of its value gets added each tick — chaotic pitch jumps. High ('+N('8')+') shifts nearly all of it away — a gentle vibrato instead.') +
+        P('Dashed lines mark each 100ms tick — watch the waveform above change character right at them.') };
     },
     'l2-off': function(){
       var off = els.offL2.checked;
-      return ['Layer 2 · Disable', off
-        ? 'Disabled — the 100ms feedback tick never fires, so s.inc stays frozen at Pitch\'s starting value (' + els.kPitch.value + ') forever. You\'re hearing a single constant tone with none of Feedback\'s (' + els.kFeedback.value + ', set but not applied) self-modulation.'
-        : 'Unchecked — feedback updates s.inc every ' + CONSTS.NOTE_LEN + 'ms as normal. Check this to freeze the increment at Pitch\'s value and isolate what Feedback (' + els.kFeedback.value + ') is doing.'];
+      return { layer:2, title:'Layer 2 · Disable', draw:drawL2Signal, html: off
+        ? P(OFF()+' — the 100ms tick never fires, so '+VR('s.inc')+' stays frozen at Pitch\'s starting value ('+N(els.kPitch.value)+') forever. A single constant tone, none of Feedback\'s ('+N(els.kFeedback.value)+', set but not applied) self-modulation.')
+        : P('Feedback updates '+VR('s.inc')+' every '+N(CONSTS.NOTE_LEN)+'ms as normal. Check '+VR('disable')+' to freeze the increment at Pitch\'s value and isolate what Feedback ('+N(els.kFeedback.value)+') is doing.') };
     },
     'l2-mod': function(){
       var live = liveModReading(2, false);
       var en = els.modL2En.checked;
-      return ['Layer 2 · Modulator — Feedback', en
-        ? ('Feedback is swept by a triangle LFO between ' + els.modL2Min.value + ' and ' + els.modL2Max.value + ' every ' + els.modL2Freq.value + 'ms, instead of sitting fixed at the Feedback knob.' + (live!==null ? (' Right now it reads ≈' + live + '.') : ''))
-        : 'Not modulated — check "enable" to sweep Feedback between Min and Max on a triangle cycle, instead of sitting fixed at the Feedback knob\'s value.'];
+      return { layer:2, title:'Layer 2 · Modulator — Feedback', draw:function(ctx){ drawModLFO(ctx,2,false); }, html: en
+        ? P('Feedback is swept by a triangle LFO between '+N(els.modL2Min.value)+' and '+N(els.modL2Max.value)+' every '+N(els.modL2Freq.value)+'ms, instead of sitting fixed.' + (live!==null ? (' Right now: '+N(live)+'.') : ''))
+        : P('Not modulated — check '+VR('enable')+' to sweep Feedback between Min and Max on a triangle cycle, instead of sitting fixed at the knob\'s value.') };
     },
     'l3-cycle': function(){
       var ms = parseFloat(els.cycleMs.value);
-      return ['Layer 3 · Transform (G / LEFT ch) — Cycle',
-        'First half of every Cycle window passes the signal straight through: buf[i]. Second half re-reads it at a stride (see Stride): buf[(i*Stride) % length] — the glitch.\n\n' +
-        'Cycle = ' + ms + 'ms, so the sound alternates clean/glitched roughly every ' + Math.round(ms/2) + 'ms.'];
+      return { layer:3, title:'Layer 3 · Transform (G / LEFT ch) — Cycle', draw:drawL3Cycle, html:
+        CODE('('+VR('i')+' '+KW('%')+' '+VR('CYCLE_LEN')+') < '+VR('CYCLE_LEN')+KW('>>')+N('1')+' ? '+VR('buf[i]')+' : glitch') +
+        P('First half of every Cycle window passes straight through; second half re-reads at a stride (glitch). '+VR('Cycle')+' = '+N(ms)+'ms.') +
+        P('So the sound alternates clean/glitched roughly every '+N(Math.round(ms/2))+'ms. The strip above shows ~3 cycles at this rate — green = clean, red = glitch.') };
     },
     'l3-stride': function(){
-      return ['Layer 3 · Transform (G / LEFT ch) — Stride',
-        'During the glitched half, each sample is re-read from buf[(i*Stride) % length].\n\n' +
-        'Stride = ' + els.kStride.value + '. Low (1) barely perturbs the clean signal. High (near 63) scrambles it into dense, distant re-reads — heavier digital noise.'];
+      return { layer:3, title:'Layer 3 · Transform (G / LEFT ch) — Stride', draw:drawL3Stride, html:
+        CODE(VR('buf[(i * Stride) % buf.length]')) +
+        P('During the glitched half, each sample is re-read from this far away. '+VR('Stride')+' = '+N(els.kStride.value)+'.') +
+        P('Dim = input signal, bright = re-read output — showing Stride\'s scramble applied directly (not tied to the real Cycle timing above).') +
+        P('Low ('+N('1')+') barely perturbs it. High (near '+N('63')+') scrambles it into dense, distant re-reads — heavier digital noise.') };
     },
     'l3-off': function(){
       var off = els.offL3.checked;
-      return ['Layer 3 · Disable', off
-        ? 'Disabled — layer 3 always passes buf[i] straight through, so it never enters the glitched half of Cycle (' + els.cycleMs.value + 'ms) / Stride (' + els.kStride.value + '). You\'re hearing layer 2\'s tonal signal with no breathing/glitch structure at all.'
-        : 'Unchecked — layer 3 alternates clean/glitched as normal. Check this to bypass the transform entirely and isolate what Cycle/Stride are adding.'];
+      return { layer:3, title:'Layer 3 · Disable', draw:drawL3Off, html: off
+        ? P(OFF()+' — always '+VR('buf[i]')+' straight through, never the glitched half of Cycle ('+N(els.cycleMs.value)+'ms) / Stride ('+N(els.kStride.value)+'). Dim and bright lines above coincide exactly.')
+        : P('Layer 3 alternates clean/glitched as normal. Check '+VR('disable')+' to bypass the transform entirely and isolate what Cycle/Stride are adding.') };
     },
     'l3-mod': function(){
       var live = liveModReading(3, false);
       var en = els.modL3En.checked;
-      return ['Layer 3 · Modulator — Stride', en
-        ? ('Stride is swept by a triangle LFO between ' + els.modL3Min.value + ' and ' + els.modL3Max.value + ' every ' + els.modL3Freq.value + 'ms, instead of sitting fixed at the Stride knob.' + (live!==null ? (' Right now it reads ≈' + live + '.') : ''))
-        : 'Not modulated — check "enable" to sweep Stride between Min and Max on a triangle cycle, instead of sitting fixed at the Stride knob\'s value.'];
+      return { layer:3, title:'Layer 3 · Modulator — Stride', draw:function(ctx){ drawModLFO(ctx,3,false); }, html: en
+        ? P('Stride is swept by a triangle LFO between '+N(els.modL3Min.value)+' and '+N(els.modL3Max.value)+' every '+N(els.modL3Freq.value)+'ms, instead of sitting fixed.' + (live!==null ? (' Right now: '+N(live)+'.') : ''))
+        : P('Not modulated — check '+VR('enable')+' to sweep Stride between Min and Max on a triangle cycle, instead of sitting fixed at the knob\'s value.') };
     },
     'l4-offset': function(){
       var msV = parseInt(els.kStereo.value, 10);
-      return ['Layer 4 · Stereo (B / RIGHT ch) — Offset',
-        'Reads layer 3\'s own line again, shifted by Offset ms: buf[(i+offsetSamples) % length].\n\n' +
-        'Offset = ' + msV + 'ms ≈ ' + msToSamples(msV) + ' samples. At 0 both channels are identical (mono). Small offsets widen the stereo image; larger ones become an audible slap-delay between speakers.'];
+      return { layer:4, title:'Layer 4 · Stereo (B / RIGHT ch) — Offset', draw:drawL4, html:
+        CODE(VR('buf4[i]')+' = '+VR('buf3[(i + offsetSamples) % length]')) +
+        P('Reads layer 3\'s own line again, shifted. '+VR('Offset')+' = '+N(msV)+'ms ≈ '+N(msToSamples(msV))+' samples.') +
+        P('Dim = left (layer 3), bright = right (layer 4). At '+N('0')+' they\'re identical (mono). Small offsets widen the image; larger ones become an audible slap-delay.') };
     },
     'l4-off': function(){
       var off = els.offL4.checked;
-      return ['Layer 4 · Disable', off
-        ? 'Disabled — the offset is forced to 0, so the right channel becomes an exact copy of layer 3\'s left-channel signal. You\'re hearing pure mono, same as setting Offset to 0 but without touching its own value (currently ' + els.kStereo.value + 'ms).'
-        : 'Unchecked — layer 4 reads layer 3\'s line offset by Offset (' + els.kStereo.value + 'ms) as normal. Check this to force mono and isolate what the stereo offset is adding.'];
+      return { layer:4, title:'Layer 4 · Disable', draw:drawL4, html: off
+        ? P(OFF()+' — offset forced to '+N('0')+', so the right channel is an exact copy of layer 3\'s line. Pure mono, without touching Offset\'s own value (currently '+N(els.kStereo.value)+'ms). Lines above coincide.')
+        : P('Layer 4 reads layer 3\'s line offset by '+N(els.kStereo.value)+'ms as normal. Check '+VR('disable')+' to force mono and isolate what the stereo offset is adding.') };
     },
     'l4-mod': function(){
       var live = liveModReading(4, true);
       var en = els.modL4En.checked;
-      return ['Layer 4 · Modulator — Offset', en
-        ? ('Offset is swept by a triangle LFO between ' + els.modL4Min.value + 'ms and ' + els.modL4Max.value + 'ms every ' + els.modL4Freq.value + 'ms, instead of sitting fixed at the Offset knob.' + (live!==null ? (' Right now it reads ≈' + live + 'ms.') : ''))
-        : 'Not modulated — check "enable" to sweep Offset between Min and Max on a triangle cycle, instead of sitting fixed at the Offset knob\'s value.'];
+      return { layer:4, title:'Layer 4 · Modulator — Offset', draw:function(ctx){ drawModLFO(ctx,4,true); }, html: en
+        ? P('Offset is swept by a triangle LFO between '+N(els.modL4Min.value)+'ms and '+N(els.modL4Max.value)+'ms every '+N(els.modL4Freq.value)+'ms, instead of sitting fixed.' + (live!==null ? (' Right now: '+N(live)+'ms.') : ''))
+        : P('Not modulated — check '+VR('enable')+' to sweep Offset between Min and Max on a triangle cycle, instead of sitting fixed at the knob\'s value.') };
     },
     'track-mode': function(){
       var on = els.trackMode.checked;
-      return ['Track Sequencer — Mode', on
-        ? 'Track mode is ON. Instead of one continuous 90s evolution, the Sequence below is rendered as discrete cells, each retriggering layers 1-4 from a fresh phase state.'
-        : 'Track mode is OFF — rendering the continuous 90s piece. Check this to switch to a rhythmic cell/sequence instead.'];
+      return { layer:null, title:'Track Sequencer — Mode', draw:drawSequence, html: on
+        ? P('Track mode is '+N('ON')+'. Instead of one continuous 90s evolution, the Sequence below is rendered as discrete cells, each retriggering layers 1-4 from a fresh phase state.')
+        : P('Track mode is '+N('OFF')+' — rendering the continuous 90s piece. Check this to switch to a rhythmic cell/sequence instead.') };
     },
     'track-cell': function(){
-      return ['Track Sequencer — Cell (ms)',
-        'Cell = ' + els.cellMs.value + 'ms, the length of one sequence step. Rounded to the nearest waterfall row (5ms) so cells tile cleanly. Every cell retriggers layers 1-4 from an identical starting phase, so same-transposition repeats are byte-identical.'];
+      return { layer:null, title:'Track Sequencer — Cell (ms)', draw:drawSequence, html:
+        P(VR('Cell')+' = '+N(els.cellMs.value)+'ms, the length of one sequence step. Rounded to the nearest waterfall row (5ms) so cells tile cleanly.') +
+        P('Every cell retriggers layers 1-4 from an identical starting phase, so same-transposition repeats are byte-identical.') };
     },
     'track-sequence': function(){
-      return ['Track Sequencer — Sequence',
-        'Sequence = "' + els.sequenceText.value + '". Space-separated steps, one Cell-length each. An integer transposes that cell\'s pitch by semitones (0 = as recorded); "." is a full rest.'];
+      return { layer:null, title:'Track Sequencer — Sequence', draw:drawSequence, html:
+        P(VR('Sequence')+' = "'+esc(els.sequenceText.value)+'". Space-separated steps, one Cell-length each.') +
+        P('An integer transposes that cell\'s pitch by semitones ('+N('0')+' = as recorded); "'+N('.')+'" is a full rest.') };
     }
   };
 
+  var LIVE_KEYS = { 'l2-mod':1, 'l3-mod':1, 'l4-mod':1 };
   var currentExplainKey = null;
   function showExplain(key){
     var fn = EXPLAIN[key];
     if(!fn) return;
     currentExplainKey = key;
-    var pair = fn();
-    els.explainTitle.textContent = pair[0];
-    els.explainBody.textContent = pair[1];
+    var e = fn();
+    els.explainTitle.textContent = e.title;
+    els.explainTitle.className = 'explain-title' + (e.layer ? ' l'+e.layer : '');
+    els.explainBody.innerHTML = e.html;
+    if(e.draw) e.draw(vctx());
   }
+  // Full recompute — used by hover-enter and by actual knob changes
+  // (updateFormulaPreview), both low-frequency, so a heavier preview
+  // recompute here is fine.
   function refreshExplain(){ if(currentExplainKey) showExplain(currentExplainKey); }
+  // Cheap recompute — used every animation frame during playback. Only the
+  // modulator keys have anything time-dependent to redraw (their LFO
+  // playhead + live-value reading); every other key's visual is deterministic
+  // from the current knobs alone, so redrawing it 60x/sec would be wasted work.
+  function tickRefreshExplain(){ if(currentExplainKey && LIVE_KEYS[currentExplainKey]) showExplain(currentExplainKey); }
   document.querySelectorAll('[data-explain]').forEach(function(el){
     el.addEventListener('mouseenter', function(){ showExplain(el.getAttribute('data-explain')); });
   });
@@ -1325,7 +1579,7 @@ onmessage = function(e){
     var s = currentSampleIndex();
     if(!state.scrubbing) els.scrubber.value = String(s);
     updateModIndicators(s);
-    refreshExplain();
+    tickRefreshExplain();
     var rowIdx = Math.floor(s / CONSTS.ROW_SAMPLES) % state.totalRows;
     if(rowIdx !== state.lastRow){
       var steps = rowIdx - state.lastRow;
@@ -1345,7 +1599,7 @@ onmessage = function(e){
     state.offsetSamples = s;
     if(state.playing) startPlayback(s);
     updateModIndicators(s);
-    refreshExplain();
+    tickRefreshExplain();
     var rowIdx = Math.floor(s / CONSTS.ROW_SAMPLES) % state.totalRows;
     state.lastRow = (rowIdx - 1 + state.totalRows) % state.totalRows;
     appendRow(rowIdx);
