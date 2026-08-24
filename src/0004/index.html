@@ -18,7 +18,7 @@
   h1 b{color:var(--ink);font-weight:600;}
 
   .shrine{width:540px;max-width:100%;display:flex;flex-direction:column;gap:20px;}
-  body.dev-mode .shrine{width:760px;}
+  body.dev-mode .shrine{width:1040px;}
 
   .field-row{display:flex;gap:8px;align-items:stretch;}
   .field-row .field{flex:1;min-width:0;}
@@ -33,6 +33,7 @@
     color:var(--dim);background:var(--panel);border:2px dashed var(--edge);border-radius:2px;padding:6px 8px;}
 
   .panels{display:grid;grid-template-columns:240px 1fr;gap:20px;}
+  body.dev-mode .panels{grid-template-columns:240px 1fr 260px;}
 
   .viz-wrap{position:relative;width:240px;height:240px;background:#000;border:1px solid var(--edge);cursor:crosshair;}
   #viz{width:240px;height:240px;image-rendering:pixelated;display:block;}
@@ -49,6 +50,11 @@
   .field.l4{border-color:var(--blue);}
   .field.track{border-color:var(--dim);}
   .field.error{border-color:#ff2222;background:#2a1010;}
+  .field.layer-off{opacity:.4;}
+  .modbox.layer-off{opacity:.35;pointer-events:none;}
+  .flabel-row{display:flex;align-items:center;justify-content:space-between;gap:6px;}
+  .off-toggle{display:flex;align-items:center;gap:3px;font-size:9px;color:var(--dim);cursor:pointer;user-select:none;}
+  .off-toggle input{margin:0;}
   .check-row{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--ink);}
   .knob-row input[type=number],.knob-row input[type=text]{flex:1;min-width:0;background:var(--panel);
     color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:10px;padding:3px 6px;}
@@ -75,6 +81,11 @@
   .advanced .formula-note{padding-top:4px;border-top:1px solid var(--edge);margin-top:4px;}
   .reset-link{background:none;border:none;color:var(--dim);font-family:var(--mono);font-size:9px;
     text-decoration:underline;cursor:pointer;padding:0;align-self:flex-start;}
+
+  .explainer{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:10px 12px;
+    align-self:start;position:sticky;top:12px;}
+  .explain-title{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;}
+  .explain-body{font-size:10px;line-height:1.6;color:var(--ink);white-space:pre-wrap;}
 
   .lut-strip{display:flex;flex-direction:column;gap:4px;height:56px;justify-content:center;}
   .lut-strip .row{display:flex;align-items:center;gap:6px;}
@@ -134,8 +145,11 @@
       <div class="fields-dev dev-only" id="devFields">
       <div class="field-row">
       <div class="field l1" id="field-l1">
-        <div class="flabel">1 wavetable</div>
-        <div class="knob-row" title="Bit-shift folded into the table shape. Low = simple/smooth, high = harsh/aliased.">
+        <div class="flabel-row">
+          <span class="flabel">1 wavetable</span>
+          <label class="off-toggle" data-explain="l1-off"><input type="checkbox" id="off-l1"> disable</label>
+        </div>
+        <div class="knob-row" data-explain="l1-timbre" title="Bit-shift folded into the table shape. Low = simple/smooth, high = harsh/aliased.">
           <span class="klabel">Timbre</span>
           <input type="range" id="k-timbre" min="1" max="7" step="1" value="3">
           <span class="kval" id="kv-timbre">3</span>
@@ -149,20 +163,23 @@
       </div>
       <div class="field-row">
       <div class="field l2" id="field-l2">
-        <div class="flabel">2 index (R)</div>
-        <div class="knob-row" title="Starting phase speed — the tonal center.">
+        <div class="flabel-row">
+          <span class="flabel">2 index (R)</span>
+          <label class="off-toggle" data-explain="l2-off"><input type="checkbox" id="off-l2"> disable</label>
+        </div>
+        <div class="knob-row" data-explain="l2-pitch" title="Starting phase speed — the tonal center.">
           <span class="klabel">Pitch</span>
           <input type="range" id="k-pitch" min="1" max="64" step="1" value="1">
           <span class="kval" id="kv-pitch">1</span>
         </div>
-        <div class="knob-row" title="How hard the tone feeds back on itself. Low = chaotic/glitchy, high = tonal/vibrato.">
+        <div class="knob-row" data-explain="l2-feedback" title="How hard the tone feeds back on itself. Low = chaotic/glitchy, high = tonal/vibrato.">
           <span class="klabel">Feedback</span>
           <input type="range" id="k-feedback" min="1" max="8" step="1" value="5">
           <span class="kval" id="kv-feedback">5</span>
         </div>
         <div class="field-err"></div>
       </div>
-      <div class="modbox" id="modbox-l2">
+      <div class="modbox" id="modbox-l2" data-explain="l2-mod">
         <div class="flabel">mod: feedback</div>
         <label class="check-row"><input type="checkbox" id="mod-l2-en"> enable</label>
         <div class="mod-row"><span class="klabel">Min</span><input type="number" id="mod-l2-min" min="1" max="8" step="1" value="1"></div>
@@ -172,20 +189,23 @@
       </div>
       <div class="field-row">
       <div class="field l3" id="field-l3">
-        <div class="flabel">3 transform (G)</div>
-        <div class="knob-row" title="How often the pattern breathes between clean and glitched, in ms. Drag to audition, type for an exact value. Off-round values are fine — the seam readout will simply reflect the result at the 90s loop point, same as Pitch/Feedback already do.">
+        <div class="flabel-row">
+          <span class="flabel">3 transform (G)</span>
+          <label class="off-toggle" data-explain="l3-off"><input type="checkbox" id="off-l3"> disable</label>
+        </div>
+        <div class="knob-row" data-explain="l3-cycle" title="How often the pattern breathes between clean and glitched, in ms. Drag to audition, type for an exact value. Off-round values are fine — the seam readout will simply reflect the result at the 90s loop point, same as Pitch/Feedback already do.">
           <span class="klabel">Cycle (ms)</span>
           <input type="range" id="cycleMsSlider" min="200" max="3000" step="10" value="1500">
           <input type="number" id="cycleMs" min="50" max="10000" step="10" value="1500">
         </div>
-        <div class="knob-row" title="How far apart samples are re-read from during the glitched half of the cycle.">
+        <div class="knob-row" data-explain="l3-stride" title="How far apart samples are re-read from during the glitched half of the cycle.">
           <span class="klabel">Stride</span>
           <input type="range" id="k-stride" min="1" max="63" step="1" value="7">
           <span class="kval" id="kv-stride">7</span>
         </div>
         <div class="field-err"></div>
       </div>
-      <div class="modbox" id="modbox-l3">
+      <div class="modbox" id="modbox-l3" data-explain="l3-mod">
         <div class="flabel">mod: stride</div>
         <label class="check-row"><input type="checkbox" id="mod-l3-en"> enable</label>
         <div class="mod-row"><span class="klabel">Min</span><input type="number" id="mod-l3-min" min="1" max="63" step="1" value="1"></div>
@@ -195,15 +215,18 @@
       </div>
       <div class="field-row">
       <div class="field l4" id="field-l4">
-        <div class="flabel">4 stereo (B)</div>
-        <div class="knob-row" title="Right channel reads layer 3's line offset by this many milliseconds. 0 = mono. Small values widen; larger values become an audible slap between speakers.">
+        <div class="flabel-row">
+          <span class="flabel">4 stereo (B)</span>
+          <label class="off-toggle" data-explain="l4-off"><input type="checkbox" id="off-l4"> disable</label>
+        </div>
+        <div class="knob-row" data-explain="l4-offset" title="Right channel reads layer 3's line offset by this many milliseconds. 0 = mono. Small values widen; larger values become an audible slap between speakers.">
           <span class="klabel">Offset</span>
           <input type="range" id="k-stereo" min="0" max="200" step="1" value="10">
           <span class="kval" id="kv-stereo">10</span>
         </div>
         <div class="field-err"></div>
       </div>
-      <div class="modbox" id="modbox-l4">
+      <div class="modbox" id="modbox-l4" data-explain="l4-mod">
         <div class="flabel">mod: offset</div>
         <label class="check-row"><input type="checkbox" id="mod-l4-en"> enable</label>
         <div class="mod-row"><span class="klabel">Min (ms)</span><input type="number" id="mod-l4-min" min="0" max="200" step="1" value="0"></div>
@@ -214,15 +237,15 @@
 
       <div class="field track" id="field-track">
         <div class="flabel">track sequencer</div>
-        <div class="knob-row">
+        <div class="knob-row" data-explain="track-mode">
           <label class="check-row"><input type="checkbox" id="trackMode"> Track mode</label>
         </div>
-        <div class="knob-row" title="Length of one cell/step. Rounded to the nearest row (5ms) so the waterfall tiles cleanly. Drag to audition, type for an exact value.">
+        <div class="knob-row" data-explain="track-cell" title="Length of one cell/step. Rounded to the nearest row (5ms) so the waterfall tiles cleanly. Drag to audition, type for an exact value.">
           <span class="klabel">Cell (ms)</span>
           <input type="range" id="cellMsSlider" min="50" max="3000" step="5" value="900">
           <input type="number" id="cellMs" min="50" max="5000" step="5" value="900">
         </div>
-        <div class="knob-row" title="Space-separated steps. A number transposes that repeat by semitones (0 = as-is). A dot . is a rest.">
+        <div class="knob-row" data-explain="track-sequence" title="Space-separated steps. A number transposes that repeat by semitones (0 = as-is). A dot . is a rest.">
           <span class="klabel">Sequence</span>
           <input type="text" id="sequenceText" spellcheck="false" value="0 0 0 +5 0 0 -7 0">
         </div>
@@ -255,6 +278,11 @@
           </select>
         </div>
       </div>
+    </div>
+
+    <div class="explainer dev-only" id="explainer">
+      <div class="explain-title" id="explainTitle">Explainer</div>
+      <div class="explain-body" id="explainBody">Hover a knob, checkbox, or modulator box to see the exact DSP mechanism — and the current values driving it — for that piece of the chain.</div>
     </div>
   </div>
 
@@ -405,6 +433,7 @@ onmessage = function(e){
     return;
   }
   var codes = e.data.codes, C = e.data.consts;
+  var l3Bypass = !!e.data.l3Bypass;
   var TOTAL = C.TOTAL_SAMPLES, ROW = C.ROW_SAMPLES;
   var phase = 'l1';
   try{
@@ -474,7 +503,8 @@ onmessage = function(e){
       // produce there, i.e. contBuf2[j]. The glitch half already reads
       // through `% buf.length`, so it naturally wraps into valid existing
       // indices regardless of ci's size and needs no special-casing.
-      contBuf3[j] = ((ci % C.CYCLE_LEN) < (C.CYCLE_LEN >> 1)) ? contBuf2[j] : (l3(buf2, ci) & 0xFF);
+      contBuf3[j] = l3Bypass ? contBuf2[j]
+        : (((ci % C.CYCLE_LEN) < (C.CYCLE_LEN >> 1)) ? contBuf2[j] : (l3(buf2, ci) & 0xFF));
     }
     var sumSq = 0;
     for(j=0;j<N;j++){ var d = contBuf3[j] - buf3[j]; sumSq += d*d; }
@@ -512,7 +542,8 @@ onmessage = function(e){
     timbre:3, pitch:1, feedback:5, cycle:72000, stride:7, stereo:10,
     mod2en:false, mod2min:1, mod2max:8, mod2freq:4000,
     mod3en:false, mod3min:1, mod3max:63, mod3freq:4000,
-    mod4en:false, mod4min:0, mod4max:30, mod4freq:4000
+    mod4en:false, mod4min:0, mod4max:30, mod4freq:4000,
+    l1off:false, l2off:false, l3off:false, l4off:false
   };
 
   function msToSamples(ms){ return Math.round(ms * CONSTS.SAMPLE_RATE / 1000); }
@@ -530,6 +561,11 @@ onmessage = function(e){
   // table computed once with no time axis, so a ms-scale LFO can't move
   // meaningfully across it (verified: at any Freq in the allowed range, the
   // value barely leaves Min across the whole table).
+  // Each layer's "disable" checkbox swaps its formula for the identity
+  // version of that stage — same render pipeline, same audio buffers, same
+  // visualization, just with that one stage's contribution removed. That's
+  // what makes disabling both audible AND visible for free: nothing about
+  // playback/waterfall/export needs to know a layer was bypassed.
   function buildCodes(k){
     var l2Feedback = k.mod2en ? ("triangleLFO(" + k.mod2min + "," + k.mod2max + "," + msToSamples(k.mod2freq) + ", G_POS)") : String(k.feedback);
     var l3Stride = k.mod3en ? ("triangleLFO(" + k.mod3min + "," + k.mod3max + "," + msToSamples(k.mod3freq) + ", G_POS)") : String(k.stride);
@@ -537,7 +573,10 @@ onmessage = function(e){
       ? ("triangleLFO(" + msToSamples(k.mod4min) + "," + msToSamples(k.mod4max) + "," + msToSamples(k.mod4freq) + ", G_POS)")
       : "STEREO_OFFSET";
     return {
-      l1: "i => (i ^ (i >> " + k.timbre + ")) & 0xFF",
+      // Disabled: the identity table T[i] = i (a plain ramp) — removes the
+      // XOR-fold entirely instead of just picking a "neutral" Timbre (there
+      // isn't one; timbre=0 folds every entry to 0, i.e. silence, not identity).
+      l1: k.l1off ? "i => i & 0xFF" : "i => (i ^ (i >> " + k.timbre + ")) & 0xFF",
       // Feedback only fires on a fixed 100ms wall clock (NOTE_LEN) instead of
       // every sample — a note rings at a stable pitch for ~100ms and only
       // jumps at the tick, which is what makes this read as tonal blips
@@ -548,17 +587,28 @@ onmessage = function(e){
       // since it's highly composite) lands on that same silent index every
       // wrap and freezes forever. The `|| 1` guards against inc collapsing
       // to 0 and stalling the phase.
-      l2: "(t, T, s) => (s.p = (s.p + s.inc) % PHASE_MOD, (t % NOTE_LEN) === 0 && (s.inc = ((s.inc + (T[(s.p >> 8) & 0xFF] >> " + l2Feedback + ")) % INC_MOD) || 1), T[(s.p >> 8) & 0xFF])",
+      // Disabled: the phase accumulator still runs (it's the only thing
+      // producing audio at all) but the feedback tick never fires, so s.inc
+      // stays frozen at Pitch's starting value — a constant tone with none
+      // of layer 2's self-modulation.
+      l2: k.l2off
+        ? "(t, T, s) => (s.p = (s.p + s.inc) % PHASE_MOD, T[(s.p >> 8) & 0xFF])"
+        : "(t, T, s) => (s.p = (s.p + s.inc) % PHASE_MOD, (t % NOTE_LEN) === 0 && (s.inc = ((s.inc + (T[(s.p >> 8) & 0xFF] >> " + l2Feedback + ")) % INC_MOD) || 1), T[(s.p >> 8) & 0xFF])",
       // First half of each CYCLE_LEN window passes layer 2 through untouched
       // (the tonal pattern reads clearly); second half applies the stride
       // scramble (glitch). This is the "cycling in and out" macro structure.
-      l3: "(buf, i) => (i % CYCLE_LEN) < (CYCLE_LEN >> 1) ? buf[i] : buf[(i * " + l3Stride + ") % buf.length]",
+      // Disabled: always the clean passthrough — never enters the glitched half.
+      l3: k.l3off
+        ? "(buf, i) => buf[i]"
+        : "(buf, i) => (i % CYCLE_LEN) < (CYCLE_LEN >> 1) ? buf[i] : buf[(i * " + l3Stride + ") % buf.length]",
       // Right channel = layer 3's line read STEREO_OFFSET samples ahead of
       // the left channel. A plain modulo-addressed read (no self-reference,
       // unlike the old residue-delay formula) — needs no "safe divisor"
       // constraint, since shifting a signal that already loops cleanly by a
       // constant offset can't introduce a new discontinuity.
-      l4: "(buf, i) => buf[(i + " + l4Offset + ") % buf.length]"
+      // Disabled: offset forced to 0 — right channel becomes an exact copy
+      // of layer 3's line, i.e. mono, without touching the Offset knob itself.
+      l4: k.l4off ? "(buf, i) => buf[i]" : "(buf, i) => buf[(i + " + l4Offset + ") % buf.length]"
     };
   }
   function buildConsts(k){
@@ -647,6 +697,8 @@ onmessage = function(e){
   ['field-l1','field-l2','field-l3','field-l4','field-track',
    'k-timbre','kv-timbre','k-pitch','kv-pitch','k-feedback','kv-feedback',
    'cycleMsSlider','cycleMs','k-stride','kv-stride','k-stereo','kv-stereo',
+   'off-l1','off-l2','off-l3','off-l4',
+   'modbox-l2','modbox-l3','modbox-l4',
    'mod-l2-en','mod-l2-min','mod-l2-max','mod-l2-freq',
    'mod-l3-en','mod-l3-min','mod-l3-max','mod-l3-freq',
    'mod-l4-en','mod-l4-min','mod-l4-max','mod-l4-freq',
@@ -655,7 +707,8 @@ onmessage = function(e){
    'viz','vizWrap','tooltip','renderBtn','playBtn','scrubber','wavBtn','pngBtn',
    'rawPng','ditherSize','swatches','seam','srcLink',
    'exportBtn','importBtn','presetModal','modalTitle','modalText',
-   'modalApply','modalCopy','modalClose','modalMsg'].forEach(function(id){
+   'modalApply','modalCopy','modalClose','modalMsg',
+   'explainer','explainTitle','explainBody'].forEach(function(id){
     els[id.replace(/-([a-z0-9])/g, function(_,c){return c.toUpperCase();})] = document.getElementById(id);
   });
 
@@ -688,7 +741,8 @@ onmessage = function(e){
       stereo: parseInt(els.kStereo.value, 10),
       mod2en: els.modL2En.checked, mod2min: parseInt(els.modL2Min.value,10), mod2max: parseInt(els.modL2Max.value,10), mod2freq: parseFloat(els.modL2Freq.value),
       mod3en: els.modL3En.checked, mod3min: parseInt(els.modL3Min.value,10), mod3max: parseInt(els.modL3Max.value,10), mod3freq: parseFloat(els.modL3Freq.value),
-      mod4en: els.modL4En.checked, mod4min: parseFloat(els.modL4Min.value), mod4max: parseFloat(els.modL4Max.value), mod4freq: parseFloat(els.modL4Freq.value)
+      mod4en: els.modL4En.checked, mod4min: parseFloat(els.modL4Min.value), mod4max: parseFloat(els.modL4Max.value), mod4freq: parseFloat(els.modL4Freq.value),
+      l1off: els.offL1.checked, l2off: els.offL2.checked, l3off: els.offL3.checked, l4off: els.offL4.checked
     };
   }
   function updateFormulaPreview(){
@@ -697,6 +751,7 @@ onmessage = function(e){
     els.fL2.textContent = codes.l2;
     els.fL3.textContent = codes.l3;
     els.fL4.textContent = codes.l4;
+    refreshExplain();
   }
   // Sliders update the live formula preview on every drag tick, but only
   // trigger a real render on release (native 'change' event) — dragging
@@ -729,6 +784,153 @@ onmessage = function(e){
       el.addEventListener('change', function(){ doRender(); });
     });
   });
+  // Disable checkboxes: swap that layer's formula for its identity/bypass
+  // version (see buildCodes) and re-render — the layer stays "in" the chain
+  // structurally, it just stops doing anything, so hearing/seeing the result
+  // with vs without is a direct A/B of what that one stage contributes. Its
+  // modbox is dimmed and inert while off since modulating a bypassed
+  // parameter would have no audible effect.
+  var LAYER_FIELDS = { 1:'fieldL1', 2:'fieldL2', 3:'fieldL3', 4:'fieldL4' };
+  var LAYER_MODBOXES = { 2:'modboxL2', 3:'modboxL3', 4:'modboxL4' };
+  function updateLayerOffVisual(n){
+    els[LAYER_FIELDS[n]].classList.toggle('layer-off', els['offL'+n].checked);
+    var mb = LAYER_MODBOXES[n];
+    if(mb) els[mb].classList.toggle('layer-off', els['offL'+n].checked);
+  }
+  [1,2,3,4].forEach(function(n){
+    els['offL'+n].addEventListener('change', function(){
+      updateLayerOffVisual(n);
+      updateFormulaPreview();
+      doRender();
+    });
+  });
+
+  // --- explainer panel ---
+  // Text is generated from the DOM controls at hover time (not a snapshot),
+  // so dragging a slider while its explanation is showing updates the
+  // numbers live via refreshExplain() below, same idea as updateFormulaPreview.
+  function liveModReading(layer, msValued){
+    var enEl = els['modL'+layer+'En'];
+    if(!enEl.checked) return null;
+    var min = parseFloat(els['modL'+layer+'Min'].value);
+    var max = parseFloat(els['modL'+layer+'Max'].value);
+    var freq = parseFloat(els['modL'+layer+'Freq'].value);
+    var minS = msValued ? msToSamples(min) : min;
+    var maxS = msValued ? msToSamples(max) : max;
+    var idx = (state.rendered && state.playing) ? currentSampleIndex() : 0;
+    var v = triangleLFOMain(minS, maxS, msToSamples(freq), idx);
+    return msValued ? Math.round(v*1000/CONSTS.SAMPLE_RATE) : v;
+  }
+
+  var EXPLAIN = {
+    'l1-timbre': function(){
+      return ['Layer 1 · Wavetable — Timbre',
+        'Builds a 256-entry table once: T[i] = (i XOR (i >> Timbre)) & 0xFF.\n\n' +
+        'Timbre = ' + els.kTimbre.value + '. Low (1) barely shifts the ramp — smooth, near-sawtooth. High (7) folds high and low bits together — jagged, aliased.\n\n' +
+        'No time axis here — layer 2 is what reads through this table to make sound.'];
+    },
+    'l1-off': function(){
+      var off = els.offL1.checked;
+      return ['Layer 1 · Disable', off
+        ? 'Disabled — using the identity table T[i] = i instead of the XOR-fold. Timbre (' + els.kTimbre.value + ') is set but not applied. Uncheck to restore the fold.'
+        : 'Unchecked — layer 1 uses its XOR-fold table (Timbre = ' + els.kTimbre.value + '). Check this to bypass the fold and hear/see a plain ramp table instead, isolating what Timbre changes.'];
+    },
+    'l2-pitch': function(){
+      return ['Layer 2 · Index (R) — Pitch',
+        'A phase accumulator: s.p = (s.p + s.inc) % ' + CONSTS.PHASE_MOD + '; each sample reads T[(s.p >> 8) & 0xFF].\n\n' +
+        'Pitch sets the starting increment, INIT_INC = ' + els.kPitch.value + '. Higher runs the phase through the table faster — a higher tone. Feedback (below) can then change s.inc over time.'];
+    },
+    'l2-feedback': function(){
+      return ['Layer 2 · Index (R) — Feedback',
+        'Every ' + CONSTS.NOTE_LEN + 'ms (a fixed wall clock, independent of the phase\'s own wrap), the increment jumps:\ns.inc = (s.inc + (T[phase] >> Feedback)) % ' + CONSTS.INC_MOD + '.\n\n' +
+        'Feedback = ' + els.kFeedback.value + '. Low (1) shifts the table read very little away, so most of its value gets added each tick — chaotic pitch jumps. High (8) shifts nearly all of it away — tiny, smooth increments, a gentle vibrato instead of chaos.'];
+    },
+    'l2-off': function(){
+      var off = els.offL2.checked;
+      return ['Layer 2 · Disable', off
+        ? 'Disabled — the 100ms feedback tick never fires, so s.inc stays frozen at Pitch\'s starting value (' + els.kPitch.value + ') forever. You\'re hearing a single constant tone with none of Feedback\'s (' + els.kFeedback.value + ', set but not applied) self-modulation.'
+        : 'Unchecked — feedback updates s.inc every ' + CONSTS.NOTE_LEN + 'ms as normal. Check this to freeze the increment at Pitch\'s value and isolate what Feedback (' + els.kFeedback.value + ') is doing.'];
+    },
+    'l2-mod': function(){
+      var live = liveModReading(2, false);
+      var en = els.modL2En.checked;
+      return ['Layer 2 · Modulator — Feedback', en
+        ? ('Feedback is swept by a triangle LFO between ' + els.modL2Min.value + ' and ' + els.modL2Max.value + ' every ' + els.modL2Freq.value + 'ms, instead of sitting fixed at the Feedback knob.' + (live!==null ? (' Right now it reads ≈' + live + '.') : ''))
+        : 'Not modulated — check "enable" to sweep Feedback between Min and Max on a triangle cycle, instead of sitting fixed at the Feedback knob\'s value.'];
+    },
+    'l3-cycle': function(){
+      var ms = parseFloat(els.cycleMs.value);
+      return ['Layer 3 · Transform (G / LEFT ch) — Cycle',
+        'First half of every Cycle window passes the signal straight through: buf[i]. Second half re-reads it at a stride (see Stride): buf[(i*Stride) % length] — the glitch.\n\n' +
+        'Cycle = ' + ms + 'ms, so the sound alternates clean/glitched roughly every ' + Math.round(ms/2) + 'ms.'];
+    },
+    'l3-stride': function(){
+      return ['Layer 3 · Transform (G / LEFT ch) — Stride',
+        'During the glitched half, each sample is re-read from buf[(i*Stride) % length].\n\n' +
+        'Stride = ' + els.kStride.value + '. Low (1) barely perturbs the clean signal. High (near 63) scrambles it into dense, distant re-reads — heavier digital noise.'];
+    },
+    'l3-off': function(){
+      var off = els.offL3.checked;
+      return ['Layer 3 · Disable', off
+        ? 'Disabled — layer 3 always passes buf[i] straight through, so it never enters the glitched half of Cycle (' + els.cycleMs.value + 'ms) / Stride (' + els.kStride.value + '). You\'re hearing layer 2\'s tonal signal with no breathing/glitch structure at all.'
+        : 'Unchecked — layer 3 alternates clean/glitched as normal. Check this to bypass the transform entirely and isolate what Cycle/Stride are adding.'];
+    },
+    'l3-mod': function(){
+      var live = liveModReading(3, false);
+      var en = els.modL3En.checked;
+      return ['Layer 3 · Modulator — Stride', en
+        ? ('Stride is swept by a triangle LFO between ' + els.modL3Min.value + ' and ' + els.modL3Max.value + ' every ' + els.modL3Freq.value + 'ms, instead of sitting fixed at the Stride knob.' + (live!==null ? (' Right now it reads ≈' + live + '.') : ''))
+        : 'Not modulated — check "enable" to sweep Stride between Min and Max on a triangle cycle, instead of sitting fixed at the Stride knob\'s value.'];
+    },
+    'l4-offset': function(){
+      var msV = parseInt(els.kStereo.value, 10);
+      return ['Layer 4 · Stereo (B / RIGHT ch) — Offset',
+        'Reads layer 3\'s own line again, shifted by Offset ms: buf[(i+offsetSamples) % length].\n\n' +
+        'Offset = ' + msV + 'ms ≈ ' + msToSamples(msV) + ' samples. At 0 both channels are identical (mono). Small offsets widen the stereo image; larger ones become an audible slap-delay between speakers.'];
+    },
+    'l4-off': function(){
+      var off = els.offL4.checked;
+      return ['Layer 4 · Disable', off
+        ? 'Disabled — the offset is forced to 0, so the right channel becomes an exact copy of layer 3\'s left-channel signal. You\'re hearing pure mono, same as setting Offset to 0 but without touching its own value (currently ' + els.kStereo.value + 'ms).'
+        : 'Unchecked — layer 4 reads layer 3\'s line offset by Offset (' + els.kStereo.value + 'ms) as normal. Check this to force mono and isolate what the stereo offset is adding.'];
+    },
+    'l4-mod': function(){
+      var live = liveModReading(4, true);
+      var en = els.modL4En.checked;
+      return ['Layer 4 · Modulator — Offset', en
+        ? ('Offset is swept by a triangle LFO between ' + els.modL4Min.value + 'ms and ' + els.modL4Max.value + 'ms every ' + els.modL4Freq.value + 'ms, instead of sitting fixed at the Offset knob.' + (live!==null ? (' Right now it reads ≈' + live + 'ms.') : ''))
+        : 'Not modulated — check "enable" to sweep Offset between Min and Max on a triangle cycle, instead of sitting fixed at the Offset knob\'s value.'];
+    },
+    'track-mode': function(){
+      var on = els.trackMode.checked;
+      return ['Track Sequencer — Mode', on
+        ? 'Track mode is ON. Instead of one continuous 90s evolution, the Sequence below is rendered as discrete cells, each retriggering layers 1-4 from a fresh phase state.'
+        : 'Track mode is OFF — rendering the continuous 90s piece. Check this to switch to a rhythmic cell/sequence instead.'];
+    },
+    'track-cell': function(){
+      return ['Track Sequencer — Cell (ms)',
+        'Cell = ' + els.cellMs.value + 'ms, the length of one sequence step. Rounded to the nearest waterfall row (5ms) so cells tile cleanly. Every cell retriggers layers 1-4 from an identical starting phase, so same-transposition repeats are byte-identical.'];
+    },
+    'track-sequence': function(){
+      return ['Track Sequencer — Sequence',
+        'Sequence = "' + els.sequenceText.value + '". Space-separated steps, one Cell-length each. An integer transposes that cell\'s pitch by semitones (0 = as recorded); "." is a full rest.'];
+    }
+  };
+
+  var currentExplainKey = null;
+  function showExplain(key){
+    var fn = EXPLAIN[key];
+    if(!fn) return;
+    currentExplainKey = key;
+    var pair = fn();
+    els.explainTitle.textContent = pair[0];
+    els.explainBody.textContent = pair[1];
+  }
+  function refreshExplain(){ if(currentExplainKey) showExplain(currentExplainKey); }
+  document.querySelectorAll('[data-explain]').forEach(function(el){
+    el.addEventListener('mouseenter', function(){ showExplain(el.getAttribute('data-explain')); });
+  });
+
   els.resetBtn.addEventListener('click', function(){ applyKnobs(KNOB_DEFAULTS); });
   updateFormulaPreview();
 
@@ -865,7 +1067,7 @@ onmessage = function(e){
         if(renderPending){ renderPending = false; doRender(); }
       }
     };
-    w.postMessage(trackPayload || {codes: codes, consts: consts});
+    w.postMessage(trackPayload || {codes: codes, consts: consts, l3Bypass: knobs.l3off});
   }
   els.renderBtn.addEventListener('click', doRender);
   els.trackMode.addEventListener('change', doRender);
@@ -890,6 +1092,9 @@ onmessage = function(e){
     els.modL2En.checked = kk.mod2en; els.modL2Min.value = kk.mod2min; els.modL2Max.value = kk.mod2max; els.modL2Freq.value = kk.mod2freq;
     els.modL3En.checked = kk.mod3en; els.modL3Min.value = kk.mod3min; els.modL3Max.value = kk.mod3max; els.modL3Freq.value = kk.mod3freq;
     els.modL4En.checked = kk.mod4en; els.modL4Min.value = kk.mod4min; els.modL4Max.value = kk.mod4max; els.modL4Freq.value = kk.mod4freq;
+
+    els.offL1.checked = kk.l1off; els.offL2.checked = kk.l2off; els.offL3.checked = kk.l3off; els.offL4.checked = kk.l4off;
+    [1,2,3,4].forEach(updateLayerOffVisual);
 
     updateFormulaPreview();
     doRender();
@@ -1120,6 +1325,7 @@ onmessage = function(e){
     var s = currentSampleIndex();
     if(!state.scrubbing) els.scrubber.value = String(s);
     updateModIndicators(s);
+    refreshExplain();
     var rowIdx = Math.floor(s / CONSTS.ROW_SAMPLES) % state.totalRows;
     if(rowIdx !== state.lastRow){
       var steps = rowIdx - state.lastRow;
@@ -1139,6 +1345,7 @@ onmessage = function(e){
     state.offsetSamples = s;
     if(state.playing) startPlayback(s);
     updateModIndicators(s);
+    refreshExplain();
     var rowIdx = Math.floor(s / CONSTS.ROW_SAMPLES) % state.totalRows;
     state.lastRow = (rowIdx - 1 + state.totalRows) % state.totalRows;
     appendRow(rowIdx);

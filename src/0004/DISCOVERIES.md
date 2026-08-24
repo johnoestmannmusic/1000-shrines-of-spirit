@@ -23,9 +23,7 @@ a nice line in a design doc.
 
 ## What's creatively settled (don't re-litigate this in a restart)
 
-- **The glitch aesthetic and the resulting sound are right.** The bytebeat /
-  integer-generator approach, the high-key-mostly-empty visual palette, the
-  general "digital glitch" character — this identity is the point, and a
+- **The glitch aesthetic and the resulting sound are right.** The per-sample integer-generator approach, the general "digital glitch" character — this identity is the point, and a
   restart should protect it rather than treat it as one option among several.
 - **Stereo adds a lot.** Layer 4 reading layer 3's own line back at a small
   sample offset (instead of the original residue-echo idea, which turned out
@@ -36,8 +34,8 @@ a nice line in a design doc.
   transposition, is what turned this from "an interesting generator" into
   "something I'd actually compose with." If a restart only gets to rebuild
   one piece of behavior early, this is the one.
-- **Visuals driven directly by the audio's own bytes, laid out with the
-  waterfall canvas beside the layer controls, is a strong UI pattern.** The
+- **Visuals driven directly by the audio's own bytes, laid out with the 240x240px
+  canvas beside the layer controls, is a strong UI pattern.** The
   specific layout — canvas on the left, a column of per-layer control boxes
   on the right, colour-coded to match — read clearly. Worth reusing the
   *shape* of that layout even if the specific knobs in each box change.
@@ -57,9 +55,7 @@ a nice line in a design doc.
   sequencer, stereo, per-layer LFO modulators — and the pace outran the
   ability to actually absorb what each piece was doing before the next one
   landed. None of the individual features were the problem; the batching and
-  speed were. A restart should land one understandable piece at a time and
-  check in before adding the next, even where the tooling would happily allow
-  more.
+  speed were. By building in a way that the chain of layers can be disabled to experience the exact effects of one layer at a time is a great way for the user to understand the construction.
 
 ---
 
