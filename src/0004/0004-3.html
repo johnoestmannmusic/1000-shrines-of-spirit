@@ -22,12 +22,18 @@
   .panels{display:grid;grid-template-columns:240px 1fr 260px;gap:20px;}
 
   .viz-wrap{width:240px;}
-  #viz{width:240px;height:240px;background:#08080a;border:1px solid var(--edge);display:block;}
+  #viz{width:240px;height:240px;background:#08080a;border:1px solid var(--edge);display:block;
+    image-rendering:pixelated;image-rendering:crisp-edges;}
   .viz-caption{font-size:9px;color:var(--dim);margin-top:6px;line-height:1.5;}
 
   .fields{display:flex;flex-direction:column;gap:8px;}
   .field{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:6px 8px;
-    display:flex;flex-direction:column;gap:4px;}
+    display:flex;flex-direction:column;gap:4px;
+    box-shadow:0 0 0 0 var(--flash-color,transparent);
+    transition:box-shadow .4s ease-out, background-color .4s ease-out;}
+  .field.firing{box-shadow:0 0 14px 2px var(--flash-color,#fff);
+    background-color:color-mix(in srgb, var(--flash-color,#fff) 14%, var(--panel));
+    transition:none;}
   .flabel{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);}
   .legend-row{font-size:10px;line-height:1.5;color:var(--ink);padding:2px 0;cursor:default;}
   .legend-row b{font-weight:600;}
@@ -63,7 +69,7 @@
   <div class="panels">
     <div class="viz-wrap">
       <canvas id="viz" width="240" height="240"></canvas>
-      <div class="viz-caption">Live — the amber glow pulses with the Tone layer's gate and two envelope circles; each ring is one Rain layer completing a flicker cycle, positioned by that layer's pan.</div>
+      <div class="viz-caption">Live — 32×32 pixel grid, 4×4 Bayer dithered, blue→fuchsia ground. The magenta ring pulses outward from center with the Tone layer's gate and two envelope circles; each coloured ring is one Rain layer completing a flicker cycle, one evenly-spaced column per layer.</div>
     </div>
 
     <div class="fields" id="legend"></div>
@@ -75,7 +81,7 @@
   </div>
 
   <div class="controls">
-    <button id="enterBtn" type="button">▶ enter</button>
+    <button id="playBtn" type="button">▶ play</button>
   </div>
 
   <footer>
@@ -130,21 +136,21 @@
   // --- legend (read-only — scaffolding of the old knob rows, no inputs) ---
   var legend = document.getElementById('legend');
   legend.innerHTML =
-    '<div class="field" style="border-color:'+'#c9973a'+'">'+
+    '<div class="field" id="field-l1" style="border-color:#c9973a;--flash-color:#c9973a;">'+
       '<div class="flabel">1 · tone</div>'+
       '<div class="legend-row" data-explain="l1-tone">Note <b>46</b> (≈'+midiToHz(46).toFixed(1)+'Hz) · vibrato <b>0.05Hz</b> ±<b>2Hz</b></div>'+
       '<div class="legend-row" data-explain="l1-pulse">Pulse gate <b>4Hz</b> · level ×<b>0.27</b> · pan <b>-0.3</b></div>'+
       '<div class="legend-row" data-explain="l1-env">Env.circle <b>25/35/25/15</b>s × Env.circle <b>15/200/25/30</b>s</div>'+
     '</div>'+
     RAIN_DEFS.map(function(d){
-      return '<div class="field" style="border-color:'+d.color+'">'+
+      return '<div class="field" id="field-rain-'+d.n+'" style="border-color:'+d.color+';--flash-color:'+d.color+';">'+
         '<div class="flabel">'+d.n+' · rain</div>'+
         '<div class="legend-row" data-explain="rain-'+d.n+'">Note <b>'+d.note+'</b> (≈'+midiToHz(d.note).toFixed(1)+'Hz) · pan <b>'+d.pan+'</b></div>'+
         '<div class="legend-row" data-explain="rain-'+d.n+'-flicker">Flicker: saw 8±7Hz swept by <b>'+d.sawRate+'Hz</b> sine</div>'+
         '<div class="legend-row" data-explain="rain-'+d.n+'-level">Level LFO: <b>'+d.lvl.rate+'Hz</b>, '+d.lvl.add+'±'+d.lvl.mul+'</div>'+
       '</div>';
     }).join('') +
-    '<div class="field" style="border-color:'+'#8a877c'+'">'+
+    '<div class="field" id="field-rain-env" style="border-color:#8a877c;--flash-color:#8a877c;">'+
       '<div class="flabel">rain bus</div>'+
       '<div class="legend-row" data-explain="rain-env">Shared Env.circle <b>30/15/200/25</b>s over all 5 rain layers, summed</div>'+
     '</div>';
@@ -221,11 +227,12 @@
     el.addEventListener('mouseenter', function(){ showExplain(el.getAttribute('data-explain')); });
   });
 
-  // --- clock: performance.now()-based, independent of AudioContext state, so
-  // the visual (and Explainer's live values) keep running even before audio
-  // is entered or while it's muted. ---
-  var t0 = performance.now();
-  function nowSec(){ return (performance.now()-t0)/1000; }
+  // --- clock: "piece time," not wall-clock time — only advances while
+  // actually playing, so Pause is a real pause (everything, audio and
+  // visual alike, freezes exactly where it was) rather than a mute that
+  // leaves the composition's own clock running silently in the background.
+  var accumSec = 0, playStartedAt = null;
+  function nowSec(){ return playStartedAt!==null ? accumSec + (performance.now()-playStartedAt)/1000 : accumSec; }
 
   // --- live Web Audio graph (built lazily on first Enter click) ---
   var ac = null, master = null, rainEnvGain = null, l1EnvAGain = null, l1EnvBGain = null;
@@ -298,85 +305,243 @@
     startables.forEach(function(n){ n.start(); });
   }
 
-  var enterBtn = document.getElementById('enterBtn');
-  var entered = false, muted = false;
-  enterBtn.addEventListener('click', function(){
-    if(!entered){
+  // Playing = the graph exists AND the AudioContext is actually running —
+  // Pause suspends it outright (stops audio processing, not just gain-to-0)
+  // rather than muting, since a suspended context is what "paused" should
+  // mean, and it's also the single source of truth the visual gates on: no
+  // spawning splashes/ripples for a synth that isn't actually audible.
+  var playBtn = document.getElementById('playBtn');
+  function isPlaying(){ return !!ac && ac.state === 'running'; }
+  playBtn.addEventListener('click', function(){
+    if(!ac){
       buildGraph();
-      entered = true;
-      enterBtn.textContent = '❚❚ mute';
+      playStartedAt = performance.now();
+      playBtn.textContent = '❚❚ pause';
+    } else if(ac.state === 'running'){
+      ac.suspend();
+      accumSec += (performance.now()-playStartedAt)/1000;
+      playStartedAt = null;
+      playBtn.textContent = '▶ play';
     } else {
-      muted = !muted;
-      master.gain.setTargetAtTime(muted ? 0 : 1, ac.currentTime, 0.05);
-      enterBtn.textContent = muted ? '▶ unmute' : '❚❚ mute';
+      ac.resume();
+      playStartedAt = performance.now();
+      playBtn.textContent = '❚❚ pause';
     }
   });
 
-  // --- canvas: splashes + tone glow ---
+  // --- canvas: 32x32 pixel grid, blue→fuchsia ground, dithered ---
+  // Everything is composited at native 32x32 resolution into a float RGB
+  // buffer, ordered-dithered with a 4x4 Bayer matrix down to a handful of
+  // levels per channel (this is what removes gradient banding at this low a
+  // resolution while keeping the blocky, retro-pixel read), then blitted up
+  // to the visible 240x240 canvas with smoothing off — same low-res-buffer +
+  // nearest-neighbour-scale technique the original 0004 waterfall used.
+  var GRID = 32, CELL = 240/GRID;
   var vctx = document.getElementById('viz').getContext('2d');
-  var splashes = [];
-  var l1PulseSmoothed = 0;
-  function spawnSplash(def, levelNow){
-    splashes.push({
-      x: 120 + def.pan*100 + (Math.random()*16-8),
-      y: 26 + Math.random()*188,
-      age: 0, maxAge: 0.55 + Math.random()*0.3,
-      color: def.color, size: 9 + levelNow*70
-    });
+  var gridCanvas = document.createElement('canvas'); gridCanvas.width = GRID; gridCanvas.height = GRID;
+  var gctx = gridCanvas.getContext('2d');
+  var gridImg = gctx.createImageData(GRID, GRID);
+
+  function bayer4(){
+    var m = [[0,2],[3,1]], n = 2;
+    while(n < 4){
+      var nm = []; for(var y=0;y<n;y++){ nm.push([]); nm.push([]); }
+      for(y=0;y<n;y++){ for(var x=0;x<n;x++){
+        var v = m[y][x]*4;
+        nm[y][x]=v; nm[y][x+n]=v+2; nm[y+n][x]=v+3; nm[y+n][x+n]=v+1;
+      }}
+      m = nm; n *= 2;
+    }
+    var flat = new Float32Array(16);
+    for(y=0;y<4;y++) for(var x=0;x<4;x++) flat[y*4+x] = (m[y][x]+0.5)/16;
+    return flat;
   }
-  function drawFrame(dt){
-    vctx.fillStyle = 'rgba(8,8,10,0.16)';
-    vctx.fillRect(0,0,240,240);
+  var BAYER4 = bayer4();
+  var DITHER_LEVELS = 6;
+  function ditherChannel(v, x, y){
+    v = v<0?0:(v>255?255:v);
+    var step = 255/(DITHER_LEVELS-1);
+    var t = BAYER4[(y&3)*4 + (x&3)];
+    var idx = v/step;
+    var base = Math.floor(idx);
+    var q = ((idx-base) > t) ? base+1 : base;
+    if(q > DITHER_LEVELS-1) q = DITHER_LEVELS-1;
+    return Math.round(q*step);
+  }
 
-    var pulseRaw = Math.sin(2*Math.PI*L1.pulseHz*nowSec()) >= 0 ? 1 : 0;
-    l1PulseSmoothed += (pulseRaw - l1PulseSmoothed) * Math.min(1, dt*8);
-    var envA = envCircle(L1.envA.levels, L1.envA.times, L1.envA.curve, nowSec());
-    var envB = envCircle(L1.envB.levels, L1.envB.times, L1.envB.curve, nowSec());
-    var glowB = envA*envB*(0.35+0.65*l1PulseSmoothed);
-    var grad = vctx.createRadialGradient(120,120,0,120,120,150);
-    grad.addColorStop(0, 'rgba(201,151,58,'+(0.55*glowB).toFixed(3)+')');
-    grad.addColorStop(1, 'rgba(201,151,58,0)');
-    vctx.fillStyle = grad; vctx.fillRect(0,0,240,240);
+  function hexToRgb(hex){ var n = parseInt(hex.slice(1),16); return [(n>>16)&255, (n>>8)&255, n&255]; }
+  RAIN_DEFS.forEach(function(d){ d.rgb = hexToRgb(d.color); });
 
-    for(var i=splashes.length-1;i>=0;i--){
-      var s = splashes[i]; s.age += dt;
-      if(s.age >= s.maxAge){ splashes.splice(i,1); continue; }
-      var t = s.age/s.maxAge, r = t*s.size;
-      vctx.strokeStyle = s.color; vctx.globalAlpha = (1-t)*0.85; vctx.lineWidth = 1.4;
-      vctx.beginPath(); vctx.arc(s.x, s.y, r, 0, 2*Math.PI); vctx.stroke();
-      vctx.globalAlpha = 1;
+  var BLUE = [40,80,220], FUCHSIA = [214,48,196];
+  var bgBuf = new Float32Array(GRID*GRID*3);
+  (function initBackground(){
+    for(var y=0;y<GRID;y++){
+      for(var x=0;x<GRID;x++){
+        var t = (x+y)/(2*(GRID-1));
+        var idx = (y*GRID+x)*3;
+        bgBuf[idx]   = BLUE[0] + (FUCHSIA[0]-BLUE[0])*t;
+        bgBuf[idx+1] = BLUE[1] + (FUCHSIA[1]-BLUE[1])*t;
+        bgBuf[idx+2] = BLUE[2] + (FUCHSIA[2]-BLUE[2])*t;
+      }
+    }
+  })();
+  var gridBuf = new Float32Array(GRID*GRID*3);
+
+  // Additive ring stamp — only touches cells inside the ring's own bounding
+  // box, so drawing dozens of concurrent splashes stays cheap. cx/cy/radius
+  // are all in grid units (0..31), not pixels.
+  function addRing(cx, cy, radius, ringWidth, color, intensity){
+    if(intensity <= 0) return;
+    var rOuter = radius + ringWidth;
+    var x0 = Math.max(0, Math.floor(cx-rOuter)), x1 = Math.min(GRID-1, Math.ceil(cx+rOuter));
+    var y0 = Math.max(0, Math.floor(cy-rOuter)), y1 = Math.min(GRID-1, Math.ceil(cy+rOuter));
+    for(var y=y0;y<=y1;y++){
+      for(var x=x0;x<=x1;x++){
+        var dx=x-cx, dy=y-cy, d=Math.sqrt(dx*dx+dy*dy);
+        var falloff = 1 - Math.abs(d-radius)/ringWidth;
+        if(falloff<=0) continue;
+        var amt = falloff*intensity;
+        var idx = (y*GRID+x)*3;
+        gridBuf[idx]   += color[0]*amt;
+        gridBuf[idx+1] += color[1]*amt;
+        gridBuf[idx+2] += color[2]*amt;
+      }
     }
   }
 
+  var MAGENTA = [255,60,220];
+  var splashes = [];   // rain drops: {gx, gy, age, maxAge, color, maxR}
+  var toneRipples = []; // tone pulse: {age, maxAge, peak}
+  // The audible flicker this mirrors can hit 15Hz — spawning a visible ring
+  // that often turns the picture into an overlapping solid blob rather than
+  // readable drops, so the VISUAL trigger rate is capped independently of
+  // the real (audio-linked) one via a short per-layer cooldown.
+  var lastSpawnAt = RAIN_DEFS.map(function(){ return -1; });
+  var SPAWN_COOLDOWN = 0.16;
+
+  // One flash per firing instrument, on its own legend box — instant snap in
+  // (transition:none while .firing is applied), then a plain CSS transition
+  // fades it back out once the class is removed a beat later.
+  function flashField(id){
+    var el = document.getElementById(id);
+    if(!el) return;
+    el.classList.remove('firing');
+    void el.offsetWidth; // restart the flash if it's still fading from the last one
+    el.classList.add('firing');
+    clearTimeout(el._flashTimer);
+    el._flashTimer = setTimeout(function(){ el.classList.remove('firing'); }, 90);
+  }
+
+  // Evenly spaced across the grid by layer index (one column per rain
+  // layer), pan only nudges it slightly — a direct fix for the earlier
+  // version, which placed drops by raw pan and ended up clustered since
+  // rune_b's actual pan values (-0.1..0.6) aren't evenly spread themselves.
+  function spawnSplash(def, idx, levelNow){
+    var baseGX = (idx+0.5) * (GRID/RAIN_DEFS.length);
+    splashes.push({
+      gx: baseGX + def.pan*3 + (Math.random()*3-1.5),
+      gy: 2 + Math.random()*(GRID-4),
+      age: 0, maxAge: 0.55 + Math.random()*0.3,
+      color: def.rgb, maxR: 1.5 + levelNow*10
+    });
+    flashField('field-rain-'+def.n);
+  }
+  function spawnToneRipple(peak){
+    toneRipples.push({ age:0, maxAge: 1.1, peak: peak });
+    flashField('field-l1');
+  }
+
+  function drawFrame(){
+    gridBuf.set(bgBuf);
+
+    for(var i=toneRipples.length-1;i>=0;i--){
+      var r = toneRipples[i];
+      if(r.age >= r.maxAge){ toneRipples.splice(i,1); continue; }
+      var t = r.age/r.maxAge;
+      addRing(GRID/2, GRID/2, t*(GRID*0.62), 1.6, MAGENTA, r.peak*(1-t)*1.4);
+    }
+    for(i=splashes.length-1;i>=0;i--){
+      var s = splashes[i];
+      if(s.age >= s.maxAge){ splashes.splice(i,1); continue; }
+      var st = s.age/s.maxAge;
+      addRing(s.gx, s.gy, st*s.maxR, 1.0, s.color, (1-st)*1.3);
+    }
+
+    var data = gridImg.data;
+    for(var y=0;y<GRID;y++){
+      for(var x=0;x<GRID;x++){
+        var idx = (y*GRID+x)*3, o = (y*GRID+x)*4;
+        data[o]   = ditherChannel(gridBuf[idx],   x, y);
+        data[o+1] = ditherChannel(gridBuf[idx+1], x, y);
+        data[o+2] = ditherChannel(gridBuf[idx+2], x, y);
+        data[o+3] = 255;
+      }
+    }
+    gctx.putImageData(gridImg, 0, 0);
+    vctx.imageSmoothingEnabled = false;
+    vctx.clearRect(0,0,240,240);
+    vctx.drawImage(gridCanvas, 0, 0, 240, 240);
+  }
+
+  // A layer only gets to spawn a visual if it's actually contributing
+  // meaningfully to the mix right now — judged relative to that layer's OWN
+  // max possible level (not a shared absolute number, since Tone and each
+  // Rain layer have very different natural ranges), not merely "nonzero."
+  var AUDIBLE_FRACTION = 0.15;
+  var L1_MAX_AMP = L1.mul; // envA/envB both max out at 1
+  RAIN_DEFS.forEach(function(d){ d.maxAmp = 0.1*(d.lvl.add + d.lvl.mul); }); // rainEnv maxes out at 1
+
   var lastFrame = null;
+  var l1PulsePhase = 0;
   function rafLoop(now){
     var tSec = now/1000;
     if(lastFrame===null) lastFrame = tSec;
-    var dt = Math.min(0.1, tSec-lastFrame); lastFrame = tSec;
+    var rafDt = Math.min(0.1, tSec-lastFrame); lastFrame = tSec;
+    // dt for anything gated on playback — 0 while paused, so phases, ring
+    // ages, and spawn timers all freeze in place rather than drifting.
+    var dt = isPlaying() ? rafDt : 0;
 
-    if(ac && !muted){
-      l1EnvAGain.gain.value = envCircle(L1.envA.levels, L1.envA.times, L1.envA.curve, nowSec());
-      l1EnvBGain.gain.value = envCircle(L1.envB.levels, L1.envB.times, L1.envB.curve, nowSec());
-      rainEnvGain.gain.value = envCircle(RAIN_ENV.levels, RAIN_ENV.times, RAIN_ENV.curve, nowSec());
-    }
-    RAIN_DEFS.forEach(function(def, idx){
-      var lvl = sineLFO(def.lvl.rate, def.lvl.phase, def.lvl.mul, def.lvl.add, nowSec());
-      if(ac && !muted && rainLayers[idx]) rainLayers[idx].levelGain.gain.value = lvl;
-      var freq = 8 + 7*Math.sin(2*Math.PI*def.sawRate*nowSec());
-      if(rainLayers[idx]){
-        rainLayers[idx].sawPhase += freq*dt;
-        if(rainLayers[idx].sawPhase >= 1){
-          rainLayers[idx].sawPhase -= Math.floor(rainLayers[idx].sawPhase);
-          spawnSplash(def, lvl);
-        }
-      } else if(Math.random() < freq*dt){
-        // before Enter is clicked there's no audio graph yet, but the visual
-        // still runs — approximate the same trigger rate probabilistically.
-        spawnSplash(def, lvl);
+    var envA = envCircle(L1.envA.levels, L1.envA.times, L1.envA.curve, nowSec());
+    var envB = envCircle(L1.envB.levels, L1.envB.times, L1.envB.curve, nowSec());
+    var rEnv = envCircle(RAIN_ENV.levels, RAIN_ENV.times, RAIN_ENV.curve, nowSec());
+    if(isPlaying()){
+      l1EnvAGain.gain.value = envA; l1EnvBGain.gain.value = envB; rainEnvGain.gain.value = rEnv;
+
+      l1PulsePhase += L1.pulseHz*dt;
+      if(l1PulsePhase >= 1){
+        l1PulsePhase -= Math.floor(l1PulsePhase);
+        var toneAmp = L1.mul*envA*envB;
+        if(toneAmp > L1_MAX_AMP*AUDIBLE_FRACTION) spawnToneRipple(envA*envB);
       }
-    });
 
-    drawFrame(dt);
+      RAIN_DEFS.forEach(function(def, idx){
+        var lvl = sineLFO(def.lvl.rate, def.lvl.phase, def.lvl.mul, def.lvl.add, nowSec());
+        if(rainLayers[idx]) rainLayers[idx].levelGain.gain.value = lvl;
+        var freq = 8 + 7*Math.sin(2*Math.PI*def.sawRate*nowSec());
+        var wrapped = false;
+        if(rainLayers[idx]){
+          rainLayers[idx].sawPhase += freq*dt;
+          if(rainLayers[idx].sawPhase >= 1){
+            rainLayers[idx].sawPhase -= Math.floor(rainLayers[idx].sawPhase);
+            wrapped = true;
+          }
+        }
+        var rainAmp = 0.1*lvl*rEnv;
+        if(wrapped && rainAmp > def.maxAmp*AUDIBLE_FRACTION && (tSec - lastSpawnAt[idx]) >= SPAWN_COOLDOWN){
+          lastSpawnAt[idx] = tSec;
+          spawnSplash(def, idx, lvl);
+        }
+      });
+    }
+
+    // Ageing/fading an already-spawned ripple or splash is NOT gated on
+    // isPlaying() — only spawning new ones is. So pausing mid-piece lets
+    // whatever's already in flight finish resolving on its own, using real
+    // (wall-clock) rafDt rather than the paused-aware dt above.
+    toneRipples.forEach(function(r){ r.age += rafDt; });
+    splashes.forEach(function(s){ s.age += rafDt; });
+
+    drawFrame();
     if(currentExplainKey) showExplain(currentExplainKey);
     requestAnimationFrame(rafLoop);
   }
