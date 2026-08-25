@@ -1,0 +1,34 @@
+{
+  "identifier": "desktop-capability",
+  "platforms": [
+    "macOS",
+    "windows",
+    "linux"
+  ],
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "autostart:default",
+    "fs:default",
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        {
+          "path": "$HOME"
+        },
+        {
+          "path": "$HOME/**/*"
+        }
+      ]
+    },
+    "cli:default",
+    "positioner:default",
+    "updater:default",
+    "window-state:default",
+    "global-shortcut:default",
+    "global-shortcut:allow-is-registered",
+    "dialog:default",
+    "dialog:allow-ask"
+  ]
+}
