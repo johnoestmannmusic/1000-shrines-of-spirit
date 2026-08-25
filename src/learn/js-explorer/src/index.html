@@ -12,10 +12,17 @@
     --chip-bg:#0c0c0d; --chip-edge:#2a2a2e; --chip-ink:#e9e6db;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
+  /* .NET master switches the page to a sky-blue palette — same roles, different
+     hues — so it reads as a distinct "place" from the WEB side at a glance. */
+  html[data-master="dotnet"]{
+    --bg:#eaf3fb; --panel:#dbeaf7; --edge:#b7d3ea; --ink:#132a3d; --dim:#4d6f8a;
+    --amber:#1f6fb0;
+  }
   *{box-sizing:border-box;}
   /* Everything rendered 20% larger by default (equivalent to a 120% browser zoom). */
   html{zoom:1.1;}
-  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);
+    transition:background-color .35s ease,color .35s ease;}
   body{padding:24px 16px 40px;display:flex;flex-direction:column;align-items:center;}
   h1{font-size:13px;font-weight:400;letter-spacing:.08em;color:var(--dim);text-transform:uppercase;margin:0 0 4px;}
   h1 b{color:var(--ink);font-weight:600;}
@@ -52,6 +59,8 @@
   .support-badge.limited{color:#b8548a;border-color:#d68ab0;background:rgba(207,95,149,.10);}
   .support-badge.exp{color:#8a5fc2;border-color:#b09ad6;background:rgba(138,127,214,.12);}
   .support-badge.ctx{color:#3f8a54;border-color:#8fbf9a;background:rgba(111,181,130,.12);}
+  .support-badge.winonly{color:#0d5c9e;border-color:#7fb3e0;background:rgba(13,92,158,.12);}
+  .support-badge.crossplat{color:#2f9c58;border-color:#8fd6a8;background:rgba(47,156,88,.12);}
   .explain-body .support-line{font-size:9px;color:var(--dim);border-top:1px solid var(--edge);
     margin-top:6px;padding-top:6px;}
   .explain-body .support-line b{color:var(--ink);}
@@ -109,6 +118,24 @@
   footer{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:var(--dim);flex-wrap:wrap;gap:6px;}
   footer a{color:var(--dim);}
 
+  .master-tabs{display:flex;gap:6px;margin-bottom:10px;}
+  .master-tab{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);
+    border:1px solid var(--edge);border-bottom:2px solid transparent;border-radius:2px 2px 0 0;
+    padding:7px 18px;cursor:pointer;background:var(--panel);}
+  .master-tab:hover{color:var(--ink);}
+  .master-tab.active{color:var(--ink);border-bottom-color:var(--amber);background:var(--bg);}
+
+  .ps-block{background:var(--chip-bg);border:1px solid var(--chip-edge);border-radius:2px;margin-top:4px;overflow:hidden;}
+  .ps-block-header{display:flex;align-items:center;justify-content:space-between;
+    padding:4px 5px 4px 8px;border-bottom:1px solid var(--chip-edge);}
+  .ps-block-lang{font-size:8px;letter-spacing:.08em;text-transform:uppercase;color:#8a8a90;}
+  .ps-copy-btn{background:transparent;border:1px solid transparent;color:#c8c5ba;border-radius:2px;
+    width:22px;height:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+  .ps-copy-btn:hover{border-color:var(--chip-edge);color:var(--chip-ink);}
+  .ps-copy-btn.copied{color:#5fc97f;}
+  .ps-block-code{padding:8px 10px;font-family:var(--mono);font-size:10px;line-height:1.6;
+    white-space:pre-wrap;word-break:break-word;color:var(--chip-ink);}
+
   @media (max-width:900px){
     .panels{grid-template-columns:minmax(0,1fr);}
     .filter-wrap{width:100%;position:static;}
@@ -118,9 +145,14 @@
 </head>
 <body>
 
-<h1>the JS ecosystem · <b>learn</b></h1>
-<div class="subtitle">An interactive field guide to the JavaScript language and the browser's major Web APIs. Hover any row for the mechanism on the right — click a card to open its live demo in the middle.</div>
-<div class="tip-banner"><b>Tip:</b> a few of these (IndexedDB, Clipboard, Geolocation, Notifications) need a "secure context" — they work best served over http(s) rather than opened directly as a <code>file://</code> path. From this folder: <code>python3 -m http.server</code> or <code>npx serve</code>, then open the printed localhost URL. Everything else works fine opened directly.</div>
+<div class="master-tabs" id="masterTabs">
+  <div class="master-tab active" data-master="web">WEB</div>
+  <div class="master-tab" data-master="dotnet">.NET</div>
+</div>
+
+<h1 id="pageTitle">the JS ecosystem · <b>learn</b></h1>
+<div class="subtitle" id="pageSubtitle">An interactive field guide to the JavaScript language and the browser's major Web APIs. Hover any row for the mechanism on the right — click a card to open its live demo in the middle.</div>
+<div class="tip-banner" id="pageTip"><b>Tip:</b> a few of these (IndexedDB, Clipboard, Geolocation, Notifications) need a "secure context" — they work best served over http(s) rather than opened directly as a <code>file://</code> path. From this folder: <code>python3 -m http.server</code> or <code>npx serve</code>, then open the printed localhost URL. Everything else works fine opened directly.</div>
 
 <div class="shrine">
   <div class="panels">
@@ -137,8 +169,8 @@
   </div>
 
   <footer>
-    <span>Personal JS learning reference · built with AI Assistance</span>
-    <span><a href="https://developer.mozilla.org/en-US/docs/Web/API" target="_blank" rel="noreferrer noopener">MDN Web API index</a></span>
+    <span>Personal learning reference · built with AI Assistance</span>
+    <span id="footerLink"><a href="https://developer.mozilla.org/en-US/docs/Web/API" target="_blank" rel="noreferrer noopener">MDN Web API index</a></span>
   </footer>
 </div>
 
@@ -158,6 +190,69 @@
   function row(inner){ return '<div class="demo-row">'+inner+'</div>'; }
   function note(text){ return '<div class="demo-note">'+text+'</div>'; }
 
+  // --- OS-support badge shortcuts for .NET/PowerShell cards: every card over
+  // there gets one of these two (unlike the WEB side, where a support badge
+  // only appears for the exceptions) — see MASTER_META.dotnet.tip. ---
+  function winOnly(detail){ return { cls:'winonly', label:'Windows only', detail:detail }; }
+  function crossPlat(detail){ return { cls:'crossplat', label:'Cross-platform', detail:detail }; }
+
+  // --- terminal-style code block for .NET/PowerShell cards, modeled on the
+  // "PowerShell" language header + corner copy-icon on learn.microsoft.com's
+  // own module reference pages (e.g. Disable-PSSessionConfiguration docs). ---
+  var PS_COPY_ICON = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M3.5 10.5v-7a1 1 0 0 1 1-1h7"/></svg>';
+  var PS_CHECK_ICON = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8.5l3.2 3.2L13 4.5"/></svg>';
+  function psBlock(id2, code){
+    return '<div class="ps-block">'+
+      '<div class="ps-block-header"><span class="ps-block-lang">PowerShell</span>'+
+        '<button type="button" class="ps-copy-btn" id="'+id2+'-copy" title="Copy" aria-label="Copy code">'+PS_COPY_ICON+'</button>'+
+      '</div>'+
+      '<div class="ps-block-code">'+esc(code)+'</div>'+
+    '</div>';
+  }
+
+  // --- clipboard copy, with a document.execCommand fallback for file://
+  // pages where navigator.clipboard needs a secure context to exist at all. ---
+  function copyToClipboard(text, btnEl){
+    function done(){
+      btnEl.innerHTML = PS_CHECK_ICON;
+      btnEl.classList.add('copied');
+      clearTimeout(btnEl._resetTimer);
+      btnEl._resetTimer = setTimeout(function(){ btnEl.innerHTML = PS_COPY_ICON; btnEl.classList.remove('copied'); }, 1400);
+    }
+    function fallback(){
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try{ document.execCommand('copy'); }catch(e){}
+      document.body.removeChild(ta);
+    }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(done).catch(function(){ fallback(); done(); });
+    } else {
+      fallback(); done();
+    }
+  }
+
+  // --- .NET/PowerShell card factory: a terminal-style code block with its
+  // own built-in copy button, no live execution — see the WEB-side
+  // tauriOpsHTML()/tauriOpsInit() pair for the "live, IPC-hosted" shape
+  // this deliberately does NOT attempt. ---
+  function psCard(opts){
+    return {
+      id: opts.id, cat: opts.cat || 'ps-fundamentals', name: opts.name, tag: opts.tag,
+      docs: opts.docs, support: opts.os, state:{},
+      demoHTML: psBlock(opts.id, opts.code) +
+        note(opts.note || 'Paste into a PowerShell terminal ('+(opts.os && opts.os.cls==='winonly' ? 'Windows PowerShell 5.1 or PowerShell 7+' : 'PowerShell 7+ / pwsh')+') to try it.'),
+      init: function(root){
+        root.querySelector('#'+opts.id+'-copy').addEventListener('click', function(e){
+          copyToClipboard(opts.code, e.currentTarget);
+        });
+      },
+      explainSummary: function(){ return { title: opts.name, html: opts.summary }; },
+      explainCode: function(){ return { title: opts.name+' — the command', html: opts.explain }; }
+    };
+  }
+
   // --- category taxonomy: also drives the left-hand orbit diagram ---
   // color: vivid accent for borders/dots/canvas shapes (also reads well on
   // the dark demo-cv/viz chips). text: a darker variant used only where the
@@ -174,9 +269,47 @@
     browser:  { label:'Browser & UX',       color:'#cf5f95', text:'#b8548a', blurb:'Hooking into the browser chrome itself — clipboard, history, permission-gated system UI.' },
     'tauri-fundamentals': { label:'Tauri v2 — Fundamentals', color:'#a3791f', text:'#7a5a12' },
     'tauri-core':   { label:'Tauri v2 — Desktop & Core', color:'#c1440e', text:'#9c3509' },
-    'tauri-mobile': { label:'Tauri v2 — Mobile',         color:'#8a4fd6', text:'#6b3aa8' }
+    'tauri-mobile': { label:'Tauri v2 — Mobile',         color:'#8a4fd6', text:'#6b3aa8' },
+
+    'ps-fundamentals': { label:'PowerShell — Fundamentals', color:'#1f6fb0', text:'#155284',
+      blurb:'The shell language itself — pipeline, objects, variables and control flow. No live demo here: copy each command into a real terminal instead.' },
+
+    'ps-mod-76':    { label:'PowerShell 7.6 (LTS) — Modules', color:'#2f7fc7', text:'#1f5f99',
+      blurb:'The modules that ship inside PowerShell itself — no install needed, just Import-Module (usually automatic).' },
+    'ps-mod-win':   { label:'Windows 11 / Server 2025 — Modules', color:'#0d5c9e', text:'#0a487d',
+      blurb:'Windows-only OS administration — networking, storage, and servicing modules that wrap the Win32/CIM layer directly.' },
+    'ps-mod-graph': { label:'Microsoft Graph — Modules', color:'#1a8a9e', text:'#146a7a',
+      blurb:'The modern, cross-platform REST SDK for Microsoft 365 / Entra ID — the successor to AzureAD/MSOnline.' },
+    'ps-mod-misc':  { label:'Misc — Modules', color:'#4a6fb0', text:'#37548a',
+      blurb:'Product-specific modules from the wider ecosystem — Teams, Exchange, Azure, SQL Server, and community favorites.' }
   };
   var CATEGORY_ORDER = ['fundamentals','dom','graphics','network','storage','device','browser','platform','tauri-fundamentals','tauri-core','tauri-mobile'];
+  var DOTNET_CATEGORY_ORDER = ['ps-fundamentals','ps-mod-76','ps-mod-win','ps-mod-graph','ps-mod-misc'];
+
+  // --- master categories: WEB (live in-browser demos) vs .NET (copy-to-
+  // terminal reference — nothing here can execute inside a browser tab). ---
+  var MASTERS = {
+    web:    { label:'WEB',  cats: CATEGORY_ORDER },
+    dotnet: { label:'.NET', cats: DOTNET_CATEGORY_ORDER }
+  };
+  var CATEGORY_TO_MASTER = {};
+  Object.keys(MASTERS).forEach(function(mk){
+    MASTERS[mk].cats.forEach(function(ck){ CATEGORY_TO_MASTER[ck] = mk; });
+  });
+  var MASTER_META = {
+    web: {
+      title: 'the JS ecosystem · <b>learn</b>',
+      subtitle: 'An interactive field guide to the JavaScript language and the browser\'s major Web APIs. Hover any row for the mechanism on the right — click a card to open its live demo in the middle.',
+      tip: '<b>Tip:</b> a few of these (IndexedDB, Clipboard, Geolocation, Notifications) need a "secure context" — they work best served over http(s) rather than opened directly as a <code>file://</code> path. From this folder: <code>python3 -m http.server</code> or <code>npx serve</code>, then open the printed localhost URL. Everything else works fine opened directly.',
+      footerLink: '<a href="https://developer.mozilla.org/en-US/docs/Web/API" target="_blank" rel="noreferrer noopener">MDN Web API index</a>'
+    },
+    dotnet: {
+      title: 'PowerShell &amp; .NET · <b>learn</b>',
+      subtitle: 'A reference for the PowerShell language and the .NET platform underneath it. Nothing here runs inside the browser — hover a row for the mechanism on the right, then use each card\'s copy button to paste the command into a real terminal.',
+      tip: '<b>Tip:</b> every card is tagged <span class="support-badge crossplat" style="margin:0 2px;">Cross-platform</span> or <span class="support-badge winonly" style="margin:0 2px;">Windows only</span> — PowerShell 7+ (<code>pwsh</code>) runs on Windows, macOS and Linux, but plenty of cmdlets and OS concepts still only make sense on Windows.',
+      footerLink: '<a href="https://learn.microsoft.com/en-us/powershell/" target="_blank" rel="noreferrer noopener">Microsoft Learn — PowerShell docs</a>'
+    }
+  };
 
   // ============================================================
   // API demo registry — one entry per Web API. Each is data + a
@@ -7655,6 +7788,1109 @@
     }
   });
 
+  // ---------- PowerShell — Fundamentals ----------
+  APIS.push(psCard({
+    id:'ps-pipeline', name:'The Pipeline', tag:'passes live .NET objects between commands, not text',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_pipelines',
+    os: crossPlat('The pipeline itself is core language syntax — identical on Windows PowerShell 5.1 and PowerShell 7+ on any OS.'),
+    code:'Get-Process | Where-Object CPU -gt 10 | Sort-Object CPU -Descending | Select-Object -First 5',
+    summary: P('Unix shells pipe <b>text</b> between programs — every command has to parse the previous one\'s output. PowerShell\'s <a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_pipelines" target="_blank" rel="noreferrer noopener">pipeline</a> (<code>|</code>) instead passes real, live <b>.NET objects</b> — so the next command can filter, sort, and select by actual property name.') +
+      P('This is the single biggest conceptual shift coming from Bash/cmd: no more scraping columns out of text with regex — you ask an object for its property directly.'),
+    explain: CODE('Get-Process | Where-Object CPU -gt 10 | Sort-Object CPU -Descending | Select-Object -First 5') +
+      P('Read it left to right: get every process object, keep the ones whose <code>CPU</code> property is over 10, sort what\'s left by that same property, then take the top 5 — each stage receives whole objects, so <code>CPU</code> means exactly the same thing in every stage.') +
+      P('Compare a shell pipe: <code>ps aux | sort -k3 -rn | head -5</code> — that only works because every stage agrees on which text column is which, by position.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-get-help', name:'Get-Help & Get-Command', tag:'discover cmdlets and their syntax without leaving the shell',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/get-help',
+    os: crossPlat('Both cmdlets ship in PowerShell\'s core module set, present everywhere PowerShell runs.'),
+    code:'Get-Command -Noun Process\nGet-Help Get-Process -Examples\nGet-Help Get-Process -Full',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/get-command" target="_blank" rel="noreferrer noopener">Get-Command</a> finds cmdlets by name pattern; <a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/get-help" target="_blank" rel="noreferrer noopener">Get-Help</a> shows a cmdlet\'s syntax, parameters, and worked examples — a full man-page system built into the shell itself, kept current by <code>Update-Help</code>.') +
+      P('The first time you set up a machine, run <code>Update-Help</code> (admin) — the box otherwise ships with only a minimal offline help set.'),
+    explain: CODE('Get-Command -Noun Process\nGet-Help Get-Process -Examples\nGet-Help Get-Process -Full') +
+      P('<code>Get-Command -Noun Process</code> lists every cmdlet ending in <code>-Process</code> (Get-, Stop-, Wait-…) — the fastest way to find a command when you know the noun but not the verb.') +
+      P('<code>-Examples</code> alone is usually enough; reach for <code>-Full</code> when you need the exact parameter types and defaults.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-get-member', name:'Get-Member', tag:'inspect the real shape of the object sitting in the pipeline',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/get-member',
+    os: crossPlat('Reflection over .NET objects — works identically wherever the .NET runtime underneath PowerShell runs.'),
+    code:'Get-Process | Get-Member\nGet-Date | Get-Member -MemberType Property',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/get-member" target="_blank" rel="noreferrer noopener">Get-Member</a> (alias <code>gm</code>) lists every property and method an object actually has, by reflecting over its real .NET type — the direct answer to "what am I even holding right now?" in a pipeline.') +
+      P('This is the card that makes <code>Where-Object CPU -gt 10</code> from the Pipeline card discoverable rather than memorized — pipe anything into <code>Get-Member</code> first and the exact property names fall out.'),
+    explain: CODE('Get-Process | Get-Member') +
+      P('The <code>TypeName</code> line at the top (e.g. <code>System.Diagnostics.Process</code>) is the real .NET class backing every process object — every property/method below it is inherited straight from the .NET Base Class Library, not invented by PowerShell.') +
+      P('<code>-MemberType Property</code> narrows the list to just data fields, filtering out the (usually longer) method list when you only want to know what you can read.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-variables', name:'Variables & Data Types', tag:'$-prefixed, dynamically but strongly typed',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_variables',
+    os: crossPlat('Variable syntax and the underlying .NET type system are identical across platforms.'),
+    code:'$name = "Ada"\n$count = 42\n$ratio = 3.14\n$items = 1,2,3\n$name.GetType().Name   # String\n$count.GetType().Name  # Int32',
+    summary: P('Every <a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_variables" target="_blank" rel="noreferrer noopener">variable</a> starts with <code>$</code> and needs no declared type — but unlike a loosely-typed scripting language, each value is a real, strongly-typed .NET object (<code>System.String</code>, <code>System.Int32</code>…) the moment it\'s assigned.') +
+      P('"Dynamically but strongly typed" is the precise phrase: the *variable* accepts anything, but the *value* it currently holds always has one exact .NET type, which is why <code>.GetType()</code> below always gives a real answer.'),
+    explain: CODE('$name = "Ada"\n$name.GetType().Name   # String\n$count = 42\n$count.GetType().Name  # Int32') +
+      P('Because every value is a genuine object, method calls work immediately with no casting — <code>$name.ToUpper()</code> and <code>$count.ToString("N0")</code> both just work.') +
+      P('Common built-ins to recognize: <code>String</code>, <code>Int32</code>/<code>Double</code>, <code>Boolean</code> (<code>$true</code>/<code>$false</code>), <code>DateTime</code>, and the Array/Hashtable pair covered in the next card.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-arrays-hashtables', name:'Arrays & Hashtables', tag:'the two core collection types — ordered list vs. key/value map',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_hash_tables',
+    os: crossPlat('Both collection types are ordinary .NET collections underneath, available everywhere PowerShell runs.'),
+    code:'$colors = "red","green","blue"\n$colors[0]              # red\n$colors += "yellow"\n\n$user = @{ Name = "Ada"; Role = "Admin" }\n$user.Name               # Ada\n$user["Role"]            # Admin\n$user.Keys',
+    summary: P('An <a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_arrays" target="_blank" rel="noreferrer noopener">array</a> is a comma-separated, index-ordered list — <code>$colors[0]</code>. A <a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_hash_tables" target="_blank" rel="noreferrer noopener">hashtable</a> (<code>@{ }</code>) is a key/value map, readable either as <code>$user.Name</code> (dot) or <code>$user["Name"]</code> (bracket) — both syntaxes reach the same value.') +
+      P('Hashtables are also how most cmdlets accept structured parameters (splatting) and how JSON round-trips — <code>ConvertTo-Json</code>/<code>ConvertFrom-Json</code> map directly onto this same shape.'),
+    explain: CODE('$user = @{ Name = "Ada"; Role = "Admin" }\n$user.Name    # dot syntax\n$user["Role"] # bracket syntax — same result') +
+      P('Arrays in PowerShell are actually fixed-size under the hood — <code>$colors += "yellow"</code> silently builds a *new* array behind the scenes rather than mutating in place. For frequent growth, use <code>[System.Collections.Generic.List[object]]::new()</code> instead.') +
+      P('<code>$user.Keys</code> / <code>$user.Values</code> iterate a hashtable\'s keys or values on their own, independent of each other.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-where-foreach', name:'Where-Object & ForEach-Object', tag:'filter and iterate mid-pipeline, one object at a time',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/foreach-object',
+    os: crossPlat('Both are core-module cmdlets, present on every PowerShell install regardless of OS.'),
+    code:'Get-ChildItem | Where-Object { $_.Length -gt 1MB } | ForEach-Object { "$($_.Name): $($_.Length) bytes" }',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/where-object" target="_blank" rel="noreferrer noopener">Where-Object</a> keeps only the pipeline objects matching a condition; <a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/foreach-object" target="_blank" rel="noreferrer noopener">ForEach-Object</a> runs a script block once per object that survives. Inside either, <code>$_</code> (or <code>$PSItem</code>) is "the current object."') +
+      P('These are what turn the Pipeline card\'s raw object stream into actual filtering and per-item logic — most real one-liners are <code>Get-Something | Where-Object {...} | ForEach-Object {...}</code>.'),
+    explain: CODE('Get-ChildItem | Where-Object { $_.Length -gt 1MB } |\n  ForEach-Object { "$($_.Name): $($_.Length) bytes" }') +
+      P('<code>{ $_.Length -gt 1MB }</code> is a script block — <code>1MB</code> is a built-in numeric literal (PowerShell also knows <code>KB</code>, <code>GB</code>, <code>TB</code>) equal to 1,048,576, no import needed.') +
+      P('<code>Where-Object</code> also has a shorter comparison-only form used in the Pipeline card above (<code>Where-Object CPU -gt 10</code>, no <code>$_</code> or braces) — reach for the <code>{ $_... }</code> block form once the condition needs more than one simple comparison.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-string-format', name:'String Interpolation & -f Formatting', tag:'embed variables directly, or format numbers precisely',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_quoting_rules',
+    os: crossPlat('String interpolation and the -f operator are core language features, identical on every platform.'),
+    code:'$name = "Ada"; $score = 97.456\n"$name scored $score"\n"$name scored $($score.ToString(\'N1\'))"\n\'{0} scored {1:N1}\' -f $name, $score',
+    summary: P('Double-quoted strings interpolate variables directly — <code>"$name scored $score"</code> — while single-quoted strings never do, which is the one quoting rule worth memorizing first. For real number formatting, the <code>-f</code> operator mirrors .NET\'s <code>String.Format</code> composite format strings.') +
+      P('<code>$( ... )</code> is the subexpression operator — anything inside it is evaluated as code first, so a method call like <code>.ToString(\'N1\')</code> can sit right inside an interpolated string.'),
+    explain: CODE('"$name scored $score"\n"$name scored $($score.ToString(\'N1\'))"\n\'{0} scored {1:N1}\' -f $name, $score') +
+      P('<code>-f</code> takes a format string with <code>{index}</code> placeholders on the left and the values to slot in on the right — <code>N1</code> means "number, 1 decimal place," the same format-specifier vocabulary the whole .NET BCL shares (dates, currency, hex all use the same mini-language).') +
+      P('Prefer interpolation for quick messages; reach for <code>-f</code> once you need column alignment, padding, or numeric/date formatting.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-functions', name:'Functions & Script Blocks', tag:'named, parameterized commands you define yourself',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_functions',
+    os: crossPlat('Function and script-block syntax is core language, identical everywhere PowerShell runs.'),
+    code:'function Get-Greeting {\n    param(\n        [string]$Name = "World",\n        [switch]$Loud\n    )\n    $msg = "Hello, $Name!"\n    if ($Loud) { $msg = $msg.ToUpper() }\n    return $msg\n}\n\nGet-Greeting -Name "Ada" -Loud',
+    summary: P('A <a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_functions" target="_blank" rel="noreferrer noopener">function</a> is a named command with a <code>param()</code> block for its typed, named parameters — called the same way as any built-in cmdlet (<code>Get-Greeting -Name "Ada"</code>), which is exactly the point: your own functions and Microsoft\'s cmdlets share one calling convention.') +
+      P('A bare <code>{ ... }</code> is a script block — an unnamed function value, the same thing passed to <code>Where-Object</code>/<code>ForEach-Object</code> in the earlier card — functions are really just script blocks with a name and a formal parameter list attached.'),
+    explain: CODE('function Get-Greeting {\n    param([string]$Name = "World", [switch]$Loud)\n    $msg = "Hello, $Name!"\n    if ($Loud) { $msg = $msg.ToUpper() }\n    return $msg\n}\nGet-Greeting -Name "Ada" -Loud') +
+      P('<code>[switch]$Loud</code> is a boolean flag parameter — present on the call (<code>-Loud</code>) means <code>$true</code>, absent means <code>$false</code>, with no <code>$true</code>/<code>$false</code> ever typed at the call site.') +
+      P('Following the Verb-Noun convention (<code>Get-Greeting</code>, not <code>GetGreeting</code>) isn\'t just style — <code>Get-Verb</code> lists the approved verb vocabulary, and PowerShell will warn on import if a module defines a function using an unapproved one.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-error-handling', name:'Try/Catch & Error Handling', tag:'catch terminating errors; $Error keeps the recent history',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_try_catch_finally',
+    os: crossPlat('Exception handling rides on the .NET exception model directly — identical behavior on every platform.'),
+    code:'try {\n    Get-Content "C:\\missing.txt" -ErrorAction Stop\n}\ncatch {\n    Write-Warning "Failed: $($_.Exception.Message)"\n}\nfinally {\n    Write-Host "Done trying."\n}',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_try_catch_finally" target="_blank" rel="noreferrer noopener">try/catch/finally</a> only catches <b>terminating</b> errors — most cmdlets raise non-terminating errors by default (they print in red and keep going), so <code>-ErrorAction Stop</code> is what actually makes a call catchable.') +
+      P('Inside <code>catch</code>, <code>$_</code> is the error record (not the pipeline item this time) — <code>$_.Exception.Message</code> is the underlying .NET exception\'s message text.'),
+    explain: CODE('try {\n    Get-Content "C:\\missing.txt" -ErrorAction Stop\n} catch {\n    Write-Warning "Failed: $($_.Exception.Message)"\n} finally {\n    Write-Host "Done trying."\n}') +
+      P('<code>$Error</code> is a running array of every error the session has hit, most recent first — <code>$Error[0]</code> after any failure, even outside a try/catch, without needing to have wrapped the call at all.') +
+      P('<code>$ErrorActionPreference = \'Stop\'</code> flips the *default* for the whole script instead of tagging every single cmdlet call with <code>-ErrorAction Stop</code> — the common choice once a script is past the exploratory stage.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-execution-policy', name:'Execution Policy', tag:'why a freshly-downloaded .ps1 script refuses to run',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies',
+    os: winOnly('Execution Policy is a Windows safety feature enforced by the Windows PowerShell/.NET host. PowerShell 7+ on macOS/Linux reports policy as Unrestricted and doesn\'t enforce it — Unix relies on the filesystem\'s own execute bit instead.'),
+    code:'Get-ExecutionPolicy\nSet-ExecutionPolicy -Scope CurrentUser RemoteSigned\nUnblock-File .\\script.ps1',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies" target="_blank" rel="noreferrer noopener">Execution Policy</a> is the Windows-only gate that blocks a <code>.ps1</code> script from running at all until the policy allows it — the reason a script downloaded from the internet fails instantly with a red "cannot be loaded" error, before a single line of it executes.') +
+      P('It is explicitly *not* a security boundary against a determined attacker (Microsoft says so directly in the docs) — it exists to stop a script from running by accident, e.g. double-clicked without meaning to.'),
+    explain: CODE('Get-ExecutionPolicy\nSet-ExecutionPolicy -Scope CurrentUser RemoteSigned\nUnblock-File .\\script.ps1') +
+      P('<code>RemoteSigned</code> is the common developer-machine setting: local scripts you wrote run freely, but anything downloaded from the internet needs a valid digital signature — Windows tracks "downloaded from the internet" via an NTFS alternate data stream called the Mark of the Web.') +
+      P('<code>Unblock-File</code> strips that Mark-of-the-Web tag from one specific file, letting it run under a policy that would otherwise block it — the alternative to loosening the whole machine\'s policy just to run one trusted script.')
+  }));
+
+  // ---------- PowerShell 7.6 (LTS) — Modules ----------
+  // Modules that ship inside PowerShell itself: https://learn.microsoft.com/en-us/powershell/module/?view=powershell-7.6
+  APIS.push(psCard({
+    id:'ps-mod-management', cat:'ps-mod-76', name:'Microsoft.PowerShell.Management', tag:'files, processes, services, the registry — inbox, no install',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/?view=powershell-7.6',
+    os: crossPlat('The module itself loads on every OS, but a subset of its cmdlets are Windows-only in practice — Get-Service/Get-EventLog wrap the Windows Service Control Manager and Event Log, which simply don\'t exist on macOS/Linux.'),
+    code:'Get-ChildItem -Path . -File | Select-Object Name, Length\nCopy-Item -Path .\\source.txt -Destination .\\backup.txt\nGet-Process | Where-Object CPU -gt 10',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">Microsoft.PowerShell.Management</a> is the everyday workhorse module — file system, process, and (on Windows) service/registry cmdlets — and it\'s already loaded, since it ships inside PowerShell itself rather than the PowerShell Gallery.') +
+      P('Everything in the Fundamentals cards above (<code>Get-ChildItem</code>, <code>Get-Process</code>) actually lives in this one module — it\'s the closest thing PowerShell has to a "standard library."'),
+    explain: CODE('Get-ChildItem -Path . -File | Select-Object Name, Length\nCopy-Item -Path .\\source.txt -Destination .\\backup.txt') +
+      P('<code>Get-Command -Module Microsoft.PowerShell.Management</code> lists everything it provides — well over 100 cmdlets, spanning file system, process, service, registry, and drive management.') +
+      P('The file-system cmdlets (<code>Get-ChildItem</code>, <code>Copy-Item</code>, <code>Remove-Item</code>...) are the genuinely cross-platform core — the same verbs work identically against a PowerShell "drive," whether that\'s the Windows file system, a Linux path, or (via a different provider) the registry.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-utility', cat:'ps-mod-76', name:'Microsoft.PowerShell.Utility', tag:'formatting, conversion, measurement — Format-*, ConvertTo-*',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/?view=powershell-7.6',
+    os: crossPlat('General-purpose object/data cmdlets with no OS dependency — identical everywhere PowerShell runs.'),
+    code:'Get-Process | Sort-Object CPU -Descending | Format-Table -AutoSize\nGet-Process | Select-Object -First 3 | ConvertTo-Json',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">Microsoft.PowerShell.Utility</a> holds the general-purpose "shape the data" cmdlets: the <code>Format-*</code> family for display, <code>ConvertTo-Json</code>/<code>ConvertFrom-Csv</code> for interchange, and <code>Measure-Object</code>/<code>Compare-Object</code> for summarizing.') +
+      P('This is the module behind almost every "make this readable" or "get this into another tool" step at the end of a pipeline — it\'s inbox, like Management, and loaded automatically.'),
+    explain: CODE('Get-Process | Sort-Object CPU -Descending | Format-Table -AutoSize\nGet-Process | Select-Object -First 3 | ConvertTo-Json') +
+      P('<code>Format-Table</code>/<code>Format-List</code> only change how the pipeline *displays* — piping their output onward into another cmdlet gets formatting-object garbage, not the original data, since formatting is meant to be the very last stage.') +
+      P('<code>ConvertTo-Json</code> is the exact inverse of a browser\'s <code>JSON.stringify</code> — this is one of the clearest places a PowerShell object and a JS object share the same conceptual model.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-security', cat:'ps-mod-76', name:'Microsoft.PowerShell.Security', tag:'execution policy, ACLs, certificates — inbox',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/?view=powershell-7.6',
+    os: crossPlat('Get-Acl/Set-Acl map onto Unix file-mode bits since PowerShell 7.1, so the module loads and works cross-platform — but Execution Policy (see the Fundamentals card) is a real no-op outside Windows.'),
+    code:'Get-Acl .\\README.md | Format-List\nGet-ExecutionPolicy -List',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">Microsoft.PowerShell.Security</a> covers permissions and trust: <code>Get-Acl</code>/<code>Set-Acl</code> for file/registry access control, the <code>*-ExecutionPolicy</code> cmdlets, and certificate-store cmdlets for code-signing and TLS.') +
+      P('This is the module the Execution Policy Fundamentals card belongs to — it\'s listed here as the module that owns that whole feature, rather than one command out of context.'),
+    explain: CODE('Get-Acl .\\README.md | Format-List\nGet-ExecutionPolicy -List') +
+      P('<code>Get-Acl</code>\'s output is a real .NET <code>System.Security.AccessControl</code> object — piping it into <code>Get-Member</code> (from the Fundamentals card) shows the actual access-rule objects underneath, not a text dump.') +
+      P('<code>-List</code> on <code>Get-ExecutionPolicy</code> shows every policy *scope* at once (MachinePolicy, UserPolicy, Process, CurrentUser, LocalMachine) — the first non-Undefined scope, top to bottom, is the one actually in effect.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-psreadline', cat:'ps-mod-76', name:'PSReadLine', tag:'the interactive shell itself — history, prediction, key bindings',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/psreadline/?view=powershell-7.6',
+    os: crossPlat('A console-input library, not an OS integration — works in any real terminal PowerShell runs in, Windows Terminal/macOS Terminal/a Linux TTY alike.'),
+    code:'Install-Module PSReadLine -Scope CurrentUser -Force\nSet-PSReadLineOption -PredictionSource History\nGet-PSReadLineKeyHandler | Select-Object -First 5',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/psreadline/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">PSReadLine</a> is what actually renders the command line you type into — syntax coloring, multi-line editing, and (its headline feature) inline history-based prediction as you type. Without it, PowerShell falls back to a bare, unstyled input line.') +
+      P('It ships inbox but updates independently through the Gallery, which is why it\'s the one "core" module regularly reinstalled for a newer version — the shipped copy tends to lag behind.'),
+    explain: CODE('Set-PSReadLineOption -PredictionSource History\nGet-PSReadLineKeyHandler | Select-Object -First 5') +
+      P('<code>-PredictionSource History</code> is the single most-recommended PSReadLine setting — it shows a greyed-out completion from your command history as you type, accepted with the right arrow key.') +
+      P('<code>Get-PSReadLineKeyHandler</code> lists every key binding currently active — the same discoverability pattern as <code>Get-Command</code>/<code>Get-Help</code> from the Fundamentals cards, applied to the editor itself.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-archive', cat:'ps-mod-76', name:'Microsoft.PowerShell.Archive', tag:'zip files — Compress-Archive / Expand-Archive, inbox',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.archive/?view=powershell-7.6',
+    os: crossPlat('Built on .NET\'s System.IO.Compression — identical behavior on every OS PowerShell runs on.'),
+    code:'Compress-Archive -Path .\\logs -DestinationPath .\\logs.zip\nExpand-Archive -Path .\\logs.zip -DestinationPath .\\restored -Force',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.archive/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">Microsoft.PowerShell.Archive</a> is a small, single-purpose inbox module: <code>Compress-Archive</code> and <code>Expand-Archive</code> for zip files — no external tool, no separate install, just two cmdlets.') +
+      P('It only speaks the zip format specifically (no .tar/.7z/.rar) — for anything else you\'re shelling out to an external tool via the Fundamentals-adjacent Shell/Invoke concepts, not this module.'),
+    explain: CODE('Compress-Archive -Path .\\logs -DestinationPath .\\logs.zip\nExpand-Archive -Path .\\logs.zip -DestinationPath .\\restored -Force') +
+      P('<code>-Path</code> accepts an array, so <code>Compress-Archive -Path file1.txt, file2.txt -DestinationPath out.zip</code> bundles multiple items into one archive in a single call.') +
+      P('<code>-Force</code> on <code>Expand-Archive</code> overwrites existing files at the destination — without it, an existing file there stops the whole operation with an error rather than silently clobbering something.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-psget', cat:'ps-mod-76', name:'PowerShellGet', tag:'the package manager for every other module on this page',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/powershellget/',
+    os: crossPlat('Talks to the PowerShell Gallery over plain HTTPS — no OS-specific package format involved.'),
+    code:'Find-Module -Name Az -Repository PSGallery\nInstall-Module -Name Az -Scope CurrentUser\nUpdate-Module -Name Az',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/powershellget/" target="_blank" rel="noreferrer noopener">PowerShellGet</a> is the meta-module: <code>Find-Module</code>/<code>Install-Module</code>/<code>Update-Module</code> are how every module in the four "Modules" categories on this page actually gets onto a machine, from the PowerShell Gallery (PowerShell\'s equivalent of npm/PyPI).') +
+      P('<code>-Scope CurrentUser</code> is the option worth memorizing early — it installs into the user profile with no admin rights needed, versus the machine-wide default that does.'),
+    explain: CODE('Find-Module -Name Az -Repository PSGallery\nInstall-Module -Name Az -Scope CurrentUser\nUpdate-Module -Name Az') +
+      P('<code>Find-Module</code> queries the Gallery without installing anything — useful for checking a module exists and reading its version/description before committing to <code>Install-Module</code>.') +
+      P('A newer major version (PowerShellGet v3 / the <code>Microsoft.PowerShell.PSResourceGet</code> module) is replacing this with faster, more reliable cmdlets — the verbs above are the ones still documented as the stable baseline across both.')
+  }));
+
+  // The official inbox list at https://learn.microsoft.com/en-us/powershell/module/?view=powershell-7.6
+  // is exactly these 12 modules (PowerShellGet above ships alongside them but
+  // isn't counted on that specific page, since it's really the bootstrapper
+  // for everything else, not part of the engine itself).
+  APIS.push(psCard({
+    id:'ps-mod-core', cat:'ps-mod-76', name:'Microsoft.PowerShell.Core', tag:'the engine\'s own module — Get-Command, Get-Help, ForEach-Object, and the rest',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/?view=powershell-7.6',
+    os: crossPlat('This module IS the PowerShell engine\'s own cmdlet set — identical everywhere PowerShell itself runs.'),
+    code:'Get-Command -Module Microsoft.PowerShell.Core | Select-Object -First 10 Name\nGet-Module -ListAvailable | Select-Object Name, Version',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">Microsoft.PowerShell.Core</a> is the odd one out among the inbox modules — it\'s not a *feature area*, it\'s the engine\'s own cmdlets: <code>Get-Command</code>, <code>Get-Help</code>, <code>Get-Module</code>, <code>ForEach-Object</code>, <code>Where-Object</code>, <code>Invoke-Command</code>, and every module/session/job management cmdlet the shell itself is built from.') +
+      P('Every Fundamentals card at the top of this page (Get-Help & Get-Command, Where-Object & ForEach-Object) is really demonstrating this one module — it\'s listed here for completeness, as the module that\'s always loaded and can never really be "not installed."'),
+    explain: CODE('Get-Command -Module Microsoft.PowerShell.Core | Select-Object -First 10 Name\nGet-Module -ListAvailable | Select-Object Name, Version') +
+      P('<code>Get-Module -ListAvailable</code> (from this module, naturally) is the fastest way to see every module actually installed on a machine — including every other card in this "PowerShell 7.6" category, and any Gallery module pulled in via PowerShellGet.') +
+      P('Because this module can\'t be removed or reloaded like the others, it\'s also the one place <code>Get-Command -Module Microsoft.PowerShell.Core</code> reliably works identically on any machine, any OS, any PowerShell 7.x version — a genuinely fixed baseline to compare everything else against.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-cimcmdlets', cat:'ps-mod-76', name:'CimCmdlets', tag:'query WMI/CIM — the modern successor to Get-WmiObject',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/cimcmdlets/?view=powershell-7.6',
+    os: crossPlat('The module and its WSMan/DCOM-independent cross-platform CIM session type ship everywhere PowerShell runs — but most real CIM/WMI *providers* being queried only exist on Windows, so remote sessions overwhelmingly still target Windows machines in practice.'),
+    code:'Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption, Version\nGet-CimInstance -ClassName Win32_LogicalDisk -Filter "DriveType=3"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/cimcmdlets/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">CimCmdlets</a> queries WMI/CIM (Common Information Model) — the standardized management data every Windows machine exposes about its OS, hardware, disks, and installed software. <code>Get-CimInstance</code> is the modern replacement for the older <code>Get-WmiObject</code>, which PowerShell 7 dropped entirely.') +
+      P('The <code>Win32_*</code> class names (<code>Win32_OperatingSystem</code>, <code>Win32_LogicalDisk</code>...) are WMI\'s own decades-old naming scheme, unrelated to PowerShell\'s Verb-Noun convention — this is the one card on this page where the "noun" comes from a completely different vocabulary.'),
+    explain: CODE('Get-CimInstance -ClassName Win32_OperatingSystem | Select-Object Caption, Version\nGet-CimInstance -ClassName Win32_LogicalDisk -Filter "DriveType=3"') +
+      P('<code>-Filter</code> here takes WQL (WMI Query Language, a SQL-like dialect), not a PowerShell <code>Where-Object</code> expression — <code>DriveType=3</code> means "fixed local disk" in WMI\'s own numeric encoding, a WMI-specific detail worth looking up rather than guessing.') +
+      P('<code>Get-CimInstance</code> defaults to WSMan-based remoting for a remote <code>-ComputerName</code>, unlike the older DCOM-based <code>Get-WmiObject</code> — one of the concrete reasons Microsoft positions it as the safer, firewall-friendlier modern replacement.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-diagnostics', cat:'ps-mod-76', name:'Microsoft.PowerShell.Diagnostics', tag:'Windows Event Log and performance counters',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.diagnostics/?view=powershell-7.6',
+    os: winOnly('Get-Counter (performance counters) and live Get-WinEvent queries both wrap Windows-only subsystems — there is no equivalent counter/eventing infrastructure on macOS/Linux for these cmdlets to talk to.'),
+    code:'Get-WinEvent -LogName System -MaxEvents 5\nGet-Counter -Counter "\\Processor(_Total)\\% Processor Time"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.diagnostics/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">Microsoft.PowerShell.Diagnostics</a> reads the two classic Windows diagnostic data sources: the Event Log (<code>Get-WinEvent</code>) and live performance counters (<code>Get-Counter</code>) — the scriptable equivalent of Event Viewer and Performance Monitor.') +
+      P('<code>Get-WinEvent</code> is the modern replacement for the older, slower <code>Get-EventLog</code> (removed in PowerShell 7) — it can query any of the newer structured "Applications and Services Logs," not just the four classic logs (System, Application, Security, Setup).'),
+    explain: CODE('Get-WinEvent -LogName System -MaxEvents 5\nGet-Counter -Counter "\\Processor(_Total)\\% Processor Time"') +
+      P('<code>-FilterHashtable</code> (not shown) is the efficient way to filter <code>Get-WinEvent</code> — it pushes the filter down into the Windows Event Log query engine itself, versus piping through <code>Where-Object</code> afterward and paying the cost of reading every event first.') +
+      P('Counter paths like <code>\\Processor(_Total)\\% Processor Time</code> follow Performance Monitor\'s own decades-old naming syntax (<code>\\Category(Instance)\\Counter</code>) — <code>Get-Counter -ListSet *</code> discovers what\'s available on a given machine.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-host', cat:'ps-mod-76', name:'Microsoft.PowerShell.Host', tag:'transcripts — Start-Transcript / Stop-Transcript',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.host/?view=powershell-7.6',
+    os: crossPlat('Writes a plain text file from the host process — no OS dependency.'),
+    code:'Start-Transcript -Path .\\session.log\nGet-Process | Select-Object -First 3\nStop-Transcript',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.host/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">Microsoft.PowerShell.Host</a> is a small, focused module: <code>Start-Transcript</code>/<code>Stop-Transcript</code> record everything typed and displayed in a session to a plain text file — full audit-trail logging with zero extra tooling.') +
+      P('This is genuinely the whole module — one job, done well, which is why it\'s among the smallest of the twelve inbox modules rather than a broad feature area like Management or Utility.'),
+    explain: CODE('Start-Transcript -Path .\\session.log\nGet-Process | Select-Object -First 3\nStop-Transcript') +
+      P('Everything between <code>Start-Transcript</code> and <code>Stop-Transcript</code> — commands typed, and their output — is captured verbatim, including timestamps at the top and bottom of the file, making this a genuine audit log rather than just a copy-paste of output.') +
+      P('<code>-Append</code> (not shown) adds to an existing transcript file instead of overwriting it — useful for a script that starts a transcript at the beginning of a scheduled task and wants one continuous log across every run.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-threadjob', cat:'ps-mod-76', name:'Microsoft.PowerShell.ThreadJob', tag:'lightweight parallel jobs — Start-ThreadJob',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/threadjob/?view=powershell-7.6',
+    os: crossPlat('Runs work on separate threads within the same process — a .NET concept with no OS dependency.'),
+    code:'1..5 | ForEach-Object { Start-ThreadJob -ScriptBlock { param($n) Start-Sleep 1; $n * $n } -ArgumentList $_ } | Wait-Job | Receive-Job',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/threadjob/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">Microsoft.PowerShell.ThreadJob</a>\'s <code>Start-ThreadJob</code> runs work in parallel on a background thread within the *same* process — much faster to start and far lighter on memory than the classic <code>Start-Job</code>, which spins up an entire separate PowerShell process per job.') +
+      P('This is the module behind <code>ForEach-Object -Parallel</code> (PowerShell 7\'s built-in parallel pipeline syntax) under the hood — reaching for <code>Start-ThreadJob</code> directly gives the same thread-based speed with more explicit control over each individual job.'),
+    explain: CODE('1..5 | ForEach-Object { Start-ThreadJob -ScriptBlock { param($n) Start-Sleep 1; $n * $n } -ArgumentList $_ } | Wait-Job | Receive-Job') +
+      P('<code>1..5</code> is PowerShell\'s range operator — shorthand for the array <code>1,2,3,4,5</code> — piped here into five parallel thread jobs that all sleep concurrently rather than one after another, so the whole line takes about 1 second, not 5.') +
+      P('Because thread jobs share the parent process\'s memory space (unlike <code>Start-Job</code>\'s fully isolated process), passing large objects in and getting results back is significantly cheaper — the tradeoff is less isolation if one job misbehaves.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-wsman', cat:'ps-mod-76', name:'Microsoft.WSMan.Management', tag:'WS-Management / WinRM — the classic PSRemoting transport',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.wsman.management/?view=powershell-7.6',
+    os: winOnly('WS-Management (WinRM) is a Windows-specific remoting protocol and service — PowerShell 7+ on macOS/Linux uses SSH-based remoting instead, which this module has nothing to do with.'),
+    code:'Test-WSMan -ComputerName Server01\nEnable-PSRemoting -Force',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.wsman.management/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">Microsoft.WSMan.Management</a> configures and tests WS-Management (WinRM) — the transport underneath classic Windows PowerShell remoting (<code>Invoke-Command</code>, <code>Enter-PSSession</code> against another Windows box).') +
+      P('PowerShell 7 added SSH as a second, cross-platform remoting transport specifically because WinRM is Windows-only — this module is squarely about the original, still-common-on-Windows-networks WinRM path, not the newer SSH one.'),
+    explain: CODE('Test-WSMan -ComputerName Server01\nEnable-PSRemoting -Force') +
+      P('<code>Test-WSMan</code> is the fastest first check when remoting fails — it confirms the WinRM *service* itself is listening and responding, before troubleshooting anything at the PowerShell session/authentication layer on top of it.') +
+      P('<code>Enable-PSRemoting</code> configures the local machine to *accept* incoming remote commands (starts the WinRM service, creates a listener, sets up the firewall exception) — a one-time setup step run on the target, not the machine initiating the connection.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-psdiagnostics', cat:'ps-mod-76', name:'PSDiagnostics', tag:'ETW tracing helpers for PowerShell/WinRM internals',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/psdiagnostics/?view=powershell-7.6',
+    os: winOnly('Wraps ETW (Event Tracing for Windows), a Windows-only OS tracing subsystem — no equivalent exists to wrap on macOS/Linux.'),
+    code:'Enable-PSWSManCombinedTrace\n# ...reproduce the problem...\nDisable-PSWSManCombinedTrace',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/psdiagnostics/?view=powershell-7.6" target="_blank" rel="noreferrer noopener">PSDiagnostics</a> is a small, specialist module: thin wrappers around ETW (Event Tracing for Windows) specifically for diagnosing PowerShell and WinRM/WSMan internals when remoting itself is misbehaving — a deeper, more invasive layer than the ordinary Diagnostics module\'s Event Log reading.') +
+      P('This is a "last resort when nothing else explains it" tool for genuinely hard-to-reproduce WinRM/remoting failures — most day-to-day scripting never needs it, unlike the broadly-useful Management/Utility modules elsewhere in this category.'),
+    explain: CODE('Enable-PSWSManCombinedTrace\n# ...reproduce the problem...\nDisable-PSWSManCombinedTrace') +
+      P('<code>Enable-PSWSManCombinedTrace</code> turns on detailed ETW tracing across both PowerShell *and* WinRM simultaneously — the "combined" part matters, since a remoting failure can originate in either layer, and correlating both traces from one session is the whole point.') +
+      P('The trace output is consumed with dedicated ETW tooling (like Windows Performance Analyzer), not read as plain PowerShell objects — a reminder that not every card on this page produces output you\'d pipe into <code>Format-Table</code>.')
+  }));
+
+  // ---------- Windows 11 / Server 2025 — Modules ----------
+  // Windows-only OS administration modules: https://learn.microsoft.com/en-us/powershell/module/?view=windowsserver2025-ps
+  APIS.push(psCard({
+    id:'ps-mod-nettcpip', cat:'ps-mod-win', name:'NetTCPIP', tag:'IP configuration and connectivity testing',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/nettcpip/?view=windowsserver2025-ps',
+    os: winOnly('Wraps the Windows TCP/IP stack\'s native configuration APIs directly — not present on macOS/Linux, which use entirely different networking cmdlets (or none, at the shell level).'),
+    code:'Get-NetIPAddress -AddressFamily IPv4\nTest-NetConnection -ComputerName learn.microsoft.com -Port 443',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/nettcpip/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">NetTCPIP</a> reads and configures IP addressing, routes, and connections — the PowerShell replacement for parsing <code>ipconfig</code>/<code>netstat</code> text output by hand.') +
+      P('<code>Test-NetConnection</code> in particular is the modern one-stop replacement for reaching for <code>ping</code> and <code>telnet</code> separately — it does DNS resolution, ping, and TCP port reachability in one call.'),
+    explain: CODE('Get-NetIPAddress -AddressFamily IPv4\nTest-NetConnection -ComputerName learn.microsoft.com -Port 443') +
+      P('<code>Get-NetIPAddress</code> returns real address objects (with <code>PrefixLength</code>, <code>InterfaceAlias</code>, etc. as actual properties) instead of text to regex apart — the same object-over-text pattern from the Pipeline Fundamentals card, applied to networking.') +
+      P('<code>Test-NetConnection ... -Port 443</code> returns a <code>TcpTestSucceeded</code> boolean directly, so it drops straight into an <code>if</code> without any string parsing.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-netadapter', cat:'ps-mod-win', name:'NetAdapter', tag:'network interface management — enable, disable, rename, restart',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/netadapter/?view=windowsserver2025-ps',
+    os: winOnly('Operates on Windows network adapter objects via the Windows networking stack — no equivalent module ships on macOS/Linux.'),
+    code:'Get-NetAdapter | Where-Object Status -eq Up\nRestart-NetAdapter -Name "Ethernet" -Confirm:$false',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/netadapter/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">NetAdapter</a> manages the network interfaces themselves — listing, enabling/disabling, renaming, and restarting adapters — one layer below the IP configuration NetTCPIP handles.') +
+      P('The classic "turn it off and on again" network fix (disable an adapter, wait, re-enable it) is exactly <code>Disable-NetAdapter</code> followed by <code>Enable-NetAdapter</code>, scriptable and remotable instead of a GUI click-through.'),
+    explain: CODE('Get-NetAdapter | Where-Object Status -eq Up\nRestart-NetAdapter -Name "Ethernet" -Confirm:$false') +
+      P('<code>-Confirm:$false</code> suppresses the interactive "Are you sure?" prompt that state-changing cmdlets show by default for anything with real side effects — the scripted equivalent of answering "yes" every time.') +
+      P('Combine with the Fundamentals Where-Object/ForEach-Object card: <code>Get-NetAdapter | Where-Object Status -eq Disconnected | Enable-NetAdapter</code> re-enables every down adapter in one line.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-storage', cat:'ps-mod-win', name:'Storage', tag:'disks, partitions, and volumes — Get-Disk, Get-Volume',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/storage/?view=windowsserver2025-ps',
+    os: winOnly('Wraps the Windows Storage Management API (the same layer Disk Management uses) — disk/volume concepts and cmdlet shapes differ entirely on macOS/Linux.'),
+    code:'Get-Disk\nGet-Volume | Where-Object DriveType -eq Fixed | Select-Object DriveLetter, FileSystemLabel, SizeRemaining',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/storage/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">Storage</a> is the scriptable equivalent of the Disk Management GUI — enumerating physical disks, partitions, and volumes, and creating/resizing/formatting them.') +
+      P('This is the module behind most "why is this server out of disk space" scripts — <code>Get-Volume</code> alone gives free-space numbers per drive letter without touching WMI directly.'),
+    explain: CODE('Get-Disk\nGet-Volume | Where-Object DriveType -eq Fixed | Select-Object DriveLetter, FileSystemLabel, SizeRemaining') +
+      P('<code>Get-Disk</code> lists the physical/virtual disks themselves (with <code>PartitionStyle</code>, <code>OperationalStatus</code>); <code>Get-Volume</code> is one layer up — the mounted, drive-lettered volumes those disks\' partitions expose.') +
+      P('<code>SizeRemaining</code> is a raw byte count — pipe through <code>Select-Object @{n=\'GB\';e={[math]::Round($_.SizeRemaining/1GB,1)}}</code> to reuse the <code>1GB</code> numeric literal from the Fundamentals Where-Object card for a human-readable value.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-defender', cat:'ps-mod-win', name:'Defender', tag:'Windows Defender antivirus — status, scans, threat history',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/defender/?view=windowsserver2025-ps',
+    os: winOnly('Controls Windows Defender specifically, a Windows-built-in component — there is no equivalent on macOS/Linux, which don\'t ship Defender.'),
+    code:'Get-MpComputerStatus\nStart-MpScan -ScanType QuickScan',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/defender/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">Defender</a> scripts Windows\'s built-in antivirus — checking protection status, triggering scans, and reviewing detected threats — the same engine behind the Windows Security app, but automatable.') +
+      P('The <code>Mp</code> prefix throughout (<code>Get-MpComputerStatus</code>, <code>Start-MpScan</code>) stands for "Malware Protection," Defender\'s internal product name — worth recognizing since it doesn\'t match "Defender" visually at all.'),
+    explain: CODE('Get-MpComputerStatus\nStart-MpScan -ScanType QuickScan') +
+      P('<code>Get-MpComputerStatus</code> returns one object with everything an admin dashboard would want — <code>AntivirusEnabled</code>, <code>RealTimeProtectionEnabled</code>, <code>AntivirusSignatureLastUpdated</code> — as real typed properties.') +
+      P('<code>Start-MpScan</code> is asynchronous by nature of what it does (a scan takes time) — check completion via <code>Get-MpThreatDetection</code> or Defender\'s own event log rather than expecting the cmdlet call itself to block until done.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-dnsclient', cat:'ps-mod-win', name:'DnsClient', tag:'DNS resolution and the local resolver cache',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/dnsclient/?view=windowsserver2025-ps',
+    os: winOnly('Manages the Windows DNS Client service and its cache specifically — macOS/Linux have their own separate resolver mechanisms and tooling.'),
+    code:'Resolve-DnsName -Name learn.microsoft.com\nClear-DnsClientCache',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/dnsclient/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">DnsClient</a> is the PowerShell replacement for <code>nslookup</code>: <code>Resolve-DnsName</code> queries DNS and returns structured record objects, and the module also manages the local resolver cache.') +
+      P('"Have you tried clearing your DNS cache" is exactly <code>Clear-DnsClientCache</code> — one line instead of remembering the old <code>ipconfig /flushdns</code> incantation.'),
+    explain: CODE('Resolve-DnsName -Name learn.microsoft.com\nClear-DnsClientCache') +
+      P('<code>Resolve-DnsName</code> returns different object shapes per record <code>Type</code> (A, AAAA, MX, TXT...) in one array — filter with <code>Where-Object Type -eq \'A\'</code> the same way the Fundamentals card filtered processes by CPU.') +
+      P('<code>Get-DnsClientCache</code> (no arguments) lists everything currently cached, which is what <code>Clear-DnsClientCache</code> empties — useful to inspect before clearing, to confirm a stale entry was actually the problem.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-dism', cat:'ps-mod-win', name:'Dism', tag:'Windows image servicing — optional features, .wim/.vhdx mounting',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/dism/?view=windowsserver2025-ps',
+    os: winOnly('Servicing the Windows image format (WIM) and Windows-specific optional-feature system — this entire concept is Windows-only.'),
+    code:'Get-WindowsOptionalFeature -Online | Where-Object State -eq Enabled\nEnable-WindowsOptionalFeature -Online -FeatureName TelnetClient',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/dism/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">Dism</a> is the PowerShell face of the DISM tool — enabling/disabling optional Windows features (like the classic Telnet client), and servicing offline Windows images (.wim/.vhdx) used to build install media.') +
+      P('<code>-Online</code> targets the currently-running Windows install; omit it (with <code>-Path</code> to a mounted image instead) to service an offline image without booting it — the same cmdlets, a different target.'),
+    explain: CODE('Get-WindowsOptionalFeature -Online | Where-Object State -eq Enabled\nEnable-WindowsOptionalFeature -Online -FeatureName TelnetClient') +
+      P('Optional features here are the same list the "Turn Windows features on or off" Control Panel dialog shows — this module is the scriptable path to the exact same underlying feature store.') +
+      P('Enabling a feature can require a restart depending what changed — check the <code>RestartNeeded</code> property on the object <code>Enable-WindowsOptionalFeature</code> returns rather than assuming it always takes effect immediately.')
+  }));
+
+  // Batch 1 of the ~140-module official list at
+  // https://learn.microsoft.com/en-us/powershell/module/?view=windowsserver2025-ps
+  // — the modules a working Windows admin reaches for most regularly.
+  // More batches to follow; this category is not yet at full parity with
+  // that list the way PowerShell 7.6 and Microsoft Graph now are.
+  APIS.push(psCard({
+    id:'ps-mod-activedirectory', cat:'ps-mod-win', name:'ActiveDirectory', tag:'on-prem AD — users, groups, computers, OUs',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/activedirectory/?view=windowsserver2025-ps',
+    os: winOnly('Wraps on-premises Active Directory Domain Services directly — a Windows Server role with no cross-platform equivalent (Entra ID/Graph, covered separately, is the cloud-native successor for identity).'),
+    code:'Get-ADUser -Filter "Department -eq \'Sales\'" -Properties Department\nNew-ADUser -Name "Ada Lovelace" -SamAccountName ada -Enabled $true -AccountPassword (Read-Host -AsSecureString)',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/activedirectory/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">ActiveDirectory</a> is the on-premises directory management module — users, groups, computers, organizational units, and domain/forest configuration — installed via the RSAT (Remote Server Administration Tools) feature, not the Gallery.') +
+      P('This is the on-prem counterpart to the Microsoft.Graph.Users/Groups modules covered in the Microsoft Graph category — many organizations run both side by side, syncing between them with Entra Connect.'),
+    explain: CODE('Get-ADUser -Filter "Department -eq \'Sales\'" -Properties Department\nNew-ADUser -Name "Ada Lovelace" -SamAccountName ada -Enabled $true -AccountPassword (Read-Host -AsSecureString)') +
+      P('<code>-Filter</code> here uses a PowerShell-*like* expression syntax, not a real PowerShell expression or the OData syntax seen in the Graph cards — it looks familiar but is actually its own parsed mini-language specific to this module, with its own quirks (<code>-Properties</code> must be requested explicitly, or most attributes come back empty).') +
+      P('<code>-AccountPassword</code> requires a <code>SecureString</code>, never a plain-text string — <code>Read-Host -AsSecureString</code> is the interactive way to supply one without it ever appearing in script history or process listings.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-grouppolicy', cat:'ps-mod-win', name:'GroupPolicy', tag:'Group Policy Objects — settings pushed to domain-joined machines',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/grouppolicy/?view=windowsserver2025-ps',
+    os: winOnly('Group Policy is an Active Directory Domain Services feature with no cross-platform or cloud-native equivalent (Intune/Graph device configuration profiles are the modern cloud replacement, covered separately).'),
+    code:'Get-GPO -All | Select-Object DisplayName, GpoStatus\nSet-GPRegistryValue -Name "Disable USB Storage" -Key "HKLM\\Software\\Policies\\Microsoft\\Windows\\RemovableStorageDevices" -ValueName "Deny_All" -Type DWord -Value 1',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/grouppolicy/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">GroupPolicy</a> manages Group Policy Objects (GPOs) — the registry-based settings, scripts, and restrictions Active Directory pushes out to every domain-joined computer and user that a GPO is linked/scoped to.') +
+      P('Most of a GPO\'s actual settings are edited through the Group Policy Management Editor GUI, not these cmdlets directly — this module is strongest for GPO lifecycle tasks (create, link, back up, report) and for setting individual registry-based values in bulk via <code>Set-GPRegistryValue</code>.'),
+    explain: CODE('Get-GPO -All | Select-Object DisplayName, GpoStatus\nSet-GPRegistryValue -Name "Disable USB Storage" -Key "HKLM\\Software\\Policies\\Microsoft\\Windows\\RemovableStorageDevices" -ValueName "Deny_All" -Type DWord -Value 1') +
+      P('A GPO existing (<code>Get-GPO</code>) and a GPO actually *applying* to a given machine are two different questions — it also needs an OU link, security filtering, and WMI filtering to all line up; <code>Get-GPResultantSetOfPolicy</code> (not shown) answers "what actually applies here."') +
+      P('<code>Set-GPRegistryValue</code> only reaches Administrative Templates-style registry settings — anything set through a GPO\'s security options, scripts, or preferences tabs needs the GUI editor or lower-level GPO backup/import XML manipulation instead.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-scheduledtasks', cat:'ps-mod-win', name:'ScheduledTasks', tag:'Task Scheduler — register, trigger, and inspect scheduled tasks',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/?view=windowsserver2025-ps',
+    os: winOnly('Wraps the Windows Task Scheduler service directly — cron (Linux) and launchd (macOS) are entirely different scheduling systems with no shared cmdlet surface.'),
+    code:'Get-ScheduledTask | Where-Object State -eq Running\nRegister-ScheduledTask -TaskName "Nightly Backup" -Action (New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-File C:\\Scripts\\backup.ps1") -Trigger (New-ScheduledTaskTrigger -Daily -At 2am)',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/scheduledtasks/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">ScheduledTasks</a> is the scriptable Task Scheduler — creating, triggering, enabling/disabling, and inspecting the same scheduled tasks the Task Scheduler GUI manages, right down to reading a task\'s last run result.') +
+      P('Registering a task composes three separate pieces built by their own cmdlets — an action (<code>New-ScheduledTaskAction</code>, what to run), a trigger (<code>New-ScheduledTaskTrigger</code>, when), and optionally principal/settings objects — then hands all of them to <code>Register-ScheduledTask</code> together.'),
+    explain: CODE('Get-ScheduledTask | Where-Object State -eq Running\nRegister-ScheduledTask -TaskName "Nightly Backup" -Action (New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-File C:\\Scripts\\backup.ps1") -Trigger (New-ScheduledTaskTrigger -Daily -At 2am)') +
+      P('<code>Get-ScheduledTask</code> alone doesn\'t include the last-run result — pipe into <code>Get-ScheduledTaskInfo</code> (not shown) for <code>LastRunTime</code>/<code>LastTaskResult</code>, the actual "did it work" data most troubleshooting scripts want.') +
+      P('A task registered this way runs under Task Scheduler independent of any PowerShell session — genuinely unattended, unlike a background job (<code>Start-Job</code>/<code>Start-ThreadJob</code> from the PowerShell 7.6 cards) which dies with the session that started it.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-dhcpserver', cat:'ps-mod-win', name:'DhcpServer', tag:'DHCP scopes, leases, and reservations',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/dhcpserver/?view=windowsserver2025-ps',
+    os: winOnly('Administers the Windows Server DHCP Server role specifically — a different product from any router\'s or Linux DHCP daemon\'s own admin tooling.'),
+    code:'Get-DhcpServerv4Scope\nGet-DhcpServerv4Lease -ScopeId 10.0.0.0 | Where-Object AddressState -eq Active',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/dhcpserver/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">DhcpServer</a> administers the Windows Server DHCP role — scopes (address ranges), active leases, and reservations (a fixed IP tied to a specific MAC address) — the server-side counterpart to the client-side NetTCPIP card elsewhere in this category.') +
+      P('The <code>v4</code>/<code>v6</code> in most cmdlet nouns (<code>Get-DhcpServerv4Scope</code> vs a <code>v6</code> equivalent) is a real, consistent split throughout this module — IPv4 and IPv6 DHCP are different enough underneath that they never share one cmdlet.'),
+    explain: CODE('Get-DhcpServerv4Scope\nGet-DhcpServerv4Lease -ScopeId 10.0.0.0 | Where-Object AddressState -eq Active') +
+      P('A <b>scope</b> is the configured address range and its options (gateway, DNS servers, lease duration) for one subnet; a <b>lease</b> is one specific address currently handed to one specific client — inspecting scopes answers "what could be handed out," leases answer "what actually is right now."') +
+      P('<code>Add-DhcpServerv4Reservation</code> (not shown) pins a specific IP to a MAC address permanently — the scripted equivalent of "this printer always gets .50," without touching the printer\'s own network configuration at all.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-dnsserver', cat:'ps-mod-win', name:'DnsServer', tag:'DNS zones and records — the server side, not the resolver',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/dnsserver/?view=windowsserver2025-ps',
+    os: winOnly('Administers the Windows Server DNS Server role specifically — distinct from the DnsClient module elsewhere in this category, which only queries/caches from the client side.'),
+    code:'Get-DnsServerZone\nAdd-DnsServerResourceRecordA -ZoneName "contoso.com" -Name "www" -IPv4Address "10.0.0.10"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/dnsserver/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">DnsServer</a> administers a Windows DNS Server — zones (the domains it\'s authoritative for) and the individual records (A, CNAME, MX...) inside them — genuinely different from the DnsClient card, which only ever *queries* DNS, never hosts it.') +
+      P('Easy to confuse with DnsClient by name alone — DnsClient is "resolve names and manage my local cache" (any Windows machine); DnsServer is "I administer a DNS server that answers other machines\' queries" (a Windows Server DNS role specifically).'),
+    explain: CODE('Get-DnsServerZone\nAdd-DnsServerResourceRecordA -ZoneName "contoso.com" -Name "www" -IPv4Address "10.0.0.10"') +
+      P('Zones come in a few flavors reflected in <code>Get-DnsServerZone</code>\'s output — primary (authoritative, editable here), secondary (a read-only copy replicated from elsewhere), and Active-Directory-integrated (replicated via AD instead of classic zone transfers).') +
+      P('Each DNS record type gets its own dedicated cmdlet (<code>...ResourceRecordA</code>, <code>...ResourceRecordCName</code>, <code>...ResourceRecordMX</code>) rather than one generic "add a record" cmdlet with a type parameter — worth knowing when searching for the right one.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-hyperv', cat:'ps-mod-win', name:'Hyper-V', tag:'Windows\' native virtualization — VMs, virtual switches, checkpoints',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/hyper-v/?view=windowsserver2025-ps',
+    os: winOnly('Wraps the Windows Hyper-V hypervisor role directly — VMware/KVM/other hypervisors each have their own entirely separate management module.'),
+    code:'Get-VM | Select-Object Name, State, CPUUsage, MemoryAssigned\nNew-VM -Name "WebServer01" -MemoryStartupBytes 4GB -NewVHDPath "D:\\VMs\\WebServer01.vhdx" -NewVHDSizeBytes 60GB',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/hyper-v/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">Hyper-V</a> manages Windows\' built-in hypervisor — virtual machines, virtual switches/networking, virtual hard disks, and checkpoints (Hyper-V\'s term for VM snapshots) — everything the Hyper-V Manager GUI does, scripted.') +
+      P('<code>4GB</code>/<code>60GB</code> above are PowerShell\'s built-in size-literal suffixes (the same ones from the Fundamentals Where-Object card\'s <code>1MB</code>) — this module leans on them constantly, since almost every size parameter expects raw bytes underneath.'),
+    explain: CODE('Get-VM | Select-Object Name, State, CPUUsage, MemoryAssigned\nNew-VM -Name "WebServer01" -MemoryStartupBytes 4GB -NewVHDPath "D:\\VMs\\WebServer01.vhdx" -NewVHDSizeBytes 60GB') +
+      P('<code>Get-VM | Where-Object State -eq Off | Start-VM</code> — chaining the Fundamentals Where-Object pattern here starts every powered-off VM on a host in one line, exactly the kind of bulk operation this module is built for.') +
+      P('A <b>checkpoint</b> (<code>Checkpoint-VM</code>, not shown) captures the VM\'s full disk and memory state for instant rollback — genuinely useful before a risky in-guest change, but not a backup strategy on its own since it lives on the same host disk as the VM itself.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-failoverclusters', cat:'ps-mod-win', name:'FailoverClusters', tag:'Windows Server Failover Clustering — nodes, resources, and roles',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/failoverclusters/?view=windowsserver2025-ps',
+    os: winOnly('Administers Windows Server Failover Clustering (WSFC) specifically — a distinct feature from Linux clustering tools like Pacemaker/Corosync.'),
+    code:'Get-Cluster | Get-ClusterNode\nGet-ClusterGroup | Select-Object Name, State, OwnerNode',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/failoverclusters/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">FailoverClusters</a> manages Windows Server Failover Clustering — the high-availability layer underneath clustered file servers, clustered Hyper-V VMs, and clustered SQL Server instances, where a workload automatically fails over to another node if one goes down.') +
+      P('A <b>cluster group</b> (also called a "role" in newer tooling) is the unit that actually fails over — it bundles the resources (an IP address, a disk, the service itself) that need to move together as one, rather than independently.'),
+    explain: CODE('Get-Cluster | Get-ClusterNode\nGet-ClusterGroup | Select-Object Name, State, OwnerNode') +
+      P('<code>OwnerNode</code> on a cluster group shows which physical node is currently running that workload — after a failover this value changes automatically, which is exactly the behavior the whole feature exists to provide.') +
+      P('<code>Move-ClusterGroup</code> (not shown) manually triggers a failover on demand — the standard way to drain a node for planned maintenance (patching, hardware work) without waiting for an actual failure to prove the cluster works.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-smbshare', cat:'ps-mod-win', name:'SmbShare', tag:'SMB file shares — create, permission, and inspect who\'s connected',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/smbshare/?view=windowsserver2025-ps',
+    os: winOnly('Manages the Windows Server Message Block (SMB) server/sharing stack directly — macOS/Linux SMB serving (Samba) has its own entirely separate configuration and tooling, unrelated to this module.'),
+    code:'Get-SmbShare\nNew-SmbShare -Name "Public" -Path "D:\\Shares\\Public" -FullAccess "Everyone"\nGet-SmbConnection',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/smbshare/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">SmbShare</a> manages Windows file shares — creating and permissioning SMB shares, and inspecting who\'s actually connected to them right now (<code>Get-SmbConnection</code>/<code>Get-SmbOpenFile</code>) — the modern replacement for the old <code>net share</code> command-line tool.') +
+      P('Share-level permissions (set here) and NTFS file-system permissions (set with <code>Get-Acl</code>/<code>Set-Acl</code> from the Microsoft.PowerShell.Security card) are two independent layers that both apply — a user needs to pass both to actually read a file over the network.'),
+    explain: CODE('Get-SmbShare\nNew-SmbShare -Name "Public" -Path "D:\\Shares\\Public" -FullAccess "Everyone"\nGet-SmbConnection') +
+      P('<code>Get-SmbOpenFile</code> (not shown) lists every file currently open by a remote user over SMB — the real answer to "who has this file locked" before forcibly closing a connection with <code>Close-SmbOpenFile</code>.') +
+      P('The effective permission a remote user gets is the *more restrictive* of the SMB share permission and the NTFS permission on the underlying folder — a common source of "I gave them full access but they still can\'t write" confusion when only one layer was changed.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-bitlocker', cat:'ps-mod-win', name:'BitLocker', tag:'full-disk encryption — enable, unlock, manage recovery keys',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/bitlocker/?view=windowsserver2025-ps',
+    os: winOnly('Wraps Windows\' native BitLocker Drive Encryption — macOS (FileVault) and Linux (LUKS) use entirely different encryption systems with their own separate tooling.'),
+    code:'Get-BitLockerVolume\nEnable-BitLocker -MountPoint "D:" -EncryptionMethod XtsAes256 -RecoveryPasswordProtector',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/bitlocker/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">BitLocker</a> manages Windows\' built-in full-volume encryption — enabling/disabling it per drive, checking encryption progress and status, and managing the recovery keys (protectors) that unlock a drive without the normal TPM/PIN/password.') +
+      P('<code>Get-BitLockerVolume</code>\'s <code>ProtectionStatus</code> is the field worth checking in any compliance/security-audit script — a drive can be fully encrypted but temporarily *unprotected* (e.g. mid-firmware-update), a real, distinct state this module surfaces directly.'),
+    explain: CODE('Get-BitLockerVolume\nEnable-BitLocker -MountPoint "D:" -EncryptionMethod XtsAes256 -RecoveryPasswordProtector') +
+      P('A "protector" is one specific way a volume can be unlocked — TPM, a PIN, a recovery password, or a startup key on USB — a volume can have several simultaneously, which is why <code>-RecoveryPasswordProtector</code> is explicitly one *type* of protector being added, not the only kind that could be used.') +
+      P('<code>Backup-BitLockerKeyProtector</code> (not shown) escrows a recovery key to Active Directory or Entra ID — the organizational safety net for "user forgot their PIN and the drive is now unreadable" without this step having been done in advance.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-netsecurity', cat:'ps-mod-win', name:'NetSecurity', tag:'Windows Defender Firewall — rules, profiles, IPsec',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/netsecurity/?view=windowsserver2025-ps',
+    os: winOnly('Configures the Windows Filtering Platform / Windows Defender Firewall directly — macOS (pf) and Linux (iptables/nftables) use entirely different firewall engines with unrelated cmdlets/tools.'),
+    code:'Get-NetFirewallRule -Enabled True | Select-Object DisplayName, Direction, Action\nNew-NetFirewallRule -DisplayName "Allow HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/netsecurity/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">NetSecurity</a> is the scriptable face of Windows Defender Firewall — inbound/outbound rules, the three firewall profiles (Domain/Private/Public), and IPsec connection security rules — the modern replacement for the old <code>netsh advfirewall</code> command-line syntax.') +
+      P('This module and the Defender card elsewhere in this category are commonly confused by name — Defender is antivirus/threat protection; NetSecurity is specifically the network firewall, a separate Windows security component entirely.'),
+    explain: CODE('Get-NetFirewallRule -Enabled True | Select-Object DisplayName, Direction, Action\nNew-NetFirewallRule -DisplayName "Allow HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow') +
+      P('A rule\'s effective behavior depends on <code>-Profile</code> (Domain/Private/Public, default all three) as much as its port/protocol — the same rule can be active on a trusted office network and silently inactive on public Wi-Fi, entirely by design.') +
+      P('Windows Firewall evaluates block rules before allow rules regardless of creation order — a single overly-broad block rule elsewhere can silently defeat a carefully-scoped allow rule created here, a common real-world troubleshooting trap.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-applocker', cat:'ps-mod-win', name:'AppLocker', tag:'application whitelisting — control what\'s allowed to run',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/applocker/?view=windowsserver2025-ps',
+    os: winOnly('AppLocker is a Windows-specific application control feature built into the OS — there is no equivalent module for a directly comparable cross-platform mechanism.'),
+    code:'Get-AppLockerPolicy -Effective\nNew-AppLockerPolicy -RuleType Publisher -User Everyone -FileType Exe -Xml | Set-AppLockerPolicy',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/applocker/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">AppLocker</a> controls exactly which applications, scripts, and installers are allowed to run on a machine — publisher-signature-based, path-based, or file-hash-based rules — the more granular successor to the older Software Restriction Policies.') +
+      P('This is the Windows-native answer to the "application whitelisting" concept the Execution Policy Fundamentals card explicitly said PowerShell\'s own <code>Get-ExecutionPolicy</code> is <b>not</b> — AppLocker is the actual security-boundary tool for that job, not execution policy.'),
+    explain: CODE('Get-AppLockerPolicy -Effective\nNew-AppLockerPolicy -RuleType Publisher -User Everyone -FileType Exe -Xml | Set-AppLockerPolicy') +
+      P('<code>-Effective</code> reads the policy actually enforced on the local machine right now (merged from local + any Group Policy-delivered rules) — distinct from <code>-Local</code>, which reads only the local policy in isolation, ignoring anything layered on via GroupPolicy.') +
+      P('Publisher rules (matching a code-signing certificate) survive an application updating to a new version far better than a hash rule would, since the file hash changes on every update but the publisher\'s signature typically doesn\'t — a real tradeoff between the rule types this module supports.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-printmanagement', cat:'ps-mod-win', name:'PrintManagement', tag:'print servers, printers, drivers, and the print queue',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/printmanagement/?view=windowsserver2025-ps',
+    os: winOnly('Manages the Windows print spooler and print server role directly — for the cloud-native, cross-platform alternative, see the Microsoft.Graph.Devices.CloudPrint (Universal Print) card in the Microsoft Graph category.'),
+    code:'Get-Printer\nGet-PrintJob -PrinterName "Office-Printer-01"\nAdd-Printer -Name "Office-Printer-01" -DriverName "HP Universal Printing PCL 6" -PortName "IP_10.0.0.50"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/printmanagement/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">PrintManagement</a> administers traditional on-prem Windows print serving — installed printers, their drivers, the ports they\'re reached through, and jobs sitting in the print queue.') +
+      P('This is the legacy print-server model this whole area of Windows administration has largely been migrating away from — Universal Print (the Microsoft.Graph.Devices.CloudPrint card) is Microsoft\'s cloud-native, driverless replacement for exactly this job.'),
+    explain: CODE('Get-Printer\nGet-PrintJob -PrinterName "Office-Printer-01"\nAdd-Printer -Name "Office-Printer-01" -DriverName "HP Universal Printing PCL 6" -PortName "IP_10.0.0.50"') +
+      P('A printer here is really three linked pieces: the driver (software translating print jobs), the port (how the spooler reaches the physical device — usually a TCP/IP port), and the printer object itself tying them together — <code>Add-Printer</code> assumes the driver\'s already installed via <code>Add-PrinterDriver</code>.') +
+      P('<code>Get-PrintJob | Remove-PrintJob</code> clears a stuck queue without touching the printer\'s configuration at all — the scripted version of the classic "clear the print queue" fix, without opening the GUI.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-windowsupdate', cat:'ps-mod-win', name:'WindowsUpdate', tag:'a single cmdlet — merge Windows Update trace logs into readable text',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/windowsupdate/?view=windowsserver2025-ps',
+    os: winOnly('Merges Windows-specific ETL trace files produced by the Windows Update client — no equivalent on other platforms.'),
+    code:'Get-WindowsUpdateLog',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/windowsupdate/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">WindowsUpdate</a>, the official inbox module, is intentionally tiny — exactly one cmdlet, <code>Get-WindowsUpdateLog</code>, which merges Windows Update\'s raw <code>.etl</code> trace files into a single readable text log.') +
+      P('Actually *managing* updates (checking for, downloading, installing) is not what this inbox module does — that job belongs to the popular but unofficial, community-maintained Gallery module <code>PSWindowsUpdate</code>, a completely separate piece of software worth not confusing with this one despite the near-identical name.'),
+    explain: CODE('Get-WindowsUpdateLog') +
+      P('Windows Update stopped writing a plain-text log file by default years ago in favor of ETW (Event Tracing for Windows) — <code>Get-WindowsUpdateLog</code> exists specifically to reverse that decision after the fact, producing the human-readable log admins actually want to read.') +
+      P('This is a genuinely good illustration of why checking a module\'s *actual* cmdlet list matters before assuming what it does from its name alone — several cards in this category exist partly to correct a plausible-sounding but wrong guess.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-international', cat:'ps-mod-win', name:'International', tag:'system locale, language, and regional (GeoID) settings',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/international/?view=windowsserver2025-ps',
+    os: winOnly('Reads/writes Windows-specific locale and regional-settings registry state — macOS/Linux locale configuration is entirely different (the POSIX `locale` mechanism).'),
+    code:'Get-WinSystemLocale\nGet-WinHomeLocation\nSet-WinSystemLocale -SystemLocale "en-GB"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/international/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">International</a> reads and sets Windows\' regional configuration — the system locale (default code page/formatting), the display/input language, and the "home location" GeoID used for region-specific content and services.') +
+      P('This is squarely OS-level configuration, not the .NET/PowerShell culture settings that control how a single script formats numbers or dates (<code>Get-Culture</code>, part of Microsoft.PowerShell.Core) — the two are related but genuinely separate settings that can disagree.'),
+    explain: CODE('Get-WinSystemLocale\nGet-WinHomeLocation\nSet-WinSystemLocale -SystemLocale "en-GB"') +
+      P('<code>Set-WinSystemLocale</code> requires a restart to fully take effect — it changes low-level, non-Unicode code-page behavior baked into the running OS session, not something that can be hot-swapped like a per-script culture setting.') +
+      P('<code>Get-WinHomeLocation</code> returns a numeric GeoID, not a friendly country name — Microsoft publishes a lookup table mapping GeoIDs to countries/regions, since the API itself only ever speaks in that numeric code.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-deduplication', cat:'ps-mod-win', name:'Deduplication', tag:'Data Deduplication — reclaim space from duplicate file blocks',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/deduplication/?view=windowsserver2025-ps',
+    os: winOnly('Manages the Windows Server Data Deduplication feature specifically — a distinct implementation from any filesystem-level dedup on other platforms (e.g. ZFS/Btrfs dedup on Linux).'),
+    code:'Enable-DedupVolume -Volume "D:" -UsageType Default\nGet-DedupStatus | Select-Object Volume, SavedSpace, OptimizedFilesCount',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/deduplication/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">Deduplication</a> manages Windows Server\'s Data Deduplication feature — finding and eliminating duplicate blocks across files on a volume (common in file shares, VM libraries, and backup targets) to reclaim real disk space without deleting anything.') +
+      P('<code>-UsageType</code> on <code>Enable-DedupVolume</code> pre-tunes several low-level settings for the expected workload (<code>Default</code> for general file shares, <code>HyperV</code> for VM storage, <code>Backup</code> for backup targets) rather than leaving an admin to hand-tune each one individually.'),
+    explain: CODE('Enable-DedupVolume -Volume "D:" -UsageType Default\nGet-DedupStatus | Select-Object Volume, SavedSpace, OptimizedFilesCount') +
+      P('Deduplication runs as a scheduled background job (via the ScheduledTasks-backed Deduplication job scheduling), not instantly on write — <code>Get-DedupStatus</code>\'s <code>SavedSpace</code> only reflects data that\'s actually been through an optimization pass already.') +
+      P('This is transparent to applications reading the files — a deduplicated file opens and reads completely normally; the space savings and block-sharing are entirely a filesystem-level implementation detail underneath.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-iisadmin', cat:'ps-mod-win', name:'IISAdministration', tag:'the modern IIS module — faster, pipeline-friendly',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/iisadministration/?view=windowsserver2025-ps',
+    os: winOnly('Manages Internet Information Services (IIS), a Windows-specific web server — Apache/nginx on Linux use entirely different configuration and tooling.'),
+    code:'Get-IISSite\nGet-IISAppPool | Where-Object State -eq Started',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/iisadministration/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">IISAdministration</a> is the IIS team\'s newer PowerShell module — sites, application pools, and IIS configuration — designed to scale better in long-running scripts and integrate more cleanly with the pipeline than the older WebAdministration module it\'s meant to eventually replace.') +
+      P('Both this module and WebAdministration (its own card in this category) currently coexist and are both still widely used — IIS itself doesn\'t require picking one, and plenty of real scripts mix cmdlets from both.'),
+    explain: CODE('Get-IISSite\nGet-IISAppPool | Where-Object State -eq Started') +
+      P('Under the hood this module works through <code>Microsoft.Web.Administration.ServerManager</code> directly (a .NET API), rather than shelling out to <code>appcmd.exe</code> the way some older IIS scripting approaches did — a meaningfully faster path for scripts touching IIS configuration repeatedly.') +
+      P('<code>Get-IISServerManager</code> (not shown) hands back that underlying ServerManager object directly — an escape hatch into the full .NET IIS configuration API for anything this module\'s own cmdlets don\'t cover.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-webadmin', cat:'ps-mod-win', name:'WebAdministration', tag:'the classic, still-widely-used IIS module',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/webadministration/?view=windowsserver2025-ps',
+    os: winOnly('Manages Internet Information Services (IIS), a Windows-specific web server — Apache/nginx on Linux use entirely different configuration and tooling.'),
+    code:'Get-Website\nNew-WebAppPool -Name "MyAppPool"\nSet-ItemProperty "IIS:\\Sites\\Default Web Site" -Name applicationPool -Value "MyAppPool"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/webadministration/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">WebAdministration</a> is the original IIS PowerShell module, installed automatically alongside IIS management tools — sites, application pools, and (its more distinctive feature) an <code>IIS:</code> PSDrive that lets you navigate IIS configuration like a file system.') +
+      P('The <code>IIS:</code> drive is genuinely unusual among PowerShell providers on this page — <code>cd IIS:\\Sites</code> and <code>dir</code> actually walk IIS\'s configuration tree the same way a filesystem drive walks folders, using ordinary navigation cmdlets instead of module-specific ones.'),
+    explain: CODE('Get-Website\nNew-WebAppPool -Name "MyAppPool"\nSet-ItemProperty "IIS:\\Sites\\Default Web Site" -Name applicationPool -Value "MyAppPool"') +
+      P('<code>Set-ItemProperty</code> against an <code>IIS:</code> path works because of that PSDrive/provider — the exact same generic cmdlet used to set a registry value or a file attribute elsewhere, here reconfiguring IIS purely because of which drive the path happens to point into.') +
+      P('For new scripts, Microsoft\'s own guidance leans toward IISAdministration (this module\'s sibling card) for better pipeline behavior and performance — WebAdministration persists mainly through existing scripts and its distinctive, still-genuinely-useful <code>IIS:</code> drive.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-remotedesktop', cat:'ps-mod-win', name:'RemoteDesktop', tag:'Remote Desktop Services — session deployments, collections, active sessions',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/remotedesktop/?view=windowsserver2025-ps',
+    os: winOnly('Administers Windows Remote Desktop Services (RDS) specifically — a Windows Server role with no cross-platform equivalent module.'),
+    code:'Get-RDSessionCollection\nGet-RDUserSession | Select-Object UserName, SessionState, HostServer',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/remotedesktop/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">RemoteDesktop</a> administers Remote Desktop Services (RDS) deployments — multi-server RDS farms with a Connection Broker, session host collections, and every user\'s currently active remote session.') +
+      P('<code>New-RDSessionDeployment</code> (not shown) provisions an entire multi-role RDS farm (Connection Broker + Web Access + Session Host) in one call — this module operates at the scale of "stand up the whole deployment," not just one server\'s local settings.'),
+    explain: CODE('Get-RDSessionCollection\nGet-RDUserSession | Select-Object UserName, SessionState, HostServer') +
+      P('A <b>collection</b> groups session hosts and the users allowed to connect to them into one manageable unit — <code>Get-RDUserSession</code> can be scoped to a specific collection, or left broad to see every active session across the whole deployment.') +
+      P('<code>Invoke-RDUserLogoff</code> (not shown) forcibly ends one specific user\'s session by ID — the scripted equivalent of an admin using Server Manager\'s GUI to disconnect a hung or abandoned remote session.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-troubleshootingpack', cat:'ps-mod-win', name:'TroubleshootingPack', tag:'run the built-in Windows troubleshooters from a script',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/troubleshootingpack/?view=windowsserver2025-ps',
+    os: winOnly('Wraps Windows\' own Diagnostic Policy Service and troubleshooting-pack infrastructure — no equivalent on other platforms.'),
+    code:'$pack = Get-TroubleshootingPack -Path "C:\\Windows\\diagnostics\\system\\Audio"\nInvoke-TroubleshootingPack -Pack $pack -Unattended',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/troubleshootingpack/?view=windowsserver2025-ps" target="_blank" rel="noreferrer noopener">TroubleshootingPack</a> runs the same built-in troubleshooters as Windows\' Get Help/Troubleshoot settings pages (audio, networking, printing...) from a script — <code>Get-TroubleshootingPack</code> loads one, <code>Invoke-TroubleshootingPack</code> actually runs it.') +
+      P('<code>-Unattended</code> is what makes this genuinely useful for automation — it runs the troubleshooter\'s full diagnose-and-fix logic without stopping to interactively ask a human which resolution to apply, the same automatic behavior "Run the troubleshooter" offers in the Settings UI.'),
+    explain: CODE('$pack = Get-TroubleshootingPack -Path "C:\\Windows\\diagnostics\\system\\Audio"\nInvoke-TroubleshootingPack -Pack $pack -Unattended') +
+      P('Troubleshooting packs live as folders under <code>C:\\Windows\\diagnostics\\system\\</code> on any Windows install — <code>Get-ChildItem</code> (from the Fundamentals cards) against that path lists every pack actually available on a given machine before trying to load one by name.') +
+      P('<code>-AnswerFile</code> (not shown) supplies pre-recorded answers to whatever interactive questions a pack would normally ask — genuinely useful for standardizing a troubleshooter\'s behavior identically across many machines in a script.')
+  }));
+
+  // ---------- Microsoft Graph — Modules ----------
+  // The cross-platform REST SDK for Microsoft 365 / Entra ID: https://learn.microsoft.com/en-us/powershell/module/?view=graph-powershell-1.0
+  APIS.push(psCard({
+    id:'ps-mod-graph-auth', cat:'ps-mod-graph', name:'Microsoft.Graph.Authentication', tag:'Connect-MgGraph — the entry point every other Graph module needs',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/?view=graph-powershell-1.0',
+    os: crossPlat('Pure REST over HTTPS against Microsoft Graph — the whole Graph SDK runs identically on Windows, macOS, and Linux under PowerShell 7+.'),
+    code:'Install-Module Microsoft.Graph -Scope CurrentUser\nConnect-MgGraph -Scopes "User.Read.All"\nGet-MgContext',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Authentication</a> is the module every other Graph module depends on — <code>Connect-MgGraph</code> handles the interactive/certificate/app-only sign-in and requests exactly the permission scopes named on the call.') +
+      P('This whole category is the modern replacement for the older, Windows-only <code>AzureAD</code>/<code>MSOnline</code> modules — same job (Microsoft 365 / Entra ID administration), rebuilt on Graph\'s REST API instead of a deprecated SOAP-era backend.'),
+    explain: CODE('Connect-MgGraph -Scopes "User.Read.All"\nGet-MgContext') +
+      P('<code>-Scopes</code> follows the principle of least privilege by design — you request exactly the Graph permissions a script needs (<code>User.Read.All</code>, <code>Group.ReadWrite.All</code>...), and the sign-in prompt shows the admin exactly what\'s being consented to.') +
+      P('<code>Get-MgContext</code> shows the current connection\'s account, tenant, and granted scopes — the first thing to check when a later <code>Get-Mg*</code> call fails with a permission error.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-users', cat:'ps-mod-graph', name:'Microsoft.Graph.Users', tag:'read and manage Entra ID user accounts',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.users/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /users Graph endpoint — no platform dependency.'),
+    code:'Get-MgUser -UserId "ada@contoso.com"\nGet-MgUser -Filter "startsWith(displayName,\'A\')" -Top 5',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.users/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Users</a> reads and writes Entra ID (formerly Azure AD) user accounts — <code>Get-MgUser</code>, <code>New-MgUser</code>, <code>Update-MgUser</code> — the cloud-identity equivalent of the on-prem Active Directory user cmdlets.') +
+      P('Every property returned maps directly onto a field in the Entra admin portal — <code>DisplayName</code>, <code>UserPrincipalName</code>, <code>AccountEnabled</code> — since both are reading the same underlying directory through the same Graph API.'),
+    explain: CODE('Get-MgUser -UserId "ada@contoso.com"\nGet-MgUser -Filter "startsWith(displayName,\'A\')" -Top 5') +
+      P('<code>-Filter</code> uses OData query syntax (Graph\'s REST filtering language), not PowerShell\'s own comparison operators — <code>startsWith(...)</code> is evaluated server-side by Graph, unlike a local <code>Where-Object</code> which filters after everything\'s already been fetched.') +
+      P('<code>-Top 5</code> limits results at the API level too — for large tenants this matters: it\'s the difference between Graph returning 5 users versus paging through every user in the directory before <code>Select-Object -First 5</code> would even run locally.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-groups', cat:'ps-mod-graph', name:'Microsoft.Graph.Groups', tag:'Entra ID / Microsoft 365 groups and their membership',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.groups/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /groups Graph endpoint — no platform dependency.'),
+    code:'Get-MgGroup -Filter "displayName eq \'Sales\'"\nNew-MgGroupMember -GroupId $groupId -DirectoryObjectId $userId',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.groups/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Groups</a> manages Microsoft 365/security/distribution groups and their membership — <code>Get-MgGroup</code>, <code>Get-MgGroupMember</code>, <code>New-MgGroupMember</code> — the same directory objects Teams/SharePoint/Exchange group access all resolve back to.') +
+      P('Group and user IDs throughout the Graph SDK are GUIDs, not display names — the usual pattern is <code>Get-MgGroup -Filter "..."</code> once to resolve a friendly name into its <code>Id</code>, then reusing that <code>Id</code> for every subsequent call.'),
+    explain: CODE('Get-MgGroup -Filter "displayName eq \'Sales\'"\nNew-MgGroupMember -GroupId $groupId -DirectoryObjectId $userId') +
+      P('<code>displayName eq \'Sales\'</code> is exact-match OData filtering (<code>eq</code>), stricter than the <code>startsWith(...)</code> used in the Users card — Graph\'s OData dialect supports both alongside <code>contains</code>, <code>endsWith</code>, and boolean combinations.') +
+      P('<code>DirectoryObjectId</code> works for both users and other groups (nested groups) — Graph models group membership as "any directory object," not "users specifically."')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-apps', cat:'ps-mod-graph', name:'Microsoft.Graph.Applications', tag:'app registrations & service principals — the identity behind an app',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.applications/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /applications and /servicePrincipals Graph endpoints — no platform dependency.'),
+    code:'Get-MgApplication -Filter "displayName eq \'MyApp\'"\nNew-MgApplication -DisplayName "MyApp"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.applications/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Applications</a> manages app registrations and their service principals — the identity objects behind every "Sign in with Microsoft" integration and every app-only (client credential) script authentication.') +
+      P('An <b>application</b> object is the app\'s definition (redirect URIs, required permissions); its <b>service principal</b> is the actual identity used to grant it access in a given tenant — two related but distinct objects this module manages separately.'),
+    explain: CODE('Get-MgApplication -Filter "displayName eq \'MyApp\'"\nNew-MgApplication -DisplayName "MyApp"') +
+      P('Creating an app registration here is the scripted equivalent of the "App registrations" blade in the Entra admin portal — useful for provisioning automation identities without a portal click-through.') +
+      P('Any script that authenticates itself with a client ID/secret or certificate (rather than a signed-in user) is authenticating as one of these service principal objects — this module is how that identity gets created and configured in the first place.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-mail', cat:'ps-mod-graph', name:'Microsoft.Graph.Mail', tag:'read, send, and manage mail through Exchange Online',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.mail/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /messages Graph endpoint — no platform dependency.'),
+    code:'Get-MgUserMessage -UserId "ada@contoso.com" -Top 5 | Select-Object Subject, ReceivedDateTime',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.mail/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Mail</a> reads and sends mail through Exchange Online mailboxes over Graph — the modern, REST-based alternative to talking directly to Exchange Web Services or SMTP.') +
+      P('Reading someone else\'s mailbox this way needs an admin-consented application permission (e.g. <code>Mail.Read</code>), not just the signed-in user\'s own delegated access — worth knowing before this looks like it should "just work" against any mailbox.'),
+    explain: CODE('Get-MgUserMessage -UserId "ada@contoso.com" -Top 5 | Select-Object Subject, ReceivedDateTime') +
+      P('The result is a normal PowerShell object array — piping straight into <code>Select-Object</code>/<code>Where-Object</code> from the Fundamentals cards works exactly as it does against any other pipeline output, mail included.') +
+      P('<code>Send-MgUserMail</code> is the write counterpart — it takes a nested hashtable/object describing the message (subject, body, recipients), the same <code>@{ }</code> shape covered in the Arrays & Hashtables Fundamentals card.')
+  }));
+
+  // The five cards above (Authentication, Users, Groups, Applications, Mail)
+  // are the ones almost every admin script touches. The rest of the Graph
+  // SDK's 30+ sub-modules below exist for completeness — the full list at
+  // https://learn.microsoft.com/en-us/powershell/module/?view=graph-powershell-1.0
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-backuprestore', cat:'ps-mod-graph', name:'Microsoft.Graph.BackupRestore', tag:'Microsoft 365 Backup Storage — protection policies and restore jobs',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.backuprestore/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /solutions/backupRestore Graph endpoint — no platform dependency.'),
+    code:'Get-MgSolutionBackupRestore\nEnable-MgSolutionBackupRestore',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.backuprestore/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.BackupRestore</a> manages Microsoft 365 Backup — protection policies covering Exchange, OneDrive, and SharePoint, and the restore sessions that recover from them.') +
+      P('This is a genuinely recent (2024+) Microsoft 365 feature — a first-party backup service — rather than something bolted on from an acquisition, which is why its cmdlet nouns are all freshly-coined (<code>SolutionBackupRestore...</code>) rather than reusing older Exchange/SharePoint vocabulary.'),
+    explain: CODE('Get-MgSolutionBackupRestore\nEnable-MgSolutionBackupRestore') +
+      P('<code>Get-MgSolutionBackupRestore</code> reports the service\'s own enablement status for the tenant — <code>Enable-MgSolutionBackupRestore</code> is the one-time opt-in a tenant needs before any protection policy can be created.') +
+      P('Everything under this module lives under the <code>/solutions/backupRestore</code> path in Graph — the <code>Solution</code> segment in every cmdlet noun is that path showing through into the generated command names.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-bookings', cat:'ps-mod-graph', name:'Microsoft.Graph.Bookings', tag:'Microsoft Bookings — businesses, services, staff, appointments',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.bookings/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /solutions/bookingBusinesses Graph endpoint — no platform dependency.'),
+    code:'Get-MgBookingBusiness\nGet-MgBookingBusinessAppointment -BookingBusinessId $businessId',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.bookings/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Bookings</a> administers Microsoft Bookings — the customer-facing appointment-scheduling app in Microsoft 365 — reading and managing businesses, their bookable services, staff, and the appointments customers make.') +
+      P('The required permission scope, <code>Bookings.Read.All</code>, is one to request explicitly on <code>Connect-MgGraph</code> (see the Authentication card) — it\'s never granted by the broader <code>User.Read.All</code>/<code>Group.Read.All</code> scopes used elsewhere on this page.'),
+    explain: CODE('Get-MgBookingBusiness\nGet-MgBookingBusinessAppointment -BookingBusinessId $businessId') +
+      P('<code>Get-MgBookingBusiness</code> with no ID lists every Bookings business/calendar in the tenant — the usual first call, to resolve a business\'s <code>Id</code> before querying its services, staff, or appointments specifically.') +
+      P('Appointments returned here carry customer PII (name, email, notes) by design — worth remembering when logging or exporting this module\'s output anywhere.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-calendar', cat:'ps-mod-graph', name:'Microsoft.Graph.Calendar', tag:'calendars, events, and meeting invitations',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.calendar/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /users/{id}/calendar Graph endpoint — no platform dependency.'),
+    code:'Get-MgUserCalendarView -UserId "ada@contoso.com" -StartDateTime (Get-Date) -EndDateTime (Get-Date).AddDays(7)\nNew-MgUserEvent -UserId "ada@contoso.com" -Subject "Standup" -Start @{DateTime="2026-08-26T09:00:00"; TimeZone="UTC"} -End @{DateTime="2026-08-26T09:15:00"; TimeZone="UTC"}',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.calendar/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Calendar</a> reads and writes Outlook/Exchange calendars — listing events in a date range, creating meetings, and managing multiple named calendars per mailbox.') +
+      P('<code>Get-MgUserCalendarView</code> rather than a plain <code>Get-MgUserEvent</code> is the one to reach for when a date range matters — it correctly expands recurring meetings into each individual occurrence within the window, which a raw event list does not do.'),
+    explain: CODE('Get-MgUserCalendarView -UserId "ada@contoso.com" -StartDateTime (Get-Date) -EndDateTime (Get-Date).AddDays(7)') +
+      P('The <code>Start</code>/<code>End</code> parameters on <code>New-MgUserEvent</code> are nested hashtables (<code>@{DateTime=...; TimeZone=...}</code>) — the same <code>@{ }</code> shape from the Arrays & Hashtables Fundamentals card, mirroring the nested JSON the Graph API actually expects on the wire.') +
+      P('Every date/time here is explicit about its <code>TimeZone</code> rather than relying on an implicit local zone — a deliberate design choice in Graph\'s calendar API to avoid the classic "meeting invite showed up an hour off" bug class.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-changenotif', cat:'ps-mod-graph', name:'Microsoft.Graph.ChangeNotifications', tag:'webhook subscriptions — get pushed changes instead of polling',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.changenotifications/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /subscriptions Graph endpoint — no platform dependency.'),
+    code:'New-MgSubscription -ChangeType "created,updated" -NotificationUrl "https://example.com/notify" -Resource "me/mailFolders(\'Inbox\')/messages" -ExpirationDateTime (Get-Date).AddHours(1)\nGet-MgSubscription',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.changenotifications/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.ChangeNotifications</a> creates and manages webhook subscriptions — Graph pushing a notification to your own URL the moment a resource (a mailbox, a group, a drive...) changes, instead of a script polling for changes on a timer.') +
+      P('Every subscription has a hard expiration (a few days at most, often much shorter) — a real production integration renews it before expiry with <code>Update-MgSubscription</code> rather than treating <code>New-MgSubscription</code> as a one-time setup step.'),
+    explain: CODE('New-MgSubscription -ChangeType "created,updated" -NotificationUrl "https://example.com/notify" -Resource "me/mailFolders(\'Inbox\')/messages" -ExpirationDateTime (Get-Date).AddHours(1)') +
+      P('<code>-NotificationUrl</code> must be a publicly reachable HTTPS endpoint that responds to Graph\'s validation handshake — this is infrastructure a script sets up, not something Graph hosts for you.') +
+      P('<code>-ClientState</code> (not shown above) is a shared secret you set and Graph echoes back on every notification — the way to confirm an incoming webhook call genuinely came from your own subscription.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-compliance', cat:'ps-mod-graph', name:'Microsoft.Graph.Compliance', tag:'eDiscovery cases, holds, and compliance search',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.compliance/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /compliance Graph endpoint — no platform dependency.'),
+    code:'Get-MgComplianceEdiscoveryCase\nGet-MgComplianceEdiscoveryCaseCustodian -EdiscoveryCaseId $caseId',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.compliance/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Compliance</a> scripts Microsoft Purview eDiscovery — cases, the custodians (people) placed on legal hold within them, and the searches run across their data.') +
+      P('This is squarely a legal/compliance-team tool rather than an everyday IT-admin one — creating and managing eDiscovery cases needs the corresponding Purview compliance role, not just a general Graph admin scope.'),
+    explain: CODE('Get-MgComplianceEdiscoveryCase\nGet-MgComplianceEdiscoveryCaseCustodian -EdiscoveryCaseId $caseId') +
+      P('An eDiscovery <b>case</b> is the top-level container; <b>custodians</b> are the specific people whose mailboxes/OneDrive get placed on hold and searched within it — the two-level nesting these cmdlet names spell out directly.') +
+      P('Everything here maps directly onto the Microsoft Purview compliance portal\'s eDiscovery experience — this module is the scriptable path to the same cases an investigator would otherwise click through by hand.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-crossdevice', cat:'ps-mod-graph', name:'Microsoft.Graph.CrossDeviceExperiences', tag:'a user\'s cross-device activity feed (Timeline)',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.crossdeviceexperiences/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /users/{id}/activities Graph endpoint — no platform dependency.'),
+    code:'Get-MgUserActivity -UserId "ada@contoso.com"\nInvoke-MgRecentUserActivity -UserId "ada@contoso.com"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.crossdeviceexperiences/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.CrossDeviceExperiences</a> reads and writes a user\'s cross-device activity history — the same data that powered Windows Timeline — letting an app record "I was doing X" and pick it back up on another device.') +
+      P('Despite the module name mentioning "cross-device," every cmdlet noun is <code>UserActivity</code>, not <code>Device</code> — this module is entirely about activity records, with no overlap with the device-management modules elsewhere in this category.'),
+    explain: CODE('Get-MgUserActivity -UserId "ada@contoso.com"\nInvoke-MgRecentUserActivity -UserId "ada@contoso.com"') +
+      P('<code>Invoke-MgRecentUserActivity</code> behaves like a "most recently used" API — it\'s scoped by design to only return activities *your own application* created (via <code>UserActivity.ReadWrite.CreatedByApp</code>), not a user\'s full cross-app history.') +
+      P('Each activity can carry an <code>activityHistoryItems</code> collection — timestamped visits to that same activity — which is what actually reconstructs "when did I last work on this" rather than just "this exists."')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-devicemgmt', cat:'ps-mod-graph', name:'Microsoft.Graph.DeviceManagement', tag:'the core Intune module — enrolled/managed devices',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devicemanagement/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /deviceManagement Graph endpoint — no platform dependency.'),
+    code:'Get-MgDeviceManagementManagedDevice | Select-Object DeviceName, OperatingSystem, ComplianceState\nSync-MgDeviceManagementManagedDevice -ManagedDeviceId $deviceId',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devicemanagement/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.DeviceManagement</a> is the main Intune module — enrolled/managed devices, their compliance state, and detected apps — the module the four <code>DeviceManagement.*</code>/<code>Devices.*</code> sibling modules below all extend with narrower slices.') +
+      P('This is the Graph-native, cross-platform successor to the older Windows-only Intune PowerShell approaches — the same job, but callable from a pwsh session on any OS since it\'s just REST underneath.'),
+    explain: CODE('Get-MgDeviceManagementManagedDevice | Select-Object DeviceName, OperatingSystem, ComplianceState\nSync-MgDeviceManagementManagedDevice -ManagedDeviceId $deviceId') +
+      P('<code>ComplianceState</code> reflects whatever compliance policies Intune has evaluated against that device (encryption, OS version, jailbreak/root detection...) — this one property is usually the actual thing an admin script is checking for.') +
+      P('<code>Sync-MgDeviceManagementManagedDevice</code> requests an immediate check-in from that specific device rather than waiting for its normal periodic Intune sync interval — useful right after pushing a new policy when you don\'t want to wait.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-devicemgmt-admin', cat:'ps-mod-graph', name:'Microsoft.Graph.DeviceManagement.Administration', tag:'Intune tenant-wide settings — Exchange connectors, roles, notification templates',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devicemanagement.administration/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /deviceManagement administration Graph endpoints — no platform dependency.'),
+    code:'Get-MgDeviceManagementExchangeConnector\nGet-MgDeviceManagementRoleDefinition',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devicemanagement.administration/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.DeviceManagement.Administration</a> covers Intune\'s tenant-wide administrative plumbing — Exchange connectors (for conditional access against on-prem Exchange), role-based access definitions, and notification message templates — rather than individual devices.') +
+      P('This is the "how Intune itself is configured" module, sitting alongside — not overlapping — the main DeviceManagement module\'s "what devices exist and what state are they in" focus.'),
+    explain: CODE('Get-MgDeviceManagementExchangeConnector\nGet-MgDeviceManagementRoleDefinition') +
+      P('An Exchange connector is what lets Intune enforce conditional access against an on-premises Exchange Server (blocking ActiveSync for noncompliant devices) — <code>Get-MgDeviceManagementExchangeConnector</code> reports its sync status and health, since a stalled connector silently breaks that enforcement.') +
+      P('<code>Get-MgDeviceManagementRoleDefinition</code> lists Intune\'s own RBAC roles (built-in and custom) — a separate, narrower permission model layered on top of the broad Graph API scopes granted at <code>Connect-MgGraph</code> time.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-devicemgmt-enroll', cat:'ps-mod-graph', name:'Microsoft.Graph.DeviceManagement.Enrollment', tag:'device enrollment configuration and restrictions',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devicemanagement.enrollment/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /deviceManagement enrollment Graph endpoints — no platform dependency.'),
+    code:'Get-MgDeviceManagementDeviceEnrollmentConfiguration\nGet-MgDeviceManagementDeviceEnrollmentConfigurationAssignment -DeviceEnrollmentConfigurationId $configId',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devicemanagement.enrollment/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.DeviceManagement.Enrollment</a> manages the rules applied at enrollment time — device-type restrictions, enrollment limits, and Windows Autopilot-adjacent enrollment profiles — before a device becomes a fully "managed device" the main DeviceManagement module can see.') +
+      P('Think of it as gatekeeping: this module decides *whether and how* a device is allowed to enroll; the main DeviceManagement module takes over for everything *after* enrollment succeeds.'),
+    explain: CODE('Get-MgDeviceManagementDeviceEnrollmentConfiguration\nGet-MgDeviceManagementDeviceEnrollmentConfigurationAssignment -DeviceEnrollmentConfigurationId $configId') +
+      P('Enrollment configurations are ordered/prioritized — when several could apply to the same user or device group, Intune resolves conflicts using an explicit priority value on each configuration, not just "most specific wins."') +
+      P('<code>...ConfigurationAssignment</code> is the separate object linking a configuration to the group(s) it actually applies to — mirroring the assignment-object pattern used throughout Intune\'s policy model, not unique to enrollment.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-devicemgmt-fn', cat:'ps-mod-graph', name:'Microsoft.Graph.DeviceManagement.Functions', tag:'Intune diagnostic/lookup helper functions',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devicemanagement.functions/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against various /deviceManagement Graph function endpoints — no platform dependency.'),
+    code:'Get-MgDeviceManagementEffectivePermission -Scope "/deviceManagement/managedDevices"\nConfirm-MgDeviceManagementWindowsEnrollmentAutoDiscovery -Domain "contoso.com"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devicemanagement.functions/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.DeviceManagement.Functions</a> is a grab-bag of read-only diagnostic/lookup helpers for Intune — effective-permission checks, Windows enrollment auto-discovery validation, and audit-event metadata lookups — none of which fit neatly under the other DeviceManagement modules.') +
+      P('The "Functions" naming (shared with Users.Functions/DeviceManagement.Functions across the SDK) is a real Graph API distinction: these map to OData <b>functions</b> (read-only, GET-based computations) rather than <b>actions</b> (state-changing, POST-based) — a formal split the Graph REST API itself makes.'),
+    explain: CODE('Get-MgDeviceManagementEffectivePermission -Scope "/deviceManagement/managedDevices"\nConfirm-MgDeviceManagementWindowsEnrollmentAutoDiscovery -Domain "contoso.com"') +
+      P('<code>Get-MgDeviceManagementEffectivePermission</code> answers "what can the *currently signed-in identity* actually do here" — genuinely useful when a script\'s calls are failing with permission errors and it\'s unclear which specific scope is missing.') +
+      P('<code>Confirm-MgDeviceManagementWindowsEnrollmentAutoDiscovery</code> checks whether a domain\'s DNS is correctly set up for Windows auto-enrollment discovery — a real-world troubleshooting step when a user\'s "Access Work or School" enrollment silently fails to find the tenant.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-cloudprint', cat:'ps-mod-graph', name:'Microsoft.Graph.Devices.CloudPrint', tag:'Universal Print — cloud-hosted printers, queues, and jobs',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devices.cloudprint/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /print Graph endpoint — no platform dependency.'),
+    code:'Get-MgPrintPrinter\nGet-MgPrintPrinterJob -PrinterId $printerId',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devices.cloudprint/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Devices.CloudPrint</a> administers Universal Print — Microsoft\'s cloud-native, driverless print service — managing registered printers, print shares, connectors, and individual print jobs entirely through Graph.') +
+      P('"CloudPrint" in the module name is specifically Universal Print, not a generic term — this has no relationship to any local Windows print-spooler cmdlets; it\'s a fully separate cloud service with its own object model.'),
+    explain: CODE('Get-MgPrintPrinter\nGet-MgPrintPrinterJob -PrinterId $printerId') +
+      P('A <b>printer</b> is registered through a Universal Print <b>connector</b> (software bridging a physical/network printer to the cloud service) — <code>Get-MgPrintConnector</code> is the sibling cmdlet for inspecting that bridging layer specifically.') +
+      P('Because this is entirely cloud-hosted, the same cmdlets work identically whether the script runs on the print server\'s own network or from anywhere else — no VPN or local network adjacency required, unlike administering a traditional Windows print server.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-corpmgmt', cat:'ps-mod-graph', name:'Microsoft.Graph.Devices.CorporateManagement', tag:'Intune app management — mobile apps and app protection policies',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devices.corporatemanagement/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /deviceAppManagement Graph endpoint — no platform dependency.'),
+    code:'Get-MgDeviceAppManagementMobileApp | Select-Object DisplayName, Publisher\nGet-MgUserManagedDevice -UserId "ada@contoso.com"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devices.corporatemanagement/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Devices.CorporateManagement</a> covers Intune\'s <b>app</b> management side — the mobile apps published to users/devices and the app-protection ("MAM") policies that control corporate data inside them — the app-focused counterpart to the main DeviceManagement module\'s device focus.') +
+      P('Despite the "CorporateManagement" name, this is specifically about applications — device compliance/configuration itself lives in the main DeviceManagement module, not here.'),
+    explain: CODE('Get-MgDeviceAppManagementMobileApp | Select-Object DisplayName, Publisher\nGet-MgUserManagedDevice -UserId "ada@contoso.com"') +
+      P('<code>Get-MgDeviceAppManagementMobileApp</code> lists everything published through Intune\'s app catalog — Store apps, line-of-business packages, and web links alike, all as one object type distinguished by an <code>@odata.type</code> property.') +
+      P('MAM ("Mobile Application Management") app-protection policies — the ones that can wipe just an app\'s corporate data without touching a personal BYOD device — are a distinct concept from MDM device compliance, and this module is specifically the MAM/app half.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-serviceann', cat:'ps-mod-graph', name:'Microsoft.Graph.Devices.ServiceAnnouncement', tag:'Microsoft 365 Service Health — incidents, advisories, message center',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devices.serviceannouncement/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /admin/serviceAnnouncement Graph endpoint — no platform dependency.'),
+    code:'Get-MgServiceAnnouncementHealthOverview\nGet-MgServiceAnnouncementIssue',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.devices.serviceannouncement/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Devices.ServiceAnnouncement</a> reads the same data behind the Microsoft 365 admin center\'s Service Health and Message Center pages — current service incidents, historical issues, and planned-change announcements — scriptable instead of a dashboard you have to check manually.') +
+      P('Despite living under the "Devices" naming prefix here, this module has nothing to do with physical devices — it\'s a naming-convention quirk of how the Graph SDK groups its sub-modules, not a hint about the content.'),
+    explain: CODE('Get-MgServiceAnnouncementHealthOverview\nGet-MgServiceAnnouncementIssue') +
+      P('<code>Get-MgServiceAnnouncementHealthOverview</code> gives current status per service (Exchange, Teams, SharePoint...); <code>Get-MgServiceAnnouncementIssue</code> gives the historical incident log with start/resolution times — the difference between "is it broken right now" and "what broke, and when."') +
+      P('A script polling <code>Get-MgServiceAnnouncementHealthOverview</code> on a schedule is a legitimate, lightweight way to build a custom status-page alert without waiting on the admin center UI or email digests.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-directoryobjects', cat:'ps-mod-graph', name:'Microsoft.Graph.DirectoryObjects', tag:'the generic base type behind users, groups, devices, and apps',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.directoryobjects/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /directoryObjects Graph endpoint — no platform dependency.'),
+    code:'Get-MgDirectoryObjectById -Ids @($userId, $groupId)\nGet-MgDirectoryObjectMemberGroup -DirectoryObjectId $userId -SecurityEnabledOnly',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.directoryobjects/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.DirectoryObjects</a> works against <code>directoryObject</code> — the generic base type every user, group, device, and service principal in Entra ID inherits from — for the rare cases where a script has an ID but genuinely doesn\'t know (or care) which specific object type it points to.') +
+      P('This is the module to reach for when resolving a "what even is this GUID" situation — <code>Get-MgDirectoryObjectById</code> returns each object with its real, specific type inside a mixed-type array, letting a script branch on the answer.'),
+    explain: CODE('Get-MgDirectoryObjectById -Ids @($userId, $groupId)\nGet-MgDirectoryObjectMemberGroup -DirectoryObjectId $userId -SecurityEnabledOnly') +
+      P('<code>Get-MgDirectoryObjectById</code> batches multiple IDs of *mixed types* into a single call — genuinely useful when a script already has a list of object IDs from elsewhere (an audit log, an access review) and needs to resolve all of them at once.') +
+      P('<code>-SecurityEnabledOnly</code> on the member-group lookup filters out Microsoft 365 (non-security) groups from the result — the same filtering concern the Fundamentals Where-Object card handles locally, done here server-side instead.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-education', cat:'ps-mod-graph', name:'Microsoft.Graph.Education', tag:'Microsoft Education — schools, classes, and rostered students',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.education/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /education Graph endpoint — no platform dependency.'),
+    code:'Get-MgEducationSchool\nGet-MgEducationClassMember -EducationClassId $classId',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.education/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Education</a> administers the Microsoft Education object model — schools, classes, and the students/teachers rostered into them — usually populated via School Data Sync from a district\'s Student Information System rather than typed by hand.') +
+      P('This is a genuinely separate object graph from plain Entra ID users/groups: an <code>educationClass</code> has its own roster and grade-level metadata that a generic <code>Microsoft.Graph.Group</code> simply doesn\'t model.'),
+    explain: CODE('Get-MgEducationSchool\nGet-MgEducationClassMember -EducationClassId $classId') +
+      P('Every education object still resolves back to an ordinary Entra ID user/group under the hood — <code>Get-MgEducationUser</code> and the Microsoft.Graph.Users module\'s <code>Get-MgUser</code> can both return data about the same person, from two different vocabularies layered on the same directory.') +
+      P('This module is largely read/administrative — the actual sync of roster data from a Student Information System into these objects normally happens through School Data Sync, not by scripting these cmdlets to create the roster from scratch.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-files', cat:'ps-mod-graph', name:'Microsoft.Graph.Files', tag:'OneDrive & SharePoint files — drives, items, and content',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.files/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /drives Graph endpoint — no platform dependency.'),
+    code:'Get-MgUserDrive -UserId "ada@contoso.com"\nGet-MgDriveItem -DriveId $driveId -DriveItemId "root" | Select-Object Name, Size',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.files/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Files</a> reads and manages files in OneDrive and SharePoint document libraries — both modeled as a <code>drive</code> containing <code>driveItem</code>s (files and folders alike, distinguished by which facet is present on the object).') +
+      P('This is the Graph-native, cross-platform way to script OneDrive/SharePoint file operations — no dependency on the Windows-only OneDrive sync client or a mapped drive letter, since every call is plain REST.'),
+    explain: CODE('Get-MgUserDrive -UserId "ada@contoso.com"\nGet-MgDriveItem -DriveId $driveId -DriveItemId "root" | Select-Object Name, Size') +
+      P('A <code>driveItem</code> is deliberately one type for both files and folders — check its <code>Folder</code> vs <code>File</code> property (via <code>Get-MgDriveItem ... | Select-Object -ExpandProperty AdditionalProperties</code>) to tell which one you actually have, rather than a separate cmdlet per kind.') +
+      P('Uploading content is a distinct, separate call (a raw byte-stream PUT under the hood) from the metadata calls shown here — small-file upload and large-file resumable "upload session" are two different code paths in this module.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-dirmgmt', cat:'ps-mod-graph', name:'Microsoft.Graph.Identity.DirectoryManagement', tag:'tenant-level directory config — organization info, domains, admin units',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.identity.directorymanagement/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /organization and /domains Graph endpoints — no platform dependency.'),
+    code:'Get-MgOrganization | Select-Object DisplayName, Id\nGet-MgDomain | Select-Object Id, IsVerified, IsDefault',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.identity.directorymanagement/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Identity.DirectoryManagement</a> reads tenant-level configuration one layer above individual users/groups — organization profile info, verified custom domains, and administrative units for delegating admin scope by geography or division.') +
+      P('<code>Get-MgOrganization</code> is often the very first call in a new script against an unfamiliar tenant — a quick sanity check that <code>Connect-MgGraph</code> (from the Authentication card) landed in the right tenant before anything more consequential runs.'),
+    explain: CODE('Get-MgOrganization | Select-Object DisplayName, Id\nGet-MgDomain | Select-Object Id, IsVerified, IsDefault') +
+      P('<code>Get-MgDomain</code>\'s <code>IsVerified</code> matters directly for provisioning — a user can only be created with a UPN on a domain the tenant has proven ownership of (via the DNS TXT/MX record verification step) shown here.') +
+      P('Administrative units (a separate cmdlet, <code>Get-MgDirectoryAdministrativeUnit</code>) let a large organization delegate "admin over this one campus/subsidiary\'s users" without granting tenant-wide admin rights — the scoped-delegation half of this module.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-govern', cat:'ps-mod-graph', name:'Microsoft.Graph.Identity.Governance', tag:'access reviews and entitlement management (access packages)',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.identity.governance/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /identityGovernance Graph endpoint — no platform dependency.'),
+    code:'Get-MgIdentityGovernanceAccessReviewDefinition\nGet-MgIdentityGovernanceEntitlementManagementAccessPackage',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.identity.governance/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Identity.Governance</a> covers Entra ID Governance — periodic access reviews ("does this person still need this access?") and entitlement management access packages (self-service, approval-gated bundles of group/app/site access).') +
+      P('Both features exist to answer the same underlying question — "who has access to what, and is that still justified" — from two different directions: access reviews audit *existing* access, access packages control *how new* access gets granted in the first place.'),
+    explain: CODE('Get-MgIdentityGovernanceAccessReviewDefinition\nGet-MgIdentityGovernanceEntitlementManagementAccessPackage') +
+      P('An access review <b>definition</b> is the recurring schedule/config (who reviews, how often); each actual run of it produces an <b>instance</b> with real reviewer decisions — the same definition-vs-instance split scheduled tasks generally use.') +
+      P('An access package bundles multiple resources (a group, an app, a SharePoint site) behind one self-service request — a user requesting it triggers an approval workflow instead of an admin manually adding them to each resource separately.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-partner', cat:'ps-mod-graph', name:'Microsoft.Graph.Identity.Partner', tag:'CSP/GDAP delegated admin relationships between partner and customer tenants',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.identity.partner/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /tenantRelationships Graph endpoint — no platform dependency.'),
+    code:'Get-MgTenantRelationshipDelegatedAdminRelationship\nUpdate-MgTenantRelationshipDelegatedAdminRelationshipAccessAssignment -DelegatedAdminRelationshipId $relId -AccessAssignmentId $assignId -BodyParameter $body',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.identity.partner/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Identity.Partner</a> is a Microsoft partner/CSP-specific module — managing Granular Delegated Admin Privileges (GDAP), the scoped, time-limited admin relationships a Cloud Solution Provider partner holds into a customer tenant.') +
+      P('Unlike every other card in this category, this module is only relevant if you\'re working *as* (or administering relationships with) a Microsoft partner organization — most tenant admins will never call it directly.'),
+    explain: CODE('Get-MgTenantRelationshipDelegatedAdminRelationship\nUpdate-MgTenantRelationshipDelegatedAdminRelationshipAccessAssignment -DelegatedAdminRelationshipId $relId -AccessAssignmentId $assignId -BodyParameter $body') +
+      P('GDAP deliberately replaced the older, broader Delegated Admin Privileges model — every relationship here is scoped to specific Entra ID roles and has a defined end date, rather than a partner holding standing full-admin access indefinitely.') +
+      P('<code>-BodyParameter</code> on the update call takes a hashtable describing exactly which roles are being granted — the same nested <code>@{ }</code> pattern seen throughout the Graph SDK cards for anything beyond a simple scalar update.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-signins', cat:'ps-mod-graph', name:'Microsoft.Graph.Identity.SignIns', tag:'sign-in logs, Conditional Access, and identity protection risk',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.identity.signins/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /auditLogs/signIns and /identity/conditionalAccess Graph endpoints — no platform dependency.'),
+    code:'Get-MgAuditLogSignIn -Top 10 | Select-Object UserPrincipalName, Status, CreatedDateTime\nGet-MgIdentityConditionalAccessPolicy | Select-Object DisplayName, State',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.identity.signins/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Identity.SignIns</a> covers three related security surfaces: the sign-in audit log, Conditional Access policies (the rules gating *how* someone is allowed to sign in), and Identity Protection\'s risk scoring for risky users/sign-ins.') +
+      P('This is the module behind "why did this user get blocked signing in" investigations — cross-referencing a specific <code>Get-MgAuditLogSignIn</code> entry\'s <code>ConditionalAccessStatus</code> against the policy that actually fired is the standard troubleshooting path.'),
+    explain: CODE('Get-MgAuditLogSignIn -Top 10 | Select-Object UserPrincipalName, Status, CreatedDateTime\nGet-MgIdentityConditionalAccessPolicy | Select-Object DisplayName, State') +
+      P('Each sign-in log entry\'s <code>Status</code> object carries a real <code>ErrorCode</code> — Microsoft publishes a lookup table for these codes, and matching one is far more precise than guessing from a vague portal error message.') +
+      P('A Conditional Access policy\'s <code>State</code> is usually <code>enabled</code>, <code>disabled</code>, or <code>enabledForReportingButNotEnforced</code> ("report-only" mode) — the third value is how admins safely test a new policy\'s real-world impact before it actually blocks anyone.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-notes', cat:'ps-mod-graph', name:'Microsoft.Graph.Notes', tag:'OneNote — notebooks, sections, and pages',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.notes/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /users/{id}/onenote Graph endpoint — no platform dependency.'),
+    code:'Get-MgUserOnenoteNotebook -UserId "ada@contoso.com"\nGet-MgGroupOnenoteNotebook -GroupId $groupId',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.notes/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Notes</a> reads OneNote content — notebooks, their sections, and the pages inside them — for a user\'s personal notebooks, a group/Team\'s shared notebook, or a SharePoint site\'s notebook.') +
+      P('The same notebook cmdlet shape (<code>Get-Mg<i>Scope</i>OnenoteNotebook</code>) repeats across <code>User</code>/<code>Group</code>/<code>Site</code> because OneNote notebooks can be owned at any of those three levels — a Team\'s shared notebook is a group-owned one, reached the same way as a personal one, just with a different ID.'),
+    explain: CODE('Get-MgUserOnenoteNotebook -UserId "ada@contoso.com"\nGet-MgGroupOnenoteNotebook -GroupId $groupId') +
+      P('Page *content* itself (the actual HTML body of a OneNote page) is a separate call from the metadata shown here — reading it returns real page HTML, not a structured object, since OneNote pages are fundamentally rich-HTML documents under the hood.') +
+      P('A Team you queried through the Microsoft.Graph.Teams card is backed by exactly the group ID that <code>Get-MgGroupOnenoteNotebook</code> expects — its "Class Notebook" or shared notebook tab lives at this same endpoint.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-people', cat:'ps-mod-graph', name:'Microsoft.Graph.People', tag:'a user\'s ranked, relevance-scored list of relevant people',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.people/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /users/{id}/people Graph endpoint — no platform dependency.'),
+    code:'Get-MgUserPeople -UserId "ada@contoso.com" -Top 10 | Select-Object DisplayName, ScoredEmailAddresses',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.people/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.People</a> is a single, small module wrapping one distinctive API: a ranked "people relevant to this user" list — the same relevance-scored suggestions behind Outlook\'s auto-complete and the People card in Microsoft 365 apps — computed from mail, calendar, and org-chart signals, not just directory membership.') +
+      P('This is genuinely different from the Users module\'s plain directory listing — it\'s a relevance-*ranked* result reflecting actual working relationships, which is exactly why it powers autocomplete-style features rather than admin scripts.'),
+    explain: CODE('Get-MgUserPeople -UserId "ada@contoso.com" -Top 10 | Select-Object DisplayName, ScoredEmailAddresses') +
+      P('The ranking signal is opaque by design (Microsoft doesn\'t document the exact weighting) — treat the order as "roughly how relevant," not a precise, reproducible score a script should build hard logic on top of.') +
+      P('<code>-Top 10</code> matters more here than on most list cmdlets in this category — since results are already relevance-sorted, the first page genuinely is "the most useful ones," not an arbitrary truncation.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-contacts', cat:'ps-mod-graph', name:'Microsoft.Graph.PersonalContacts', tag:'a mailbox\'s own Outlook contacts (not the org directory)',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.personalcontacts/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /users/{id}/contacts Graph endpoint — no platform dependency.'),
+    code:'Get-MgUserContact -UserId "ada@contoso.com" -Top 10 | Select-Object DisplayName, EmailAddresses\nGet-MgUserContactFolder -UserId "ada@contoso.com"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.personalcontacts/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.PersonalContacts</a> reads and writes a specific mailbox\'s own Outlook contacts and contact folders — the personal address book a user built up themselves, a fundamentally different data set from the Users/Groups modules\' organizational directory.') +
+      P('"Personal" in the module name is the whole point of its existence — it\'s exactly what distinguishes it from <code>Microsoft.Graph.Users</code>, which is the tenant\'s shared directory rather than any one person\'s private contact list.'),
+    explain: CODE('Get-MgUserContact -UserId "ada@contoso.com" -Top 10 | Select-Object DisplayName, EmailAddresses\nGet-MgUserContactFolder -UserId "ada@contoso.com"') +
+      P('A personal contact\'s <code>EmailAddresses</code> is a free-text array a user typed or imported themselves — unlike a directory <code>User</code> object\'s email, nothing here is validated against real mailboxes or kept in sync with anything.') +
+      P('Contact <b>folders</b> let a mailbox organize contacts into named groups the same way mail folders organize messages — <code>Get-MgUserContactFolderContact</code> (not shown) scopes the contact list down to just one such folder.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-planner', cat:'ps-mod-graph', name:'Microsoft.Graph.Planner', tag:'Microsoft Planner — plans, buckets, and tasks',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.planner/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /planner Graph endpoint — no platform dependency.'),
+    code:'Get-MgGroupPlannerPlan -GroupId $groupId\nNew-MgPlannerTask -PlanId $planId -Title "Ship the release" -BucketId $bucketId',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.planner/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Planner</a> manages Microsoft Planner boards — plans (owned by a Microsoft 365 group/Team), the buckets (columns) within a plan, and the tasks assigned to people inside those buckets.') +
+      P('Every Planner plan is owned by a group, the same group object the Groups and Teams cards work with — <code>Get-MgGroupPlannerPlan</code> is literally "get the Planner plan attached to this group," not a separate top-level Planner tenant concept.'),
+    explain: CODE('Get-MgGroupPlannerPlan -GroupId $groupId\nNew-MgPlannerTask -PlanId $planId -Title "Ship the release" -BucketId $bucketId') +
+      P('Task updates here use optimistic concurrency — every task object carries an <code>@odata.etag</code>, and updating it requires passing that etag back (via an <code>If-Match</code> header) to prove you\'re updating the version you last read, not silently overwriting someone else\'s concurrent edit.') +
+      P('Assigning a task to people is a separate <code>Assignments</code> property update (a dictionary keyed by user ID), not a parameter on <code>New-MgPlannerTask</code> itself — creation and assignment are deliberately two steps.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-reports', cat:'ps-mod-graph', name:'Microsoft.Graph.Reports', tag:'Microsoft 365 usage reports — active users, email/Teams/OneDrive activity',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.reports/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /reports Graph endpoint — no platform dependency.'),
+    code:'Get-MgReportOffice365ActiveUserDetail -Period "D7" -OutFile "activeusers.csv"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.reports/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Reports</a> pulls the same usage reports as the Microsoft 365 admin center\'s Reports pages — active users, mailbox/Teams/OneDrive activity, license usage — as data a script can schedule and archive, not just a dashboard someone checks manually.') +
+      P('Most report cmdlets here return CSV content, not a PowerShell object array — worth knowing before piping straight into <code>Where-Object</code> the way most other cards on this page do; expect an <code>-OutFile</code> and a subsequent <code>Import-Csv</code> instead.'),
+    explain: CODE('Get-MgReportOffice365ActiveUserDetail -Period "D7" -OutFile "activeusers.csv"') +
+      P('<code>-Period</code> takes one of a small fixed set (<code>D7</code>, <code>D30</code>, <code>D90</code>, <code>D180</code>) — a rolling window in days, not an arbitrary custom date range, which is a real limitation of the underlying reports API worth knowing before assuming full flexibility.') +
+      P('By default, user-identifying details (names, UPNs) are anonymized in these reports for privacy — a tenant admin has to explicitly opt into showing "concealed" identifiable data in the M365 admin center before these cmdlets return it unmasked.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-schemaext', cat:'ps-mod-graph', name:'Microsoft.Graph.SchemaExtensions', tag:'define custom properties on directory objects',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.schemaextensions/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /schemaExtensions Graph endpoint — no platform dependency.'),
+    code:'New-MgSchemaExtension -Id "contoso_employeeMetadata" -Description "Custom HR fields" -TargetTypes "User" -Properties @(@{Name="badgeNumber"; Type="String"})\nGet-MgSchemaExtension -Filter "id eq \'contoso_employeeMetadata\'"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.schemaextensions/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.SchemaExtensions</a> defines custom properties on standard Graph objects (users, groups, devices...) — Graph\'s answer to "I need to store one extra field the built-in schema doesn\'t have," without standing up a separate database.') +
+      P('Once registered, a schema extension\'s custom properties show up directly on the target object\'s normal <code>Get-MgUser</code>/etc. response, under a namespaced property name — no separate lookup call needed to read them back afterward.'),
+    explain: CODE('New-MgSchemaExtension -Id "contoso_employeeMetadata" -Description "Custom HR fields" -TargetTypes "User" -Properties @(@{Name="badgeNumber"; Type="String"})') +
+      P('The <code>Id</code> is namespaced with your own registered domain/prefix (<code>contoso_...</code>) specifically to prevent collisions between different organizations\' or apps\' custom extensions defined against the same shared object types.') +
+      P('<code>-Properties</code> takes an array of typed field definitions — the same nested-hashtable pattern used throughout the Graph SDK cards, here defining a small custom schema rather than passing data into an existing one.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-search', cat:'ps-mod-graph', name:'Microsoft.Graph.Search', tag:'one unified query across mail, files, sites, people, and more',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.search/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /search/query Graph endpoint — no platform dependency.'),
+    code:'Search-MgQuery -Requests @(@{EntityTypes="driveItem"; Query=@{QueryString="quarterly report"}})',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.search/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Search</a> wraps the unified Microsoft Search API in one cmdlet, <code>Search-MgQuery</code> — a single call that can search across mail, files, sites, people, and even custom-indexed external data, all through the same query shape.') +
+      P('This is the same search engine behind the Microsoft 365 top-of-page search box — this module is the scriptable path to that exact ranking and relevance behavior, rather than reimplementing search logic per content type yourself.'),
+    explain: CODE('Search-MgQuery -Requests @(@{EntityTypes="driveItem"; Query=@{QueryString="quarterly report"}})') +
+      P('<code>-Requests</code> takes an *array* of request objects — a single call can run several differently-scoped searches at once (e.g. <code>driveItem</code> and <code>message</code> in parallel) and get back one combined response, rather than one call per content type.') +
+      P('Results respect the signed-in identity\'s actual permissions — a search never surfaces a file or message the calling user/app couldn\'t otherwise see, the same permission model as browsing to that content directly.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-security', cat:'ps-mod-graph', name:'Microsoft.Graph.Security', tag:'Microsoft 365 Defender / Sentinel — unified security alerts and incidents',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.security/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /security Graph endpoint — no platform dependency.'),
+    code:'Get-MgSecurityAlert_v2 -Top 10 | Select-Object Title, Severity, Status\nGet-MgSecurityIncident -Top 10',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.security/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Security</a> pulls unified alerts and incidents from Microsoft\'s security stack — Defender for Endpoint/Identity/Cloud Apps, and Sentinel — normalized into one shared alert schema regardless of which product actually raised them.') +
+      P('The <code>_v2</code> suffix on <code>Get-MgSecurityAlert_v2</code> is a real, intentional quirk, not a typo — Graph shipped a v1 alerts schema early on, then a genuinely incompatible v2 schema later, and kept both cmdlets rather than silently breaking existing v1 scripts.'),
+    explain: CODE('Get-MgSecurityAlert_v2 -Top 10 | Select-Object Title, Severity, Status\nGet-MgSecurityIncident -Top 10') +
+      P('An <b>incident</b> groups one or more related <b>alerts</b> that Microsoft\'s correlation engine believes are part of the same attack — querying incidents instead of raw alerts is usually the more useful starting point, since it\'s already done the "which of these alerts are actually connected" work.') +
+      P('<code>Status</code> on an alert (<code>new</code>, <code>inProgress</code>, <code>resolved</code>) is exactly the triage state a security analyst would set by hand in the Defender portal — this module reads and can update the same field, for scripted triage workflows.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-sites', cat:'ps-mod-graph', name:'Microsoft.Graph.Sites', tag:'SharePoint sites, lists, and list items',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.sites/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /sites Graph endpoint — no platform dependency.'),
+    code:'Get-MgSite -SiteId "contoso.sharepoint.com:/sites/Marketing"\nGet-MgSiteList -SiteId $siteId | Select-Object DisplayName',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.sites/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Sites</a> reads and manages SharePoint sites, their lists (SharePoint\'s structured-data tables), and the items inside those lists — the SharePoint counterpart to the Files module\'s document-focused view of the same platform.') +
+      P('A site\'s document library is itself just a <code>drive</code> — this module and Microsoft.Graph.Files genuinely overlap at that boundary, with Sites adding everything SharePoint-specific (lists, pages, site structure) that a plain drive view doesn\'t expose.'),
+    explain: CODE('Get-MgSite -SiteId "contoso.sharepoint.com:/sites/Marketing"\nGet-MgSiteList -SiteId $siteId | Select-Object DisplayName') +
+      P('The colon-separated <code>-SiteId</code> format (<code>hostname:/sites/name</code>) is Graph\'s "resolve this human-readable path into a real site" syntax — the returned object\'s actual <code>Id</code> (a compound GUID string) is what every subsequent call against that site should use instead.') +
+      P('SharePoint <b>lists</b> predate SharePoint\'s modern page-building tools by years — they\'re the same structured-data-table concept classic SharePoint used for everything from task tracking to custom databases, still fully scriptable through this module.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-teams', cat:'ps-mod-graph', name:'Microsoft.Graph.Teams', tag:'Teams via the Graph SDK — a different module from "MicrosoftTeams"',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.teams/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /teams Graph endpoint — no platform dependency.'),
+    code:'Get-MgTeam -TeamId $teamId\nGet-MgTeamChannel -TeamId $teamId | Select-Object DisplayName, MembershipType',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.teams/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Teams</a> is a genuinely separate module from the standalone <a href="https://learn.microsoft.com/en-us/powershell/module/teams/?view=teams-ps" target="_blank" rel="noreferrer noopener">MicrosoftTeams</a> module covered in the Misc category — same product, two different SDKs, each with its own cmdlet vocabulary (<code>Get-MgTeam</code> here vs. <code>Get-Team</code> there) and its own separate sign-in.') +
+      P('The dedicated MicrosoftTeams module has deeper reach into Teams-specific admin settings (calling/messaging policies); this Graph-native module covers teams, channels, and members with the same REST-first, cross-platform-first design as every other card in this category.'),
+    explain: CODE('Get-MgTeam -TeamId $teamId\nGet-MgTeamChannel -TeamId $teamId | Select-Object DisplayName, MembershipType') +
+      P('A <code>Team</code> object here is, underneath, the exact same Microsoft 365 group the Groups module already works with, with Teams features enabled on top — <code>Get-MgTeam -TeamId $groupId</code> and <code>Get-MgGroup -GroupId $groupId</code> resolve the same underlying object two different ways.') +
+      P('<code>MembershipType</code> on a channel is <code>standard</code>, <code>private</code>, or <code>shared</code> — private/shared channels have their own separate, smaller membership list from the parent team\'s full roster, which is exactly what this property distinguishes.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-users-actions', cat:'ps-mod-graph', name:'Microsoft.Graph.Users.Actions', tag:'state-changing user operations — send mail, license, revoke sessions',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.users.actions/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /users action endpoints — no platform dependency.'),
+    code:'Set-MgUserLicense -UserId "ada@contoso.com" -AddLicenses @{SkuId="skuGuid"} -RemoveLicenses @()\nRevoke-MgUserSignInSession -UserId "ada@contoso.com"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.users.actions/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Users.Actions</a> holds the state-*changing* user operations split out from the plain read/write Users module — sending mail as a user, assigning licenses, and revoking sign-in sessions after a lost/stolen device.') +
+      P('<code>Send-MgUserMail</code>, mentioned back in the Mail card, actually lives in this module — a good example of how the Graph SDK\'s module boundaries follow the REST API\'s own "actions vs. plain CRUD" split, not always a single obvious product area.'),
+    explain: CODE('Set-MgUserLicense -UserId "ada@contoso.com" -AddLicenses @{SkuId="skuGuid"} -RemoveLicenses @()\nRevoke-MgUserSignInSession -UserId "ada@contoso.com"') +
+      P('<code>Set-MgUserLicense</code> always takes both <code>-AddLicenses</code> and <code>-RemoveLicenses</code> in one call, even to only add one — an empty array for the side you\'re not touching, rather than two separate add/remove cmdlets.') +
+      P('<code>Revoke-MgUserSignInSession</code> invalidates refresh tokens tenant-wide for that user immediately — the real "lost my laptop, lock me out everywhere" incident-response action, distinct from just resetting their password.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-graph-users-fn', cat:'ps-mod-graph', name:'Microsoft.Graph.Users.Functions', tag:'read-only user helper functions — delta sync, managed-app diagnostics',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.users.functions/?view=graph-powershell-1.0',
+    os: crossPlat('REST calls against the /users function endpoints — no platform dependency.'),
+    code:'Get-MgUserDelta\nGet-MgUserManagedAppPolicy -UserId "ada@contoso.com"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.users.functions/?view=graph-powershell-1.0" target="_blank" rel="noreferrer noopener">Microsoft.Graph.Users.Functions</a> holds read-only OData <b>function</b> calls for users — delta queries for efficiently syncing user changes, and Intune managed-app diagnostic/policy lookups for a specific user — the read-only counterpart to Users.Actions\' state-changing calls.') +
+      P('<code>Get-MgUserDelta</code> is the one genuinely load-bearing cmdlet here for any script syncing Entra ID users into another system — it returns only what changed since a prior call, instead of re-pulling the entire user collection on every run.'),
+    explain: CODE('Get-MgUserDelta\nGet-MgUserManagedAppPolicy -UserId "ada@contoso.com"') +
+      P('A delta query works via an opaque <code>@odata.deltaLink</code> the response includes — a script saves that link, and its *next* call passes it back to get only the changes since then, rather than diffing two full snapshots itself.') +
+      P('<code>Get-MgUserManagedAppPolicy</code> answers "what Intune app-protection policy actually applies to this specific person" — a targeted diagnostic lookup, distinct from <code>Get-MgDeviceAppManagementMobileApp</code>\'s tenant-wide app catalog view in the Devices.CorporateManagement card.')
+  }));
+
+  // ---------- Misc — Modules ----------
+  // Other widely-used product modules, e.g. https://learn.microsoft.com/en-us/powershell/module/?view=teams-ps
+  APIS.push(psCard({
+    id:'ps-mod-teams', cat:'ps-mod-misc', name:'MicrosoftTeams', tag:'administer Teams — teams, channels, policies',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/teams/?view=teams-ps',
+    os: crossPlat('Modern versions of the module (v4+) run on PowerShell 7+ cross-platform, not just Windows PowerShell.'),
+    code:'Install-Module MicrosoftTeams -Scope CurrentUser\nConnect-MicrosoftTeams\nGet-Team | Select-Object DisplayName, GroupId',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/teams/?view=teams-ps" target="_blank" rel="noreferrer noopener">MicrosoftTeams</a> administers Microsoft Teams — listing teams and channels, managing membership, and configuring the calling/messaging policies applied to users.') +
+      P('A "Team" here is really a Microsoft 365 Group with Teams features turned on — <code>GroupId</code> in the output above is the same directory object ID the Microsoft.Graph.Groups module would recognize.'),
+    explain: CODE('Connect-MicrosoftTeams\nGet-Team | Select-Object DisplayName, GroupId') +
+      P('This module and Microsoft.Graph.Groups overlap on purpose — Teams-specific settings (policies, meeting configuration) live here, while general directory/group membership is increasingly steered toward Graph instead.') +
+      P('<code>Connect-MicrosoftTeams</code> opens its own sign-in, separate from <code>Connect-MgGraph</code> — each product module in this category authenticates independently rather than sharing one session.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-exo', cat:'ps-mod-misc', name:'ExchangeOnlineManagement', tag:'administer Exchange Online mailboxes and mail flow',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/exchange/?view=exchange-ps',
+    os: crossPlat('The "V3" module (REST-based, current) runs on PowerShell 7+ cross-platform — the legacy remote-PowerShell (WinRM-based) connection method it replaced was Windows-only.'),
+    code:'Install-Module ExchangeOnlineManagement -Scope CurrentUser\nConnect-ExchangeOnline\nGet-Mailbox -ResultSize 5',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/exchange/?view=exchange-ps" target="_blank" rel="noreferrer noopener">ExchangeOnlineManagement</a> administers Exchange Online specifically — mailboxes, distribution groups, and mail-flow (transport) rules — a deeper, Exchange-specific surface than the mail-sending cmdlets in Microsoft.Graph.Mail.') +
+      P('<code>-ResultSize 5</code> rather than <code>-Top 5</code> or piping to <code>Select-Object -First 5</code> is a good reminder that each product module keeps its own cmdlet vocabulary — the underlying Verb-Noun pattern is shared, but parameter names are not guaranteed to match across modules.'),
+    explain: CODE('Connect-ExchangeOnline\nGet-Mailbox -ResultSize 5') +
+      P('<code>Get-Mailbox</code> exposes mailbox-specific configuration (quotas, litigation hold, forwarding rules) that Graph\'s user/mail endpoints don\'t surface — reach for this module specifically for mailbox *administration*, and Graph for reading/sending *mail*.') +
+      P('The V3 module authenticates over REST like the Graph SDK now, rather than the older approach of opening an actual PSSession over WinRM to an Exchange server — worth knowing since a lot of older example code online still shows that pattern.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-az', cat:'ps-mod-misc', name:'Az', tag:'manage Azure resources — the modern, cross-platform Azure module',
+    docs:'https://learn.microsoft.com/en-us/powershell/azure/new-azureps-module-az',
+    os: crossPlat('Built on .NET Core from the start — runs on PowerShell 7+ on Windows, macOS, and Linux identically; this is precisely what replaced the older Windows-only AzureRM module.'),
+    code:'Install-Module Az -Scope CurrentUser\nConnect-AzAccount\nGet-AzResourceGroup | Select-Object ResourceGroupName, Location',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/azure/new-azureps-module-az" target="_blank" rel="noreferrer noopener">Az</a> is the umbrella module for managing Azure resources — resource groups, VMs, storage accounts, networking — organized into per-service sub-modules (<code>Az.Compute</code>, <code>Az.Storage</code>...) installed together under one name.') +
+      P('This is the direct Azure counterpart to the Microsoft Graph category: same shift in shape — REST-based, cross-platform, superseding an older Windows-only module (AzureRM here, AzureAD/MSOnline over there).'),
+    explain: CODE('Connect-AzAccount\nGet-AzResourceGroup | Select-Object ResourceGroupName, Location') +
+      P('<code>Connect-AzAccount</code> and <code>Connect-MgGraph</code> are separate sign-ins against separate services (Azure Resource Manager vs. Microsoft Graph) even though both live under the same Microsoft/Entra identity — a script touching both needs both connect calls.') +
+      P('The <code>Az</code> noun prefix (<code>Az</code>Account, <code>Az</code>ResourceGroup, <code>Az</code>VM...) is consistent across every sub-module, which is exactly what makes <code>Get-Command -Noun *ResourceGroup*</code> from the Fundamentals Get-Command card a reliable way to explore it.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-sqlserver', cat:'ps-mod-misc', name:'SqlServer', tag:'run T-SQL and manage SQL Server from the pipeline',
+    docs:'https://learn.microsoft.com/en-us/powershell/module/sqlserver/?view=sqlserver-ps',
+    os: crossPlat('Built on Microsoft.Data.SqlClient (.NET Core) rather than the legacy Windows-only System.Data.SqlClient — runs under PowerShell 7+ on macOS/Linux against any reachable SQL Server.'),
+    code:'Install-Module SqlServer -Scope CurrentUser\nInvoke-Sqlcmd -ServerInstance "localhost" -Query "SELECT @@VERSION"',
+    summary: P('<a href="https://learn.microsoft.com/en-us/powershell/module/sqlserver/?view=sqlserver-ps" target="_blank" rel="noreferrer noopener">SqlServer</a> is Microsoft\'s official module for scripting SQL Server — <code>Invoke-Sqlcmd</code> runs arbitrary T-SQL and returns each result row as a PowerShell object, alongside cmdlets for managing logins, agent jobs, and backups.') +
+      P('<code>Invoke-Sqlcmd</code>\'s output rows are genuine PowerShell objects, one per row, with each column as a property — so a query result flows straight into <code>Where-Object</code>/<code>Format-Table</code> from the Fundamentals cards with no extra parsing.'),
+    explain: CODE('Invoke-Sqlcmd -ServerInstance "localhost" -Query "SELECT @@VERSION"') +
+      P('This is functionally the scripted version of running a query in SQL Server Management Studio — same T-SQL, same server, but composable in a pipeline and schedulable as a script instead of typed interactively.') +
+      P('For serious database administration day-to-day, many admins reach for the community-built <code>dbatools</code> module instead (see the next card) — SqlServer stays the closer-to-the-metal, officially-supported option for raw query execution.')
+  }));
+
+  APIS.push(psCard({
+    id:'ps-mod-dbatools', cat:'ps-mod-misc', name:'dbatools', tag:'the community DBA toolkit — 700+ SQL Server admin commands',
+    docs:'https://docs.dbatools.io/',
+    os: crossPlat('Explicitly designed and tested to run cross-platform under PowerShell 7+, including against SQL Server on Linux and in containers — a stated project goal, not an accident.'),
+    code:'Install-Module dbatools -Scope CurrentUser\nGet-DbaDatabase -SqlInstance "localhost" | Select-Object Name, SizeMB, Owner',
+    summary: P('<a href="https://docs.dbatools.io/" target="_blank" rel="noreferrer noopener">dbatools</a> is a large, actively-maintained open-source module for SQL Server administration — backups, migrations, health checks, and diagnostics — built by DBAs who write PowerShell, not vice versa.') +
+      P('It\'s the standout community (not Microsoft-authored) entry among these module cards — a reminder that the PowerShell Gallery from the PowerShellGet card isn\'t only official Microsoft modules, and some community ones are the de-facto standard for their domain.'),
+    explain: CODE('Get-DbaDatabase -SqlInstance "localhost" | Select-Object Name, SizeMB, Owner') +
+      P('dbatools\' cmdlets follow the same <code>Verb-Noun</code> convention as everything else on this page (<code>Get-DbaDatabase</code>, <code>Backup-DbaDatabase</code>, <code>Test-DbaLastBackup</code>) with a consistent <code>Dba</code> noun prefix, discoverable the same way via <code>Get-Command -Module dbatools</code>.') +
+      P('Its signature feature is one-line, safety-checked migrations — <code>Copy-DbaDatabase</code> moves a database (schema, data, logins, jobs) between two servers in a single call, a task that\'s otherwise a long manual checklist.')
+  }));
+
   // ============================================================
   // render: category filter bar, cards grouped by category, and
   // the orbit-diagram canvas on the left.
@@ -7662,16 +8898,21 @@
   var legend = document.getElementById('legend');
   var catBar = document.getElementById('catBar');
   var activeFilter = 'all';
+  var activeMaster = 'web';
+  var ALL_CATEGORY_ORDER = CATEGORY_ORDER.concat(DOTNET_CATEGORY_ORDER);
 
-  catBar.innerHTML = '<div class="cat-pill active" data-cat="all"><span class="dot" style="background:var(--dim);"></span>all</div>'+
-    CATEGORY_ORDER.map(function(key){
-      var c = CATEGORIES[key];
-      return '<div class="cat-pill" data-cat="'+key+'"><span class="dot" style="background:'+c.color+';"></span>'+esc(c.label)+'</div>';
-    }).join('');
+  function buildCatBar(masterKey){
+    catBar.innerHTML = '<div class="cat-pill active" data-cat="all"><span class="dot" style="background:var(--dim);"></span>all</div>'+
+      MASTERS[masterKey].cats.map(function(key){
+        var c = CATEGORIES[key];
+        return '<div class="cat-pill" data-cat="'+key+'"><span class="dot" style="background:'+c.color+';"></span>'+esc(c.label)+'</div>';
+      }).join('');
+  }
+  buildCatBar(activeMaster);
 
   function renderCards(){
     var html = '';
-    CATEGORY_ORDER.forEach(function(key){
+    ALL_CATEGORY_ORDER.forEach(function(key){
       var apisInCat = APIS.filter(function(a){ return a.cat===key; });
       if(!apisInCat.length) return;
       html += '<div class="cat-heading" data-cat-heading="'+key+'" style="color:'+CATEGORIES[key].text+';">'+esc(CATEGORIES[key].label)+'</div>';
@@ -7730,11 +8971,14 @@
     activeFilter = key;
     document.querySelectorAll('.cat-pill').forEach(function(p){ p.classList.toggle('active', p.getAttribute('data-cat')===key); });
     document.querySelectorAll('.cat-heading').forEach(function(h){
-      h.style.display = (key==='all' || h.getAttribute('data-cat-heading')===key) ? '' : 'none';
+      var cat = h.getAttribute('data-cat-heading');
+      var inMaster = CATEGORY_TO_MASTER[cat]===activeMaster;
+      h.style.display = (inMaster && (key==='all' || cat===key)) ? '' : 'none';
     });
     APIS.forEach(function(a){
       var el = document.getElementById('field-'+a.id);
-      var show = (key==='all' || a.cat===key);
+      var inMaster = CATEGORY_TO_MASTER[a.cat]===activeMaster;
+      var show = inMaster && (key==='all' || a.cat===key);
       el.classList.toggle('hidden', !show);
       if(!show) setCollapsed(a, true);
     });
@@ -7744,13 +8988,38 @@
     if(pill) setFilter(pill.getAttribute('data-cat'));
   });
 
+  // --- master switch (WEB / .NET tabs): swaps the category pill bar, the
+  // page chrome text (title/subtitle/tip), and re-runs the category filter
+  // scoped to the new master's categories. ---
+  function setMaster(key){
+    if(activeMaster===key) return;
+    activeMaster = key;
+    document.documentElement.setAttribute('data-master', key);
+    document.querySelectorAll('.master-tab').forEach(function(t){
+      t.classList.toggle('active', t.getAttribute('data-master')===key);
+    });
+    var meta = MASTER_META[key];
+    document.getElementById('pageTitle').innerHTML = meta.title;
+    document.getElementById('pageSubtitle').innerHTML = meta.subtitle;
+    document.getElementById('pageTip').innerHTML = meta.tip;
+    document.getElementById('footerLink').innerHTML = meta.footerLink;
+    buildCatBar(key);
+    setFilter('all');
+  }
+  document.getElementById('masterTabs').addEventListener('click', function(e){
+    var tab = e.target.closest('.master-tab');
+    if(tab) setMaster(tab.getAttribute('data-master'));
+  });
+  setFilter('all'); // scope the initial render to activeMaster ('web') — otherwise .NET cards render unhidden
+
   // --- explainer: hover any data-explain zone to update the right panel ---
   var EXPLAIN = {};
   // If a card declares limited browser support, append a consistent note to
   // whichever explainer panel is shown, so the caveat is always visible.
   function withSupport(api, result){
     if(api.support && api.support.detail){
-      result.html += '<div class="support-line"><b>Browser support:</b> '+esc(api.support.detail)+'</div>';
+      var label = (api.support.cls==='winonly' || api.support.cls==='crossplat') ? 'Platform support' : 'Browser support';
+      result.html += '<div class="support-line"><b>'+label+':</b> '+esc(api.support.detail)+'</div>';
     }
     return result;
   }
