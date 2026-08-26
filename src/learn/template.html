@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference — learn</title>
+<link rel="icon" href="data:,">
+<!--
+  ============================================================================
+  SINGLE-FILE INTERACTIVE REFERENCE — TEMPLATE
+  ============================================================================
+  Extracted from src/learn/js-explorer/src/index.html (the "JS ecosystem /
+  PowerShell & .NET" reference, ~650 cards). That file is the fully-grown
+  example; this one is the scaffolding with the content stripped out and
+  replaced by a few worked examples, so a new topic can start from a proven
+  shape instead of re-deriving it.
+
+  WHAT THIS IS
+  A left filter sidebar (categories, click to narrow) + a middle column of
+  collapsible "cards" (click one to expand — it collapses whichever other
+  card was open) + a right "explainer" panel that updates on hover, showing
+  the mechanism behind whatever you're looking at. One optional top-level
+  tab bar ("master categories") if the reference genuinely spans more than
+  one big topic area (the source file uses this for WEB vs .NET); delete it
+  if your reference only ever covers one thing.
+
+  HOW TO ADAPT THIS
+  1. Set <title>, the H1, subtitle, and tip-banner text below.
+  2. Edit CATEGORIES / CATEGORY_ORDER to your own topic's sections.
+  3. Replace the EXAMPLE cards near the bottom of the script with your own,
+     built with APIS.push(makeCard({...})) — see the two worked patterns
+     (a live in-page demo card, and a copy-to-clipboard reference card).
+  4. If you have many structurally-identical entries (a module catalog, an
+     API index), write a small compact factory wrapping makeCard() the way
+     the source file's azCard() does for 200+ Azure modules — see the
+     commented example below the EXAMPLE cards.
+  5. If you don't need the WEB/.NET-style master-tab split, delete the
+     <div class="master-tabs"> block, the master-tabs/.master-tab CSS, and
+     the MASTERS/CATEGORY_TO_MASTER/MASTER_META/setMaster machinery — set
+     `cat:` on every card straight from CATEGORY_ORDER and the rest keeps
+     working unmodified. (Left in place here since it's genuinely useful
+     the moment a reference grows a second big topic area, and it no-ops
+     cleanly with only one master defined — the tab bar hides itself.)
+
+  DESIGN NOTES CARRIED OVER FROM THE SOURCE FILE
+  - Cards are plain data objects (id, cat, name, tag, demoHTML, init,
+    explainSummary, explainCode) pushed into one flat APIS array — the
+    render/accordion/explainer code never changes per topic, only the data.
+  - A demo only ever initializes (and wires its event listeners) the first
+    time its card is expanded, and cleans up on collapse if `cleanup` is
+    defined — so background timers/audio/sockets from a closed card never
+    keep running.
+  - The explainer panel is driven entirely by hover, via `data-explain`
+    attributes matched against an EXPLAIN lookup built from every card's
+    explainSummary()/explainCode() — no per-card wiring needed.
+  - `group` (optional, on any card) inserts a lighter sub-heading whenever
+    it changes within a category — useful once one category holds enough
+    cards to benefit from further breakdown (see the source file's Azure
+    category, grouped into 7 subgroups this way).
+-->
+<style>
+  :root{
+    --bg:#faf9f6; --panel:#f1efe8; --edge:#ddd9cf; --ink:#211f1b; --dim:#726d62;
+    --amber:#a9781f;
+    --chip-bg:#0c0c0d; --chip-edge:#2a2a2e; --chip-ink:#e9e6db;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  /* Second master's theme, if you keep the master-tabs system — swap these
+     for your own palette, or delete this block entirely with a single master. */
+  html[data-master="secondary"]{
+    --bg:#eaf3fb; --panel:#dbeaf7; --edge:#b7d3ea; --ink:#132a3d; --dim:#4d6f8a;
+    --amber:#1f6fb0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);
+    transition:background-color .35s ease,color .35s ease;}
+  body{padding:24px 16px 40px;display:flex;flex-direction:column;align-items:center;}
+  h1{font-size:13px;font-weight:400;letter-spacing:.08em;color:var(--dim);text-transform:uppercase;margin:0 0 4px;}
+  h1 b{color:var(--ink);font-weight:600;}
+  .subtitle{font-size:10px;color:var(--dim);margin:0 0 10px;text-align:center;max-width:720px;line-height:1.6;}
+  .tip-banner{font-size:9px;color:var(--dim);background:var(--panel);border:1px solid var(--edge);border-radius:2px;
+    padding:7px 12px;margin-bottom:16px;max-width:1040px;width:100%;line-height:1.6;}
+  .tip-banner b{color:var(--ink);}
+
+  .shrine{width:1040px;max-width:100%;display:flex;flex-direction:column;gap:14px;}
+  .panels{display:grid;grid-template-columns:240px minmax(0,1fr) 260px;gap:20px;}
+
+  .filter-wrap{width:240px;align-self:start;position:sticky;top:12px;display:flex;flex-direction:column;gap:14px;}
+  .cat-bar{display:flex;flex-direction:column;gap:6px;}
+  .cat-pill{font-size:9px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);border:1px solid var(--edge);
+    border-radius:2px;padding:7px 10px;cursor:pointer;display:flex;align-items:center;gap:7px;background:var(--panel);}
+  .cat-pill:hover{border-color:#555;}
+  .cat-pill.active{color:var(--ink);border-color:#8a877c;background:var(--bg);}
+  .cat-pill .dot{width:6px;height:6px;border-radius:50%;flex:none;}
+
+  .fields{display:flex;flex-direction:column;gap:8px;}
+  .cat-heading{font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:8px 0 -2px;}
+  .cat-heading:first-child{margin-top:0;}
+  .sub-heading{font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);opacity:.7;
+    margin:6px 0 -2px 2px;}
+  .field{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:6px 8px;
+    display:flex;flex-direction:column;gap:4px;
+    box-shadow:0 0 0 0 var(--flash-color,transparent);
+    transition:box-shadow .4s ease-out, background-color .4s ease-out;}
+  .field.hidden{display:none;}
+  .flabel{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);overflow-wrap:anywhere;}
+  .support-badge{font-size:8px;letter-spacing:.03em;text-transform:uppercase;flex:none;
+    border-radius:8px;padding:1px 6px;margin-left:6px;border:1px solid;white-space:nowrap;}
+  .support-badge.warn{color:#a9781f;border-color:#d9b06a;background:rgba(201,151,58,.12);}
+  .support-badge.limited{color:#b8548a;border-color:#d68ab0;background:rgba(207,95,149,.10);}
+  .support-badge.exp{color:#8a5fc2;border-color:#b09ad6;background:rgba(138,127,214,.12);}
+  .support-badge.good{color:#3f8a54;border-color:#8fbf9a;background:rgba(111,181,130,.12);}
+  .support-badge.info{color:#0d5c9e;border-color:#7fb3e0;background:rgba(13,92,158,.12);}
+  .explain-body .support-line{font-size:9px;color:var(--dim);border-top:1px solid var(--edge);
+    margin-top:6px;padding-top:6px;}
+  .explain-body .support-line b{color:var(--ink);}
+  .field-header{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;}
+  .field-summary{font-size:9px;color:var(--dim);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;text-align:right;display:none;}
+  .collapse-arrow{font-size:9px;color:var(--dim);flex:none;width:8px;}
+  .field-body{display:flex;flex-direction:column;gap:4px;margin-top:4px;}
+  .field.collapsed{padding-top:6px;padding-bottom:6px;}
+  .field.collapsed .field-body{display:none;}
+  .field.collapsed .field-summary{display:block;}
+
+  .param-group{padding:2px 0;}
+  .demo-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0;}
+  .demo-row label{font-size:10px;color:var(--dim);display:flex;align-items:center;gap:4px;white-space:nowrap;}
+  .demo-out{background:var(--chip-bg);border:1px solid var(--chip-edge);border-radius:2px;padding:6px 7px;font-size:10px;
+    line-height:1.55;white-space:pre-wrap;word-break:break-word;max-height:150px;overflow-y:auto;margin-top:4px;color:var(--chip-ink);}
+  .demo-box{border:1px solid var(--edge);border-radius:2px;padding:6px;margin-top:4px;}
+  .demo-note{font-size:9px;color:var(--dim);margin-top:2px;line-height:1.5;}
+  input[type=text], input[type=number], textarea, select{background:var(--chip-bg);color:var(--chip-ink);border:1px solid var(--chip-edge);
+    font-family:var(--mono);font-size:10px;padding:4px 6px;border-radius:2px;}
+  textarea{resize:vertical;width:100%;}
+  input[type=range]{flex:1;min-width:60px;}
+
+  .field-header button, .demo-row button{background:var(--panel);color:var(--ink);border:1px solid var(--edge);
+    font-family:var(--mono);font-size:10px;padding:5px 10px;cursor:pointer;border-radius:2px;}
+  .field-header button:hover, .demo-row button:hover{border-color:#555;}
+
+  .explainer{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:10px 12px;
+    align-self:start;position:sticky;top:12px;}
+  .explain-title{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;}
+  .explain-body{font-size:10px;line-height:1.6;color:var(--ink);}
+  .explain-body .tk-p{margin:0 0 8px;}
+  .explain-body .tk-p:last-child{margin-bottom:0;}
+  .explain-body .tk-block{background:var(--chip-bg);border:1px solid var(--chip-edge);border-radius:2px;
+    padding:6px 7px;margin:0 0 8px;font-family:var(--mono);white-space:pre-wrap;overflow-wrap:break-word;color:var(--chip-ink);}
+  .explain-body .tk-num{color:var(--amber);}
+  .explain-body .tk-var{color:#3b5bc4;}
+  .explain-body .tk-kw{color:#2f9c58;}
+  .explain-body .tk-live{color:#fff;background:#242427;border-radius:2px;padding:0 3px;}
+  .explain-body a{color:#3b5bc4;}
+
+  footer{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:var(--dim);flex-wrap:wrap;gap:6px;}
+  footer a{color:var(--dim);}
+
+  .master-tabs{display:flex;gap:6px;margin-bottom:10px;}
+  .master-tab{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);
+    border:1px solid var(--edge);border-bottom:2px solid transparent;border-radius:2px 2px 0 0;
+    padding:7px 18px;cursor:pointer;background:var(--panel);}
+  .master-tab:hover{color:var(--ink);}
+  .master-tab.active{color:var(--ink);border-bottom-color:var(--amber);background:var(--bg);}
+
+  /* Terminal-style code block with a built-in copy button — modeled on
+     learn.microsoft.com's own module-reference pages. Use for anything the
+     reader is meant to copy elsewhere rather than run in-page. */
+  .code-block{background:var(--chip-bg);border:1px solid var(--chip-edge);border-radius:2px;margin-top:4px;overflow:hidden;}
+  .code-block-header{display:flex;align-items:center;justify-content:space-between;
+    padding:4px 5px 4px 8px;border-bottom:1px solid var(--chip-edge);}
+  .code-block-lang{font-size:8px;letter-spacing:.08em;text-transform:uppercase;color:#8a8a90;}
+  .code-copy-btn{background:transparent;border:1px solid transparent;color:#c8c5ba;border-radius:2px;
+    width:22px;height:22px;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+  .code-copy-btn:hover{border-color:var(--chip-edge);color:var(--chip-ink);}
+  .code-copy-btn.copied{color:#5fc97f;}
+  .code-block-code{padding:8px 10px;font-family:var(--mono);font-size:10px;line-height:1.6;
+    white-space:pre-wrap;word-break:break-word;color:var(--chip-ink);}
+
+  @media (max-width:900px){
+    .panels{grid-template-columns:minmax(0,1fr);}
+    .filter-wrap{width:100%;position:static;}
+    .cat-bar{flex-direction:row;flex-wrap:wrap;}
+  }
+</style>
+</head>
+<body>
+
+<!-- Master-tab bar: only needed if this reference spans more than one big
+     topic area. Hides itself automatically (see script) if MASTERS has
+     just one entry — delete this block plus the matching JS if you never
+     want it at all. -->
+<div class="master-tabs" id="masterTabs">
+  <div class="master-tab active" data-master="primary">TOPIC A</div>
+  <div class="master-tab" data-master="secondary">TOPIC B</div>
+</div>
+
+<h1 id="pageTitle">your topic · <b>learn</b></h1>
+<div class="subtitle" id="pageSubtitle">One sentence on what this reference covers and how to use it — hover a card's title bar for the mechanism on the right, click to expand it in the middle.</div>
+<div class="tip-banner" id="pageTip"><b>Tip:</b> whatever caveat is worth putting in front of every card goes here (a runtime requirement, a version note, anything true page-wide).</div>
+
+<div class="shrine">
+  <div class="panels">
+    <div class="filter-wrap">
+      <div class="cat-bar" id="catBar"></div>
+    </div>
+
+    <div class="fields" id="legend"></div>
+
+    <div class="explainer" id="explainer">
+      <div class="explain-title" id="explainTitle">Explainer</div>
+      <div class="explain-body" id="explainBody">Hover a card's title bar, or an area inside its open demo, to see exactly which objects and methods are doing the work — with a live current value where one applies.</div>
+    </div>
+  </div>
+
+  <footer>
+    <span>Personal learning reference · built with AI Assistance</span>
+    <span id="footerLink"><a href="#" target="_blank" rel="noreferrer noopener">Docs index</a></span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ==========================================================================
+  // SECTION 1 — token/formatting helpers, used inside explainSummary/explainCode
+  // HTML to keep prose consistently styled (numbers, variables, keywords, a
+  // "live current value" chip, code blocks, paragraphs). Copy these as-is.
+  // ==========================================================================
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function N(x){ return '<span class="tk-num">'+esc(x)+'</span>'; }
+  function VR(x){ return '<span class="tk-var">'+esc(x)+'</span>'; }
+  function KW(x){ return '<span class="tk-kw">'+esc(x)+'</span>'; }
+  function LIVE(x){ return '<span class="tk-live">'+esc(x)+'</span>'; }
+  function CODE(x){ return '<div class="tk-block">'+x+'</div>'; }
+  function P(x){ return '<p class="tk-p">'+x+'</p>'; }
+  function btn(id2,label){ return '<button type="button" id="'+id2+'">'+esc(label)+'</button>'; }
+  function out(id2){ return '<div class="demo-out" id="'+id2+'">—</div>'; }
+  function row(inner){ return '<div class="demo-row">'+inner+'</div>'; }
+  function note(text){ return '<div class="demo-note">'+text+'</div>'; }
+
+  // ==========================================================================
+  // SECTION 2 — copy-to-clipboard code block, for reference cards that hand
+  // the reader something to paste elsewhere rather than a live in-page demo.
+  // ==========================================================================
+  var COPY_ICON = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M3.5 10.5v-7a1 1 0 0 1 1-1h7"/></svg>';
+  var CHECK_ICON = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8.5l3.2 3.2L13 4.5"/></svg>';
+  function codeBlock(id2, code, lang){
+    return '<div class="code-block">'+
+      '<div class="code-block-header"><span class="code-block-lang">'+esc(lang||'Code')+'</span>'+
+        '<button type="button" class="code-copy-btn" id="'+id2+'-copy" title="Copy" aria-label="Copy code">'+COPY_ICON+'</button>'+
+      '</div>'+
+      '<div class="code-block-code">'+esc(code)+'</div>'+
+    '</div>';
+  }
+  // document.execCommand fallback covers file:// pages, where
+  // navigator.clipboard needs a secure context to exist at all.
+  function copyToClipboard(text, btnEl){
+    function done(){
+      btnEl.innerHTML = CHECK_ICON;
+      btnEl.classList.add('copied');
+      clearTimeout(btnEl._resetTimer);
+      btnEl._resetTimer = setTimeout(function(){ btnEl.innerHTML = COPY_ICON; btnEl.classList.remove('copied'); }, 1400);
+    }
+    function fallback(){
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try{ document.execCommand('copy'); }catch(e){}
+      document.body.removeChild(ta);
+    }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(done).catch(function(){ fallback(); done(); });
+    } else {
+      fallback(); done();
+    }
+  }
+
+  // ==========================================================================
+  // SECTION 3 — the card factory. Every card is a plain object with this
+  // shape; makeCard() fills in the boilerplate so each real card only states
+  // what's actually different about it. Two ways to build the interactive
+  // part:
+  //   - pass `code` (+ optional `lang`) for a copy-to-clipboard reference
+  //     card — see the EXAMPLE cards' "Reference card" pattern below.
+  //   - pass `demoHTML` + `init` (+ optional `cleanup`) yourself for a live,
+  //     in-page interactive demo — see the "Live demo card" pattern below.
+  // ==========================================================================
+  function makeCard(opts){
+    var isReference = !opts.demoHTML && opts.code !== undefined;
+    var lang = opts.lang || 'Code';
+    return {
+      id: opts.id, cat: opts.cat, name: opts.name, tag: opts.tag, group: opts.group,
+      docs: opts.docs, support: opts.support, state: opts.state || {},
+      demoHTML: isReference
+        ? codeBlock(opts.id, opts.code, lang) + note(opts.note || 'Copy this into wherever it\'s meant to run.')
+        : opts.demoHTML,
+      init: isReference
+        ? function(root){
+            root.querySelector('#'+opts.id+'-copy').addEventListener('click', function(e){
+              copyToClipboard(opts.code, e.currentTarget);
+            });
+          }
+        : opts.init,
+      cleanup: opts.cleanup,
+      explainSummary: function(){ return { title: opts.name, html: opts.summary }; },
+      explainCode: function(){ return { title: opts.name+' — the mechanism', html: opts.explain || opts.summary }; }
+    };
+  }
+
+  // --- OPTIONAL: a compact factory for a large, structurally-uniform set of
+  // entries (a module catalog, an API index) — write one of these once your
+  // dataset is big/repetitive enough to justify it, the way the source
+  // file's azCard() trims 200+ Azure modules down to their genuinely
+  // distinct content. Left here commented out as a pattern reference:
+  //
+  // function catalogCard(id, name, tag, purpose, code, detail){
+  //   var docsUrl = 'https://example.com/docs/'+name.toLowerCase()+'/';
+  //   return makeCard({
+  //     id: id, cat: 'my-catalog', name: name, tag: tag, docs: docsUrl,
+  //     support: { cls:'good', label:'Stable', detail:'...' },
+  //     code: code,
+  //     summary: P('<a href="'+docsUrl+'" target="_blank" rel="noreferrer noopener">'+name+'</a> '+purpose),
+  //     explain: CODE(code) + P(detail)
+  //   });
+  // }
+
+  // ==========================================================================
+  // SECTION 4 — category taxonomy. `color` is the vivid accent (borders,
+  // dots); `text` is a darker variant used only where the color sits
+  // directly on the page background as text (the cat-heading label) and
+  // needs real contrast. `blurb` is optional, unused by the render code
+  // below but handy if you later add a category-description tooltip.
+  // ==========================================================================
+  var CATEGORIES = {
+    'example-one': { label:'Example Category One', color:'#d96a4a', text:'#b0492e',
+      blurb:'Replace with your own first section.' },
+    'example-two': { label:'Example Category Two', color:'#2bb8a8', text:'#17897d',
+      blurb:'Replace with your own second section.' }
+  };
+  var CATEGORY_ORDER = ['example-one','example-two'];
+
+  // Second master's category list — delete along with the master-tabs
+  // machinery below if you only need one topic area.
+  var CATEGORIES_SECONDARY = {
+    'example-three': { label:'Example Category Three', color:'#1f6fb0', text:'#155284' }
+  };
+  Object.assign(CATEGORIES, CATEGORIES_SECONDARY);
+  var SECONDARY_CATEGORY_ORDER = ['example-three'];
+
+  // --- master categories (optional multi-topic split) ---
+  var MASTERS = {
+    primary:   { label:'TOPIC A', cats: CATEGORY_ORDER },
+    secondary: { label:'TOPIC B', cats: SECONDARY_CATEGORY_ORDER }
+  };
+  var CATEGORY_TO_MASTER = {};
+  Object.keys(MASTERS).forEach(function(mk){
+    MASTERS[mk].cats.forEach(function(ck){ CATEGORY_TO_MASTER[ck] = mk; });
+  });
+  var MASTER_META = {
+    primary: {
+      title: 'your topic · <b>learn</b>',
+      subtitle: 'One sentence on what Topic A covers.',
+      tip: '<b>Tip:</b> whatever\'s worth knowing before using Topic A\'s cards.',
+      footerLink: '<a href="#" target="_blank" rel="noreferrer noopener">Docs index</a>'
+    },
+    secondary: {
+      title: 'your other topic · <b>learn</b>',
+      subtitle: 'One sentence on what Topic B covers.',
+      tip: '<b>Tip:</b> whatever\'s worth knowing before using Topic B\'s cards.',
+      footerLink: '<a href="#" target="_blank" rel="noreferrer noopener">Other docs index</a>'
+    }
+  };
+
+  // ==========================================================================
+  // SECTION 5 — the card registry + EXAMPLE cards. Delete everything below
+  // this line down to "render:" and replace with your own APIS.push(...)
+  // calls (or generate them from a factory, per Section 3's comment).
+  // ==========================================================================
+  var APIS = [];
+
+  // --- EXAMPLE: a live, in-page interactive demo card. ---
+  APIS.push(makeCard({
+    id:'example-live-demo', cat:'example-one', name:'Live Demo Pattern', tag:'a card that actually runs something in the page',
+    demoHTML: row(btn('ex-run','run it')) + out('ex-out'),
+    init: function(root, st){
+      var outEl = root.querySelector('#ex-out');
+      root.querySelector('#ex-run').addEventListener('click', function(){
+        st.count = (st.count||0) + 1;
+        outEl.textContent = 'clicked '+st.count+' time(s)';
+      });
+    },
+    // cleanup: function(st){ /* stop any timer/audio/socket this demo started */ },
+    summary: P('This card demonstrates the <b>live demo</b> pattern — <code>demoHTML</code> is the markup shown when the card expands, and <code>init(root, state)</code> wires it up the first time that happens (never twice), with '+VR('root')+' scoped to just this card so '+VR('querySelector')+' can\'t accidentally grab another card\'s elements.'),
+    explain: CODE(KW('init')+': function(root, st){\n  root.querySelector(\'#ex-run\').addEventListener(\'click\', () => {\n    st.count = (st.count||0) + 1;\n    ...\n  });\n}') +
+      P('State that should survive a collapse/re-expand (or just be inspectable from '+VR('explainCode()')+' for a "current value" chip like this: '+LIVE('example')+') lives on the '+VR('st')+' object passed into '+VR('init')+' — it\'s the same object each time, created once per card.')
+  }));
+
+  // --- EXAMPLE: a copy-to-clipboard reference card (no live execution). ---
+  APIS.push(makeCard({
+    id:'example-reference', cat:'example-one', name:'Reference Card Pattern', tag:'a card that hands the reader something to copy elsewhere',
+    lang:'Bash',
+    docs:'https://example.com/docs',
+    support:{ cls:'info', label:'Cross-platform', detail:'Whatever platform/version caveat applies — shown both as this badge and, on hover, in the explainer panel below it.' },
+    code:'echo "this block has a built-in copy button"',
+    summary: P('<a href="https://example.com/docs" target="_blank" rel="noreferrer noopener">This pattern</a> is for anything meant to be copied out and run somewhere else — a terminal command, a config snippet, a source file. Passing '+VR('code')+' (and optionally '+VR('lang')+') to '+VR('makeCard()')+' does the rest: the terminal-style block, the copy button, and the default footer note.'),
+    explain: CODE('echo "this block has a built-in copy button"') +
+      P('The '+VR('support')+' badge is optional — five preset color variants ship in the CSS ('+VR('warn')+', '+VR('limited')+', '+VR('exp')+', '+VR('good')+', '+VR('info')+'); pick whichever fits what you\'re flagging (a caveat, a platform requirement, a stability level).')
+  }));
+
+  // --- EXAMPLE: a second category, and the `group` sub-heading mechanic. ---
+  APIS.push(makeCard({
+    id:'example-grouped-a', cat:'example-two', group:'First Subgroup', name:'Grouped Card A', tag:'sub-headings appear once a category has enough cards to benefit',
+    code:'# first item in "First Subgroup"', lang:'Bash',
+    summary: P('Setting '+VR('group')+' on a card inserts a lighter sub-heading above it whenever the value changes from the previous card in the same category — cards sharing a group value render together under one sub-heading, no other wiring needed.')
+  }));
+  APIS.push(makeCard({
+    id:'example-grouped-b', cat:'example-two', group:'Second Subgroup', name:'Grouped Card B', tag:'a new group value starts a new sub-heading',
+    code:'# first item in "Second Subgroup"', lang:'Bash',
+    summary: P('This card switched '+VR('group')+' to a new value, so a second sub-heading appears above it — omit '+VR('group')+' entirely on any card in a category that doesn\'t need this breakdown yet.')
+  }));
+
+  // --- EXAMPLE: a card in the second master's category, so switching the
+  // TOPIC A / TOPIC B tab above actually has something to show. ---
+  APIS.push(makeCard({
+    id:'example-secondary-master', cat:'example-three', name:'Second Master Pattern', tag:'this card only appears under the TOPIC B tab',
+    code:'# cards are scoped to a master purely by which category they\'re in', lang:'Bash',
+    summary: P('A card\'s master is never set directly — it\'s inferred from '+VR('cat')+' via '+VR('CATEGORY_TO_MASTER')+', built once from each master\'s '+VR('cats')+' list. Put a category in '+VR('SECONDARY_CATEGORY_ORDER')+' (Section 4) instead of '+VR('CATEGORY_ORDER')+' and every card in it follows automatically.')
+  }));
+
+  // ============================================================
+  // render: category filter bar, cards grouped by category (and,
+  // within a category, by group), the accordion, and the explainer.
+  // Nothing below this line needs to change per topic.
+  // ============================================================
+  var legend = document.getElementById('legend');
+  var catBar = document.getElementById('catBar');
+  var activeFilter = 'all';
+  var activeMaster = Object.keys(MASTERS)[0];
+  var ALL_CATEGORY_ORDER = [].concat.apply([], Object.keys(MASTERS).map(function(mk){ return MASTERS[mk].cats; }));
+
+  function buildCatBar(masterKey){
+    catBar.innerHTML = '<div class="cat-pill active" data-cat="all"><span class="dot" style="background:var(--dim);"></span>all</div>'+
+      MASTERS[masterKey].cats.map(function(key){
+        var c = CATEGORIES[key];
+        return '<div class="cat-pill" data-cat="'+key+'"><span class="dot" style="background:'+c.color+';"></span>'+esc(c.label)+'</div>';
+      }).join('');
+  }
+  buildCatBar(activeMaster);
+
+  function renderCards(){
+    var html = '';
+    ALL_CATEGORY_ORDER.forEach(function(key){
+      var apisInCat = APIS.filter(function(a){ return a.cat===key; });
+      if(!apisInCat.length) return;
+      html += '<div class="cat-heading" data-cat-heading="'+key+'" style="color:'+CATEGORIES[key].text+';">'+esc(CATEGORIES[key].label)+'</div>';
+      var lastGroup = null;
+      apisInCat.forEach(function(a){
+        if(a.group && a.group!==lastGroup){
+          lastGroup = a.group;
+          html += '<div class="sub-heading" data-cat-heading="'+key+'">'+esc(a.group)+'</div>';
+        }
+        html += '<div class="field collapsed" id="field-'+a.id+'" data-cat="'+a.cat+'" style="border-color:'+CATEGORIES[a.cat].color+';--flash-color:'+CATEGORIES[a.cat].color+';">'+
+          '<div class="field-header" data-toggle="'+a.id+'" data-explain="'+a.id+'-summary">'+
+            '<span class="flabel">'+esc(a.name)+'</span>'+
+            (a.support ? '<span class="support-badge '+a.support.cls+'" title="'+esc(a.support.detail||'').replace(/"/g,'&quot;')+'">'+esc(a.support.label)+'</span>' : '')+
+            '<span class="field-summary">'+esc(a.tag)+'</span>'+
+            '<span class="collapse-arrow">▸</span>'+
+          '</div>'+
+          '<div class="field-body">'+
+            '<div class="legend-row demo-note" style="margin-bottom:2px;">'+esc(a.tag)+'</div>'+
+            '<div class="param-group" data-explain="'+a.id+'-code">'+a.demoHTML+'</div>'+
+          '</div>'+
+        '</div>';
+      });
+    });
+    legend.innerHTML = html;
+  }
+  renderCards();
+
+  // --- accordion: expanding one card collapses every other, lazily
+  // initializes its demo on first expand, and cleans it up on collapse so
+  // background timers/audio/sockets from OTHER demos don't linger. ---
+  function setCollapsed(api, collapsed){
+    var el = document.getElementById('field-'+api.id);
+    if(!el) return;
+    el.classList.toggle('collapsed', collapsed);
+    var arrow = el.querySelector('.collapse-arrow');
+    if(arrow) arrow.textContent = collapsed ? '▸' : '▾';
+    if(!collapsed && !api.inited){
+      api.inited = true;
+      try{ api.init(el, api.state); }catch(e){ /* keep the page alive even if one demo misbehaves */ }
+    }
+    if(collapsed && api.inited && api.cleanup){
+      try{ api.cleanup(api.state); }catch(e){}
+    }
+  }
+  function wireHeaders(){
+    document.querySelectorAll('.field-header').forEach(function(header){
+      header.addEventListener('click', function(){
+        var id = header.getAttribute('data-toggle');
+        var api = APIS.filter(function(a){ return a.id===id; })[0];
+        var el = document.getElementById('field-'+id);
+        var wasCollapsed = el.classList.contains('collapsed');
+        if(wasCollapsed) APIS.forEach(function(a){ setCollapsed(a, a.id!==id); });
+        else setCollapsed(api, true);
+      });
+    });
+  }
+  wireHeaders();
+
+  function setFilter(key){
+    activeFilter = key;
+    document.querySelectorAll('.cat-pill').forEach(function(p){ p.classList.toggle('active', p.getAttribute('data-cat')===key); });
+    document.querySelectorAll('[data-cat-heading]').forEach(function(h){
+      var cat = h.getAttribute('data-cat-heading');
+      var inMaster = CATEGORY_TO_MASTER[cat]===activeMaster;
+      h.style.display = (inMaster && (key==='all' || cat===key)) ? '' : 'none';
+    });
+    APIS.forEach(function(a){
+      var el = document.getElementById('field-'+a.id);
+      var inMaster = CATEGORY_TO_MASTER[a.cat]===activeMaster;
+      var show = inMaster && (key==='all' || a.cat===key);
+      el.classList.toggle('hidden', !show);
+      if(!show) setCollapsed(a, true);
+    });
+  }
+  catBar.addEventListener('click', function(e){
+    var pill = e.target.closest('.cat-pill');
+    if(pill) setFilter(pill.getAttribute('data-cat'));
+  });
+
+  // --- master switch (optional multi-topic tabs): swaps the category pill
+  // bar, the page chrome text, and re-runs the category filter scoped to
+  // the new master. The tab bar hides itself if only one master exists. ---
+  function setMaster(key){
+    if(activeMaster===key) return;
+    activeMaster = key;
+    document.documentElement.setAttribute('data-master', key);
+    document.querySelectorAll('.master-tab').forEach(function(t){
+      t.classList.toggle('active', t.getAttribute('data-master')===key);
+    });
+    var meta = MASTER_META[key];
+    document.getElementById('pageTitle').innerHTML = meta.title;
+    document.getElementById('pageSubtitle').innerHTML = meta.subtitle;
+    document.getElementById('pageTip').innerHTML = meta.tip;
+    document.getElementById('footerLink').innerHTML = meta.footerLink;
+    buildCatBar(key);
+    setFilter('all');
+  }
+  var masterTabsEl = document.getElementById('masterTabs');
+  if(Object.keys(MASTERS).length <= 1){
+    masterTabsEl.style.display = 'none';
+  } else {
+    masterTabsEl.addEventListener('click', function(e){
+      var tab = e.target.closest('.master-tab');
+      if(tab) setMaster(tab.getAttribute('data-master'));
+    });
+  }
+  setFilter('all'); // scope the initial render to activeMaster — otherwise every master's cards render unhidden
+
+  // --- explainer: hover any data-explain zone to update the right panel ---
+  var EXPLAIN = {};
+  function withSupport(api, result){
+    if(api.support && api.support.detail){
+      result.html += '<div class="support-line"><b>Support:</b> '+esc(api.support.detail)+'</div>';
+    }
+    return result;
+  }
+  APIS.forEach(function(a){
+    EXPLAIN[a.id+'-summary'] = function(){ return withSupport(a, a.explainSummary()); };
+    EXPLAIN[a.id+'-code'] = function(){ return withSupport(a, a.explainCode ? a.explainCode() : a.explainSummary()); };
+  });
+  function showExplain(key){
+    var fn = EXPLAIN[key]; if(!fn) return;
+    var e = fn();
+    document.getElementById('explainTitle').textContent = e.title;
+    document.getElementById('explainBody').innerHTML = e.html;
+  }
+  document.body.addEventListener('mouseover', function(e){
+    var target = e.target.closest ? e.target.closest('[data-explain]') : null;
+    if(target) showExplain(target.getAttribute('data-explain'));
+  });
+
+})();
+</script>
+</body>
+</html>
