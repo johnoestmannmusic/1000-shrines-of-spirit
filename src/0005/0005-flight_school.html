@@ -90,9 +90,15 @@
      table — only Wave-channel instruments get one (empty td otherwise). */
   .ins-wave-canvas{display:block;background:#08080a;border:1px solid var(--edge);
     image-rendering:pixelated;width:64px;height:16px;cursor:default;}
+  .piano-roll-row{display:flex;align-items:stretch;gap:8px;}
   .piano-roll-scroll{overflow-x:auto;overflow-y:hidden;border:1px solid var(--edge);border-radius:2px;background:#08080a;
     width:max-content;max-width:100%;}
   .piano-roll-canvas{display:block;}
+  .noise-box{border:1px solid var(--edge);border-radius:2px;background:#08080a;padding:6px 12px;
+    display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:100px;flex:none;}
+  .noise-box-label{font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);}
+  .noise-box-note{font-size:17px;font-weight:600;font-family:var(--mono);color:var(--dim);}
+  .noise-box-ins{font-size:10px;color:var(--dim);}
 
   .order-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin-bottom:6px;font-size:10px;color:var(--dim);}
   .order-row select{background:#0c0c0d;color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:10px;}
@@ -10782,7 +10788,10 @@
   var PIANO_BLACK_SEMITONES = {1:true,3:true,6:true,8:true,10:true}; // rel%12 values that are '#' in NOTE_NAMES
   function computeNoteRange(){
     var min = null, max = null;
-    song.channels.forEach(function(ch){
+    // Channel 3 (Noise) is excluded — it's not tonal, doesn't appear on the
+    // Piano Roll at all (see the Noise box instead), and its note values
+    // would otherwise skew the keyboard's range for no musical reason.
+    song.channels.slice(0,3).forEach(function(ch){
       ch.noteTimeline.forEach(function(arr){
         arr.forEach(function(n){
           if(n!==null){
@@ -10824,6 +10833,12 @@
   // mutedChannels' own declaration-placement comment above.
   var pianoRollActiveNotes = {}; // note -> color, from real playback position
   var pianoRollFlashes = {}, pianoRollFlashTimers = {}; // note -> color, temporary
+  // Noise (channel 3) box — same sustained/flash split as the piano keys
+  // above, but for a single non-tonal channel shown as text (note name +
+  // instrument colour/name) rather than a lit key, since "which pitch" on
+  // Noise isn't a musically meaningful question the way it is for the
+  // other 3 channels.
+  var noiseActive = null, noiseFlash = null, noiseFlashTimer = null;
 
   // Which channel each instrument actually gets played on in this song —
   // read straight from the timeline rather than guessed, so the preview
@@ -10949,7 +10964,14 @@
         '<span class="collapse-arrow">▾</span>'+
       '</div>'+
       '<div class="field-body">'+
-        '<div class="piano-roll-scroll"><canvas id="pianoRollCanvas" class="piano-roll-canvas"></canvas></div>'+
+        '<div class="piano-roll-row">'+
+          '<div class="piano-roll-scroll"><canvas id="pianoRollCanvas" class="piano-roll-canvas"></canvas></div>'+
+          '<div class="noise-box" title="CH3 · noise isn\'t tonal, so it doesn\'t light up a key — shown here instead">'+
+            '<span class="noise-box-label">Noise</span>'+
+            '<span class="noise-box-note" id="noiseBoxNote">—</span>'+
+            '<span class="noise-box-ins" id="noiseBoxIns"></span>'+
+          '</div>'+
+        '</div>'+
       '</div>'+
     '</div>';
   }
@@ -11040,6 +11062,7 @@
   // (defined further down, but hoisted) paints the base keys and then any
   // currently-active/flashed notes on top — nothing's active yet at load.
   drawPianoRoll();
+  updateNoiseDisplay(); // both hoisted; initializes the noise box to "—"
 
   // --- collapsible cards, each toggling independently (unlike 0004's
   // one-open-at-a-time accordion): Song + Patterns are meant to stay open
@@ -11418,7 +11441,8 @@
     'piano-roll': function(){
       return { title:'Piano Roll — what\'s sounding right now',
         html: P('A standard keyboard sized to the pitch range this song actually uses. Any key currently held down lights up in the colour of whichever instrument is playing it — the same colours used everywhere else on this page (pattern-grid tint, instrument swatches).') +
-          P('Clicking a pattern cell, a row number, or an instrument\'s preview button also flashes the relevant key(s) briefly, even when the track isn\'t playing — the same click-to-preview interactions as the Patterns panel below.') };
+          P('Clicking a pattern cell, a row number, or an instrument\'s preview button also flashes the relevant key(s) briefly, even when the track isn\'t playing — the same click-to-preview interactions as the Patterns panel below.') +
+          P('CH3 (Noise) is left off the keyboard — its "note" selects a noise-LFSR rate, not a real pitch, so it wouldn\'t mean anything as a lit key. It\'s shown as text in the box on the right instead: the current note value and the instrument playing it.') };
     },
     'wavetables': function(){
       return { title:'Wavetables — custom waveforms for the GB Wave channel',
@@ -11658,6 +11682,7 @@
     setPlayheadRow(null);
     lastShownOrderPos = null; lastShownRow = null; // force a fresh update on next play
     pianoRollActiveNotes = {}; drawPianoRoll(); // no channel is sounding once stopped
+    noiseActive = null; updateNoiseDisplay();
     updateTransportUI();
   }
   // Jump playback to an arbitrary song-time — keeps playing from the new
@@ -11708,7 +11733,17 @@
   // effects — true for flight_school (never uses 0Bxx/0Dxx), but worth
   // knowing if this file is ever adapted for a song that does use them. ---
   function songPositionAt(t){
-    var totalRows = Math.floor(t / rowDurationSec());
+    // Clamp to 0: startStemsAt schedules sources ~50ms into the future
+    // (T = ac.currentTime+0.05), so for that brief pre-roll window
+    // ac.currentTime < songStartCtxTime and t can come out as a tiny
+    // negative float. JS's % (unlike Python's) preserves the sign of a
+    // negative dividend, so an unclamped totalRows here would yield
+    // orderPos/row of -1 instead of wrapping to the end — harmless
+    // everywhere this was only ever fed through a falsy-check (pat ? ... :
+    // null, a DOM query returning null), but a direct array index
+    // (noteTimeline[orderPos][row]) throws on it. Treat "still in the
+    // pre-roll" as row 0, which is what it actually means.
+    var totalRows = Math.max(0, Math.floor(t / rowDurationSec()));
     var orderPos = Math.floor(totalRows / song.meta.patternLength) % song.meta.orderLength;
     var row = totalRows % song.meta.patternLength;
     return { orderPos: orderPos, row: row };
@@ -11797,9 +11832,11 @@
   // Looks up each given channel's held note/instrument at (orderPos,row)
   // via noteTimeline/insTimeline and flashes it — the shared lookup used
   // by all 3 preview-click sites below (row-index, per-cell, and the
-  // Instruments panel's preview button).
+  // Instruments panel's preview button). Channel 3 (Noise) is routed to
+  // the noise box instead of a lit key — see flashNoise.
   function flashPianoForChannelsAt(channels, orderPos, row){
     channels.forEach(function(c){
+      if(c===3){ flashNoise(orderPos, row); return; }
       var ch = song.channels[c];
       var note = ch.noteTimeline[orderPos][row];
       if(note===null) return;
@@ -11812,17 +11849,63 @@
   // reads noteTimeline (actual pitch) rather than just detecting a
   // trigger, and replaces the whole active set each call (a channel that
   // fell silent this row needs its old key to go dark, not just skip
-  // adding a new one).
+  // adding a new one). Only channels 0-2 (the tonal ones) light a key —
+  // channel 3 (Noise) is handled separately by setNoiseActive below.
   function updatePianoRollActive(orderPos, row){
     pianoRollActiveNotes = {};
-    for(var c=0;c<4;c++){
+    for(var c=0;c<3;c++){
       var ch = song.channels[c];
       var note = ch.noteTimeline[orderPos][row];
       if(note===null) continue;
       var insIdx = ch.insTimeline[orderPos][row];
       pianoRollActiveNotes[note] = (insIdx!==null && song.instruments[insIdx]) ? song.instruments[insIdx].color : '#c9973a';
     }
+    setNoiseActive(orderPos, row);
     drawPianoRoll();
+  }
+  // --- Noise box: not tonal, so instead of a lit key it's a small text
+  // readout of the current note + instrument colour/name. Same
+  // sustained (setNoiseActive, tracks playback) vs. transient (flashNoise,
+  // preview clicks) split as the piano keys, merged the same way (flash
+  // wins) in updateNoiseDisplay. ---
+  var NOISE_FLASH_MS = 300;
+  function updateNoiseDisplay(){
+    var noteEl = document.getElementById('noiseBoxNote');
+    var insEl = document.getElementById('noiseBoxIns');
+    if(!noteEl || !insEl) return;
+    var state = noiseFlash || noiseActive;
+    if(!state){
+      noteEl.textContent = '—';
+      noteEl.style.color = 'var(--dim)';
+      insEl.textContent = '';
+      return;
+    }
+    noteEl.textContent = noteToName(state.note);
+    noteEl.style.color = state.color;
+    insEl.textContent = state.name || '';
+  }
+  function noiseStateAt(orderPos, row){
+    var ch = song.channels[3];
+    var note = ch.noteTimeline[orderPos][row];
+    if(note===null) return null;
+    var insIdx = ch.insTimeline[orderPos][row];
+    var ins = insIdx!==null ? song.instruments[insIdx] : null;
+    return { note: note, color: ins ? ins.color : '#c9973a', name: ins ? ins.name : '' };
+  }
+  function setNoiseActive(orderPos, row){
+    noiseActive = noiseStateAt(orderPos, row);
+    updateNoiseDisplay();
+  }
+  function flashNoise(orderPos, row){
+    var state = noiseStateAt(orderPos, row);
+    if(!state) return;
+    noiseFlash = state;
+    updateNoiseDisplay();
+    clearTimeout(noiseFlashTimer);
+    noiseFlashTimer = setTimeout(function(){
+      noiseFlash = null;
+      updateNoiseDisplay();
+    }, NOISE_FLASH_MS);
   }
 
   var lastShownOrderPos = null, lastShownRow = null;
@@ -12126,7 +12209,8 @@
     stemBuffers: function(){ return stemBuffers; },
     instrumentPreviewSpots: instrumentPreviewSpots,
     mutedChannels: mutedChannels,
-    pianoRoll: function(){ return { active: pianoRollActiveNotes, flashes: pianoRollFlashes, range: pianoRollRange }; }
+    pianoRoll: function(){ return { active: pianoRollActiveNotes, flashes: pianoRollFlashes, range: pianoRollRange }; },
+    noiseBox: function(){ return { active: noiseActive, flash: noiseFlash }; }
   };
 
 })();
