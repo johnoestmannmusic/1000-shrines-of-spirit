@@ -90,6 +90,9 @@
      table — only Wave-channel instruments get one (empty td otherwise). */
   .ins-wave-canvas{display:block;background:#08080a;border:1px solid var(--edge);
     image-rendering:pixelated;width:64px;height:16px;cursor:default;}
+  .piano-roll-scroll{overflow-x:auto;overflow-y:hidden;border:1px solid var(--edge);border-radius:2px;background:#08080a;
+    width:max-content;max-width:100%;}
+  .piano-roll-canvas{display:block;}
 
   .order-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin-bottom:6px;font-size:10px;color:var(--dim);}
   .order-row select{background:#0c0c0d;color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:10px;}
@@ -137,6 +140,17 @@
   table.pat-table td.row-idx, table.pat-table th.row-idx-head{color:var(--dim);position:sticky;left:0;background:var(--panel);z-index:1;}
   table.pat-table td.row-idx{cursor:pointer;}
   table.pat-table td.row-idx:hover{color:var(--amber);background:#232320;}
+  /* Same click-to-preview affordance as row-idx, but per-channel-column
+     cells (note/ins/vol/fx) — clicking one previews just that stem at that
+     point in time rather than jumping/seeking the whole transport. */
+  table.pat-table td[data-field="note"],
+  table.pat-table td[data-field="ins"],
+  table.pat-table td[data-field="vol"],
+  table.pat-table td[data-field="fx"]{cursor:pointer;}
+  table.pat-table td[data-field="note"]:hover,
+  table.pat-table td[data-field="ins"]:hover,
+  table.pat-table td[data-field="vol"]:hover,
+  table.pat-table td[data-field="fx"]:hover{background:#232320;}
   table.pat-table td.note{color:var(--ink);}
   table.pat-table td.note.off{color:#c96a6a;}
   table.pat-table td.note.empty{color:var(--dim);}
@@ -10732,6 +10746,85 @@
   }
   song.channels.forEach(function(ch){ ch.insTimeline = buildInstrumentTimeline(ch); });
 
+  // --- per-channel note timeline: same forward-walk as insTimeline above,
+  // but recording the actual held note number instead of the instrument
+  // index — what the Piano Roll needs to know exactly which pitch is
+  // sounding on each channel at any row, independent of which instrument
+  // is playing it. ---
+  function buildNoteTimeline(ch){
+    var timeline = [];
+    var current = null;
+    ch.orderList.forEach(function(pIdx){
+      var pat = ch.patterns[pIdx];
+      var rows = (pat && pat.rows) ? pat.rows : [];
+      var arr = [];
+      for(var r=0;r<song.meta.patternLength;r++){
+        var raw = rows[r];
+        if(raw && raw.note!==undefined) current = (raw.note===NOTE_OFF) ? null : raw.note;
+        arr.push(current);
+      }
+      timeline.push(arr);
+    });
+    return timeline;
+  }
+  song.channels.forEach(function(ch){ ch.noteTimeline = buildNoteTimeline(ch); });
+
+  // --- Piano Roll key range & geometry: sized to just the notes this song
+  // actually uses (plus a little headroom) rather than a full 88-key
+  // keyboard, computed once at load. Black/white classification reuses
+  // NOTE_NAMES' own sharp/natural convention so it lines up with every
+  // other note-name display on this page. Black keys are centered evenly
+  // on the boundary between their neighbouring white keys — a common
+  // simplification for canvas keyboards; a real piano widens the E-F/B-C
+  // gaps slightly, which this doesn't reproduce. ---
+  var PIANO_ROLL_PAD = 2; // semitones of headroom either side of the used range
+  var PIANO_WHITE_KEY_W = 14, PIANO_WHITE_KEY_H = 60, PIANO_BLACK_KEY_W = 9, PIANO_BLACK_KEY_H = 36;
+  var PIANO_BLACK_SEMITONES = {1:true,3:true,6:true,8:true,10:true}; // rel%12 values that are '#' in NOTE_NAMES
+  function computeNoteRange(){
+    var min = null, max = null;
+    song.channels.forEach(function(ch){
+      ch.noteTimeline.forEach(function(arr){
+        arr.forEach(function(n){
+          if(n!==null){
+            if(min===null || n<min) min = n;
+            if(max===null || n>max) max = n;
+          }
+        });
+      });
+    });
+    if(min===null){ min = A_REF_NOTE-12; max = A_REF_NOTE+12; } // no notes at all — shouldn't happen, safe fallback
+    return { min: min-PIANO_ROLL_PAD, max: max+PIANO_ROLL_PAD };
+  }
+  var pianoRollRange = computeNoteRange();
+  function computePianoKeyGeometry(range){
+    var geo = {}, whiteXs = {}, whiteIdx = 0, n;
+    for(n=range.min; n<=range.max; n++){
+      var rel = n-60, semi = ((rel%12)+12)%12;
+      if(!PIANO_BLACK_SEMITONES[semi]){
+        geo[n] = { white:true, x: whiteIdx*PIANO_WHITE_KEY_W, w: PIANO_WHITE_KEY_W, h: PIANO_WHITE_KEY_H };
+        whiteXs[n] = whiteIdx*PIANO_WHITE_KEY_W;
+        whiteIdx++;
+      }
+    }
+    for(n=range.min; n<=range.max; n++){
+      var rel2 = n-60, semi2 = ((rel2%12)+12)%12;
+      if(PIANO_BLACK_SEMITONES[semi2] && whiteXs[n-1]!==undefined){
+        geo[n] = { white:false, x: whiteXs[n-1]+PIANO_WHITE_KEY_W-PIANO_BLACK_KEY_W/2, w: PIANO_BLACK_KEY_W, h: PIANO_BLACK_KEY_H };
+      }
+    }
+    return { keys: geo, totalWidth: whiteIdx*PIANO_WHITE_KEY_W };
+  }
+  var pianoKeyGeo = computePianoKeyGeometry(pianoRollRange);
+  // Declared here (not next to drawPianoRoll/flashPianoKey further down,
+  // which also read/write these) because the initial drawPianoRoll() call
+  // right after the HTML is inserted runs much earlier in the script than
+  // that — var hoisting only hoists the declaration, not the `= {}`
+  // initializer, so a later declaration left these undefined for that
+  // first call (Object.keys(undefined) throws). Same reasoning as
+  // mutedChannels' own declaration-placement comment above.
+  var pianoRollActiveNotes = {}; // note -> color, from real playback position
+  var pianoRollFlashes = {}, pianoRollFlashTimers = {}; // note -> color, temporary
+
   // Which channel each instrument actually gets played on in this song —
   // read straight from the timeline rather than guessed, so the preview
   // button uses the right synthesis path (duty/wave/noise) for GB-engine
@@ -10848,6 +10941,18 @@
       '<tbody>'+rows+'</tbody></table></div></div>'+
     '</div>';
   }
+  function pianoRollFieldHTML(){
+    return '<div class="field" id="field-piano-roll">'+
+      '<div class="field-header" data-toggle="piano-roll" data-explain="piano-roll">'+
+        '<span class="flabel">Piano Roll</span>'+
+        '<span class="field-summary">keys currently sounding</span>'+
+        '<span class="collapse-arrow">▾</span>'+
+      '</div>'+
+      '<div class="field-body">'+
+        '<div class="piano-roll-scroll"><canvas id="pianoRollCanvas" class="piano-roll-canvas"></canvas></div>'+
+      '</div>'+
+    '</div>';
+  }
   function patternsFieldHTML(){
     var opts = song.channels[0].orderList.map(function(pIdx, op){
       return '<option value="'+op+'">'+op+' (pattern '+pIdx+')</option>';
@@ -10895,7 +11000,7 @@
   // Explainer, then the secondary/reference cards (Timing, Chips,
   // Instruments, Wavetables) stacked below it.
   var legend = document.getElementById('legend');
-  legend.innerHTML = songFieldHTML() + patternsFieldHTML() + instrumentsFieldHTML();
+  legend.innerHTML = songFieldHTML() + patternsFieldHTML() + pianoRollFieldHTML() + instrumentsFieldHTML();
   var sideLegend = document.getElementById('sideLegend');
   sideLegend.innerHTML = commentsFieldHTML() + timingFieldHTML() + chipsFieldHTML();
 
@@ -10929,6 +11034,12 @@
       ctx.fillRect(x, 16-h, 1, h);
     }
   });
+
+  // Piano Roll: same "empty canvas in the HTML string, draw into it right
+  // after insertion" approach as the wavetable bars above. drawPianoRoll
+  // (defined further down, but hoisted) paints the base keys and then any
+  // currently-active/flashed notes on top — nothing's active yet at load.
+  drawPianoRoll();
 
   // --- collapsible cards, each toggling independently (unlike 0004's
   // one-open-at-a-time accordion): Song + Patterns are meant to stay open
@@ -10988,7 +11099,7 @@
       var rowLineClass = linesEnabled ? ((highlight2 && r%highlight2===0) ? 'bar-line' : ((highlight1 && r%highlight1===0) ? 'beat-line' : '')) : '';
       var rowBgClass = (highlight2 && r%highlight2===0) ? 'hl2' : ((highlight1 && r%highlight1===0) ? 'hl1' : '');
       html += '<tr class="'+rowBgClass+'" data-row="'+r+'">'+
-        '<td class="row-idx '+rowLineClass+'" data-ch="-1" data-row="'+r+'" data-field="rowidx" title="click to jump playback here">'+(r<16?'0':'')+r.toString(16).toUpperCase()+'</td>';
+        '<td class="row-idx '+rowLineClass+'" data-ch="-1" data-row="'+r+'" data-field="rowidx" title="click to jump playback here (and preview all unmuted stems at this row)">'+(r<16?'0':'')+r.toString(16).toUpperCase()+'</td>';
       for(var c=0;c<perChan.length;c++){
         var cell = normalizeCell(perChan[c].rows[r], perChan[c].effectColumns);
         var noteClass = cell.noteName===null ? 'empty' : (cell.noteName==='OFF' ? 'off' : '');
@@ -11015,12 +11126,13 @@
         var nextRaw = perChan[c].rows[r+1];
         var endClass = (linesEnabled && nextRaw && nextRaw.note===NOTE_OFF) ? ' note-end' : '';
         var mutedClass = mutedChannels[c] ? ' chan-muted' : '';
-        html += '<td class="note '+noteClass+tintClass+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="note">'+(cell.noteName===null?'...':cell.noteName)+'</td>'+
-          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="ins">'+hex2(cell.instrument)+'</td>'+
-          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="vol">'+hex2(cell.volume)+'</td>';
+        var previewTitle = ' title="click to preview CH'+c+' at this row"';
+        html += '<td class="note '+noteClass+tintClass+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="note"'+previewTitle+'>'+(cell.noteName===null?'...':cell.noteName)+'</td>'+
+          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="ins"'+previewTitle+'>'+hex2(cell.instrument)+'</td>'+
+          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="vol"'+previewTitle+'>'+hex2(cell.volume)+'</td>';
         for(var fc=0;fc<cell.effects.length;fc++){
           var e = cell.effects[fc];
-          html += '<td class="fx'+tintClass+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="fx" data-fxcol="'+fc+'">'+(e?(hex2(e.code)+hex2(e.value)):'....')+'</td>';
+          html += '<td class="fx'+tintClass+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="fx" data-fxcol="'+fc+'"'+previewTitle+'>'+(e?(hex2(e.code)+hex2(e.value)):'....')+'</td>';
         }
       }
       html += '</tr>';
@@ -11136,6 +11248,23 @@
     if(rowCell){
       var row = parseInt(rowCell.getAttribute('data-row'), 10);
       seekToPosition(currentOrderPos, row);
+      // Extra audio feedback beyond the seek itself: seeking alone is
+      // silent unless the track is already playing, so also preview every
+      // unmuted stem at that row — same "audition this instant" purpose
+      // as the per-cell preview below, just across all channels at once.
+      var unmutedChannels = [0,1,2,3].filter(function(c){ return !mutedChannels[c]; });
+      previewAtTime(unmutedChannels, (currentOrderPos*song.meta.patternLength + row) * rowDurationSec());
+      flashPianoForChannelsAt(unmutedChannels, currentOrderPos, row);
+      return;
+    }
+    var chCell = e.target.closest('td[data-ch]');
+    if(chCell){
+      var ch = parseInt(chCell.getAttribute('data-ch'), 10);
+      var chRow = parseInt(chCell.getAttribute('data-row'), 10);
+      if(ch>=0){
+        previewAtTime([ch], (currentOrderPos*song.meta.patternLength + chRow) * rowDurationSec());
+        flashPianoForChannelsAt([ch], currentOrderPos, chRow);
+      }
       return;
     }
   });
@@ -11285,6 +11414,11 @@
     'instruments': function(){
       return { title:'Instruments — GB channel presets',
         html: P(song.instruments.length+' instruments, each a preset of Game Boy envelope + (optionally) duty-cycle or wavetable settings that a pattern row can trigger by index. Hover a row for that instrument\'s specific envelope.') };
+    },
+    'piano-roll': function(){
+      return { title:'Piano Roll — what\'s sounding right now',
+        html: P('A standard keyboard sized to the pitch range this song actually uses. Any key currently held down lights up in the colour of whichever instrument is playing it — the same colours used everywhere else on this page (pattern-grid tint, instrument swatches).') +
+          P('Clicking a pattern cell, a row number, or an instrument\'s preview button also flashes the relevant key(s) briefly, even when the track isn\'t playing — the same click-to-preview interactions as the Patterns panel below.') };
     },
     'wavetables': function(){
       return { title:'Wavetables — custom waveforms for the GB Wave channel',
@@ -11523,6 +11657,7 @@
     if(ac && ac.state==='running') ac.suspend();
     setPlayheadRow(null);
     lastShownOrderPos = null; lastShownRow = null; // force a fresh update on next play
+    pianoRollActiveNotes = {}; drawPianoRoll(); // no channel is sounding once stopped
     updateTransportUI();
   }
   // Jump playback to an arbitrary song-time — keeps playing from the new
@@ -11541,6 +11676,7 @@
     document.getElementById('orderSelect').value = pos.orderPos;
     renderPatternTable();
     setPlayheadRow(pos.row);
+    updatePianoRollActive(pos.orderPos, pos.row);
     updateTransportUI();
   }
   function seekToPosition(orderPos, row){
@@ -11596,6 +11732,99 @@
     }
   }
 
+  // --- Piano Roll rendering: a full redraw on every update (base keys +
+  // whatever's currently lit), same "just rebuild it" discipline as
+  // renderPatternTable — the canvas is small and updates are infrequent
+  // (once per row change, or on a preview click), so there's no need for
+  // incremental redraw bookkeeping. Two independent sources of "lit" keys
+  // are merged each draw: pianoRollActiveNotes (sustained — tracks real
+  // playback position, cleared on Stop, frozen on Pause) and
+  // pianoRollFlashes (transient — a preview click, self-clearing via its
+  // own setTimeout regardless of transport state). Both declared earlier,
+  // next to pianoKeyGeo — see the comment there. ---
+  var PIANO_FLASH_MS = 300;
+  function drawPianoRollBase(ctx){
+    var geo = pianoKeyGeo.keys;
+    Object.keys(geo).forEach(function(nStr){
+      var k = geo[nStr];
+      if(!k.white) return;
+      ctx.fillStyle = '#eae6dc';
+      ctx.fillRect(k.x, 0, k.w-1, k.h);
+      ctx.strokeStyle = '#3a3a3a';
+      ctx.strokeRect(k.x+0.5, 0.5, k.w-2, k.h-1);
+    });
+    Object.keys(geo).forEach(function(nStr){
+      var k = geo[nStr];
+      if(k.white) return;
+      ctx.fillStyle = '#151515';
+      ctx.fillRect(k.x, 0, k.w, k.h);
+    });
+  }
+  function drawPianoRoll(){
+    var canvas = document.getElementById('pianoRollCanvas');
+    if(!canvas) return;
+    canvas.width = pianoKeyGeo.totalWidth+1;
+    canvas.height = PIANO_WHITE_KEY_H;
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    drawPianoRollBase(ctx);
+    var geo = pianoKeyGeo.keys;
+    var lit = {};
+    Object.keys(pianoRollActiveNotes).forEach(function(n){ lit[n] = pianoRollActiveNotes[n]; });
+    Object.keys(pianoRollFlashes).forEach(function(n){ lit[n] = pianoRollFlashes[n]; }); // flashes drawn last, win over a sustained note at the same key
+    Object.keys(lit).forEach(function(nStr){
+      var k = geo[nStr];
+      if(!k) return; // note outside the computed range (padding is generous, but stay safe)
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = lit[nStr];
+      ctx.fillRect(k.x, k.white ? k.h*0.55 : 0, k.w, k.white ? k.h*0.45 : k.h);
+      ctx.globalAlpha = 1;
+    });
+  }
+  // Transient highlight for a preview click — independent of playback
+  // state, self-clearing, same "add now, setTimeout to remove" idiom as
+  // flashInstrumentRow above.
+  function flashPianoKey(note, color){
+    if(note===null || note===undefined || note===NOTE_OFF) return;
+    pianoRollFlashes[note] = color;
+    drawPianoRoll();
+    clearTimeout(pianoRollFlashTimers[note]);
+    pianoRollFlashTimers[note] = setTimeout(function(){
+      delete pianoRollFlashes[note];
+      drawPianoRoll();
+    }, PIANO_FLASH_MS);
+  }
+  // Looks up each given channel's held note/instrument at (orderPos,row)
+  // via noteTimeline/insTimeline and flashes it — the shared lookup used
+  // by all 3 preview-click sites below (row-index, per-cell, and the
+  // Instruments panel's preview button).
+  function flashPianoForChannelsAt(channels, orderPos, row){
+    channels.forEach(function(c){
+      var ch = song.channels[c];
+      var note = ch.noteTimeline[orderPos][row];
+      if(note===null) return;
+      var insIdx = ch.insTimeline[orderPos][row];
+      var color = (insIdx!==null && song.instruments[insIdx]) ? song.instruments[insIdx].color : '#c9973a';
+      flashPianoKey(note, color);
+    });
+  }
+  // Sustained keys — mirrors flashInstrumentsForRow's per-row scan, but
+  // reads noteTimeline (actual pitch) rather than just detecting a
+  // trigger, and replaces the whole active set each call (a channel that
+  // fell silent this row needs its old key to go dark, not just skip
+  // adding a new one).
+  function updatePianoRollActive(orderPos, row){
+    pianoRollActiveNotes = {};
+    for(var c=0;c<4;c++){
+      var ch = song.channels[c];
+      var note = ch.noteTimeline[orderPos][row];
+      if(note===null) continue;
+      var insIdx = ch.insTimeline[orderPos][row];
+      pianoRollActiveNotes[note] = (insIdx!==null && song.instruments[insIdx]) ? song.instruments[insIdx].color : '#c9973a';
+    }
+    drawPianoRoll();
+  }
+
   var lastShownOrderPos = null, lastShownRow = null;
   function playbackRAF(){
     if(songStarted && ac && ac.state==='running'){
@@ -11611,6 +11840,7 @@
         lastShownRow = pos.row;
         setPlayheadRow(pos.row);
         flashInstrumentsForRow(pos.orderPos, pos.row);
+        updatePianoRollActive(pos.orderPos, pos.row);
       }
     }
     requestAnimationFrame(playbackRAF);
@@ -11630,7 +11860,7 @@
           var pat = ch.patterns[ch.orderList[op]];
           var raw = pat ? pat.rows[r] : null;
           if(raw && raw.note!==undefined && raw.note!==NOTE_OFF && ch.insTimeline[op][r]===insIndex){
-            return { channel: c, time: (op*song.meta.patternLength+r) * rowDurationSec() };
+            return { channel: c, time: (op*song.meta.patternLength+r) * rowDurationSec(), orderPos: op, row: r };
           }
         }
       }
@@ -11646,16 +11876,30 @@
   // objects aren't tied to the context that decoded them (only AudioNodes
   // are), so stemBuffers can be reused here directly with no re-decoding.
   var previewAc = null;
-  function previewInstrument(insIndex){
+  // Shared preview primitive: plays a PREVIEW_DUR_CELLS-long slice starting
+  // at `time` (song-time seconds) from each stem in `channels`, all
+  // started together so a multi-channel preview (row-index click) stays
+  // in sync the same way real playback does. Used by the instrument
+  // preview buttons, per-cell pattern clicks, and row-index clicks alike.
+  function previewAtTime(channels, time){
     ensureAudioContext(); // still needed: stemBuffers are decoded via the main context
     if(!previewAc) previewAc = new (window.AudioContext||window.webkitAudioContext)();
     if(previewAc.state!=='running') previewAc.resume();
+    var startAt = previewAc.currentTime;
+    var dur = PREVIEW_DUR_CELLS * rowDurationSec();
+    channels.forEach(function(c){
+      if(!stemBuffers[c]) return;
+      var src = previewAc.createBufferSource();
+      src.buffer = stemBuffers[c];
+      src.connect(previewAc.destination);
+      src.start(startAt, time, dur);
+    });
+  }
+  function previewInstrument(insIndex){
     var spot = instrumentPreviewSpots[insIndex];
-    if(!spot || !stemBuffers[spot.channel]) return;
-    var src = previewAc.createBufferSource();
-    src.buffer = stemBuffers[spot.channel];
-    src.connect(previewAc.destination);
-    src.start(previewAc.currentTime, spot.time, PREVIEW_DUR_CELLS * rowDurationSec());
+    if(!spot) return;
+    previewAtTime([spot.channel], spot.time);
+    flashPianoForChannelsAt([spot.channel], spot.orderPos, spot.row);
   }
   document.getElementById('legend').addEventListener('click', function(e){
     var previewBtn = e.target.closest('[data-preview-ins]');
@@ -11881,7 +12125,8 @@
     getState: function(){ return { ac: ac, songStarted: songStarted, isPlaying: isPlaying(), songDuration: songDuration, currentSongTime: currentSongTime() }; },
     stemBuffers: function(){ return stemBuffers; },
     instrumentPreviewSpots: instrumentPreviewSpots,
-    mutedChannels: mutedChannels
+    mutedChannels: mutedChannels,
+    pianoRoll: function(){ return { active: pianoRollActiveNotes, flashes: pianoRollFlashes, range: pianoRollRange }; }
   };
 
 })();
