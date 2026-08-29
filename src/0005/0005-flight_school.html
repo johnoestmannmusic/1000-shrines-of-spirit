@@ -77,10 +77,13 @@
   table.ins-table td{color:var(--ink);}
   table.ins-table tr[data-explain]{cursor:default;}
   input.ins-color-input{width:22px;height:16px;padding:0;border:1px solid var(--edge);background:none;cursor:pointer;}
-  .wave-badge{display:inline-block;font-size:9px;letter-spacing:.02em;color:var(--amber);
-    border:1px solid var(--amber);border-radius:8px;padding:1px 7px;background:rgba(201,151,58,.14);white-space:nowrap;}
-  .wave-none{color:var(--dim);}
-  table.ins-table tr.uses-wave{background:rgba(201,151,58,.06);}
+  /* Flash an instrument row the instant it's actually triggered during
+     playback — instant snap-in (no transition while .firing is applied),
+     then a plain CSS fade once the class is removed a beat later. Same
+     technique as 0004's per-instrument card flash. */
+  table.ins-table tr{transition:background-color .5s ease-out;}
+  table.ins-table tr.firing{background-color:rgba(201,151,58,.35);transition:none;}
+  table.ins-table tr:hover{background-color:#1e1e22;}
 
   .wave-row{display:flex;align-items:center;gap:10px;padding:4px 0;font-size:11px;}
   .wave-row canvas{background:#08080a;border:1px solid var(--edge);image-rendering:pixelated;}
@@ -102,7 +105,10 @@
   table.pat-table td, table.pat-table th{padding:2px 7px;white-space:nowrap;border-right:1px solid var(--edge);}
   table.pat-table th{position:sticky;top:0;background:var(--panel);color:var(--dim);font-weight:400;text-align:left;
     text-transform:uppercase;font-size:8px;letter-spacing:.04em;z-index:1;}
-  table.pat-table th.chan-head{text-align:center;top:0;}
+  table.pat-table th.chan-head{text-align:center;top:0;cursor:pointer;user-select:none;}
+  table.pat-table th.chan-head:hover{color:var(--ink);}
+  table.pat-table th.chan-head.muted{color:#6a4040;text-decoration:line-through;background:rgba(180,60,60,.1);}
+  table.pat-table td.chan-muted{opacity:.32;}
   table.pat-table thead tr:first-child th{top:0;}
   table.pat-table thead tr:last-child th{top:16px;}
   table.pat-table td.row-idx, table.pat-table th.row-idx-head{color:var(--dim);position:sticky;left:0;background:var(--panel);z-index:1;}
@@ -141,6 +147,35 @@
   button:hover{border-color:#555;}
   button:disabled{opacity:.4;cursor:default;}
 
+  .sampler-btn{font-size:9px;padding:3px 8px;}
+  .ins-table .preview-btn{font-size:9px;padding:3px 7px;line-height:1;color:var(--amber);}
+  #samplerPreviewBtn{color:var(--amber);white-space:nowrap;}
+  .sampler-btn.active{color:var(--amber);border-color:var(--amber);}
+
+  /* --- sampler modal: per-instrument sample import + ADSR/loop editor —
+     the first concrete "swap this instrument for another synthesis engine"
+     control. Reuses the dark chip/panel palette rather than introducing a
+     new one. --- */
+  .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
+    align-items:center;justify-content:center;z-index:20;}
+  .modal-overlay.open{display:flex;}
+  .modal-box{width:460px;max-width:92vw;max-height:88vh;overflow-y:auto;background:var(--panel);
+    border:1px solid var(--edge);border-radius:2px;padding:16px;display:flex;flex-direction:column;gap:10px;}
+  .modal-title{font-size:11px;letter-spacing:.04em;color:var(--ink);}
+  .modal-section{border-top:1px solid var(--edge);padding-top:10px;display:flex;flex-direction:column;gap:6px;}
+  .modal-section:first-of-type{border-top:none;padding-top:0;}
+  .modal-label{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);}
+  .modal-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .modal-row input[type=text]{flex:1;min-width:100px;background:#0c0c0d;color:var(--ink);
+    border:1px solid var(--edge);font-family:var(--mono);font-size:11px;padding:6px 8px;}
+  .modal-msg{font-size:10px;color:var(--dim);min-height:12px;}
+  .sampler-wave{width:100%;height:70px;background:#0c0c0d;border:1px solid var(--edge);display:block;}
+  .adsr-row{display:flex;align-items:center;gap:6px;font-size:10px;}
+  .adsr-row .klabel{width:60px;flex:none;color:var(--ink);}
+  .adsr-row input[type=range]{flex:1;min-width:0;}
+  .adsr-row .kval{width:44px;flex:none;text-align:right;color:var(--dim);}
+  .modal-note{font-size:9px;color:var(--dim);line-height:1.5;}
+
   footer{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:var(--dim);flex-wrap:wrap;gap:6px;width:1040px;max-width:100%;}
   footer a{color:var(--dim);}
 
@@ -157,7 +192,9 @@
 
 <div class="shrine">
   <div class="controls">
-    <button id="playBtn" type="button" disabled>▶ play (stage C)</button>
+    <button id="playBtn" type="button">▶ play</button>
+    <button id="pauseBtn" type="button" disabled>❚❚ pause</button>
+    <button id="stopBtn" type="button" disabled>■ stop</button>
   </div>
 
   <div class="panels">
@@ -176,6 +213,69 @@
     <span>License: MIT · <a href="https://github.com/johnoestmannmusic/1000-shrines-of-spirit" target="_blank" rel="noreferrer noopener">view source</a></span>
     <span>composed in Furnace tracker — format specs used with permission from tildearrow</span>
   </footer>
+</div>
+
+<div class="modal-overlay" id="samplerModal">
+  <div class="modal-box">
+    <div class="modal-title" id="samplerModalTitle">Sampler</div>
+
+    <div class="modal-section">
+      <div class="modal-label">Load from samples/ folder</div>
+      <div class="modal-note">Primary path for the shipped "Player" page — drop a WAV in <code>src/0005/samples/</code>, type its filename, and this fetches it by relative path (works when the page is served, or opened directly as file:// for local editing).</div>
+      <div class="modal-row">
+        <input type="text" id="samplerFilename" placeholder="e.g. kick.wav">
+        <button type="button" id="samplerLoadBtn">Load</button>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-label">Or import a file directly</div>
+      <div class="modal-note">Quick preview while authoring — this stays in the browser only, for this session; it isn't saved into the page. Move the file into samples/ and load it by name (above) once you're happy with it.</div>
+      <input type="file" id="samplerFileInput" accept="audio/*">
+    </div>
+
+    <div class="modal-section">
+      <canvas class="sampler-wave" id="samplerWave" width="420" height="70"></canvas>
+      <div class="modal-row">
+        <button type="button" class="preview-btn" id="samplerPreviewBtn" title="preview this instrument">▶ preview</button>
+        <div class="modal-msg" id="samplerMsg" style="flex:1;">No sample loaded — this instrument is still using its Game Boy synthesis.</div>
+      </div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-row">
+        <span class="modal-label" style="width:70px;">Root note</span>
+        <input type="range" id="samplerRoot" min="24" max="143" step="1" value="96" style="flex:1;">
+        <span class="kval" id="samplerRootVal" style="width:40px;text-align:right;color:var(--dim);">C-3</span>
+      </div>
+      <div class="modal-note">The note this sample plays back at its recorded pitch — other notes speed it up/slow it down from there.</div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-label">Envelope (ADSR)</div>
+      <div class="adsr-row"><span class="klabel">Attack</span><input type="range" id="adsrA" min="0" max="2" step="0.005"><span class="kval" id="adsrAVal">0.005s</span></div>
+      <div class="adsr-row"><span class="klabel">Decay</span><input type="range" id="adsrD" min="0" max="2" step="0.01"><span class="kval" id="adsrDVal">0.10s</span></div>
+      <div class="adsr-row"><span class="klabel">Sustain</span><input type="range" id="adsrS" min="0" max="1" step="0.01"><span class="kval" id="adsrSVal">0.80</span></div>
+      <div class="adsr-row"><span class="klabel">Release</span><input type="range" id="adsrR" min="0" max="3" step="0.01"><span class="kval" id="adsrRVal">0.15s</span></div>
+    </div>
+
+    <div class="modal-section">
+      <label class="tint-toggle"><input type="checkbox" id="samplerLoop"> loop</label>
+      <div class="modal-row" id="loopPointsRow" style="display:none;">
+        <span class="modal-label">start</span><input type="text" id="loopStart" style="width:60px;" value="0">
+        <span class="modal-label">end</span><input type="text" id="loopEnd" style="width:60px;" value="0">
+        <span class="modal-note">seconds</span>
+      </div>
+    </div>
+
+    <div class="modal-row">
+      <label class="tint-toggle"><input type="checkbox" id="samplerEnabled"> use sampler for this instrument (instead of Game Boy synthesis)</label>
+    </div>
+
+    <div class="modal-row">
+      <button type="button" id="samplerCloseBtn">Close</button>
+    </div>
+  </div>
 </div>
 
 <script id="fur-json" type="application/json">
@@ -10583,20 +10683,23 @@
     if(n===null || n===undefined || n===NOTE_OFF) return null;
     return tuning * Math.pow(2, (n - A_REF_NOTE)/12);
   }
-  // Human-readable meaning of the core tracker effect codes this shrine
-  // plans to actually play back in Stage D (see the shrine's plan). Codes
-  // outside this set still parse fine — normalizeCell keeps every effect —
-  // they just don't have a friendly name yet.
+  // Human-readable meaning of the core tracker effect codes — all of these
+  // actually play back now (Stage D), confirmed against Furnace's own
+  // effect docs. Only 01/02 (pitch slide) and 04 (vibrato) actually appear
+  // in flight_school itself; the rest are implemented for other songs but
+  // untested against real data here. Codes outside this set still parse
+  // fine — normalizeCell keeps every effect — they just don't have a
+  // friendly name or playback behavior yet.
   var CORE_EFFECTS = {
     0: 'Arpeggio — cycles rapidly between this note and two offsets (nibbles below) each tick, faking a chord on one channel.',
-    1: 'Pitch Up — slides pitch upward continuously by the given amount each tick.',
-    2: 'Pitch Down — slides pitch downward continuously by the given amount each tick.',
-    3: 'Tone Portamento — glides smoothly from whatever note was playing to this row\'s new note, at the given speed.',
-    4: 'Vibrato — oscillates pitch using the nibbles below as speed/depth.',
-    8: 'Panning — sets stereo position for this channel.',
+    1: 'Pitch Up — slides pitch upward continuously by the given amount each tick, until cleared with value 00 or a plain new note.',
+    2: 'Pitch Down — slides pitch downward continuously by the given amount each tick, until cleared with value 00 or a plain new note.',
+    3: 'Tone Portamento — glides smoothly from whatever note was playing to this row\'s new note, at the given speed, instead of retriggering.',
+    4: 'Vibrato — oscillates pitch using the nibbles below as speed/depth (max depth ±1 semitone).',
+    8: 'Panning — sets this channel\'s LEFT and RIGHT volume independently (nibbles below: left/right, 0–15 each) — not a single left↔right position.',
     10: 'Volume Slide — ramps this channel\'s volume up or down each tick (nibbles below).',
-    11: 'Position Jump — jumps playback to a different order position.',
-    13: 'Pattern Break — ends the current pattern early and jumps to the next order position.'
+    11: 'Position Jump — after this row, playback continues at a different order position.',
+    13: 'Pattern Break — ends the current pattern early and jumps to the given row of the next order.'
   };
 
   function buildSongModel(mod){
@@ -10660,6 +10763,15 @@
       var hue = Math.round((i*137.508)%360);
       ins.color = hslToHex(hue, 65, 55);
     }
+    // engine: 'gb' (the parsed Furnace/GB chip params, Stage C's default)
+    // or 'sampler' (a user-imported WAV overriding this instrument's
+    // synthesis entirely) — the first concrete step of the "swap any
+    // instrument for another synthesis engine" architecture from the
+    // shrine's plan. Sample data/settings live only in this session's
+    // memory for now (loaded via file picker, not baked into the page);
+    // exporting/persisting them is a natural follow-up, not v1.
+    if(!ins.engine) ins.engine = 'gb';
+    if(ins.sampler===undefined) ins.sampler = null;
   });
 
   // --- per-channel instrument timeline: which instrument is "active" at
@@ -10688,6 +10800,20 @@
     return timeline;
   }
   song.channels.forEach(function(ch){ ch.insTimeline = buildInstrumentTimeline(ch); });
+
+  // Which channel each instrument actually gets played on in this song —
+  // read straight from the timeline rather than guessed, so the preview
+  // button uses the right synthesis path (duty/wave/noise) for GB-engine
+  // instruments. Falls back to channel 0 for an instrument that's never
+  // actually triggered anywhere.
+  song.instruments.forEach(function(ins, i){
+    ins._previewChannel = 0;
+    for(var c=0; c<song.channels.length; c++){
+      var tl = song.channels[c].insTimeline, found = false;
+      for(var op=0; op<tl.length && !found; op++){ if(tl[op].indexOf(i)!==-1) found = true; }
+      if(found){ ins._previewChannel = c; break; }
+    }
+  });
 
   // --- card scaffolding: same collapsible .field pattern as 0004/js-explorer ---
   function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -10744,15 +10870,18 @@
   function instrumentsFieldHTML(){
     var rows = song.instruments.map(function(ins, i){
       var gb = ins.gb || {};
-      // Wavetable use is easy to miss as a plain "yes" in a wall of table
-      // text, so it gets its own coloured badge (which wavetable index,
-      // not just whether one's used) instead.
-      var usesWave = ins.waveSynth && ins.waveSynth.enabled!==false;
-      var waveCell = usesWave ? '<span class="wave-badge">wave '+ins.waveSynth.wave1+'</span>' : '<span class="wave-none">—</span>';
-      return '<tr data-explain="ins-'+i+'"'+(usesWave?' class="uses-wave"':'')+'>'+
+      // Sampler now lives where the Wave column used to — samples are the
+      // primary way instruments get overridden now, so that's the column
+      // that earns the prime real estate. Which wavetable a GB instrument
+      // pointed at is still in its hover explainer, just not its own column.
+      var samplerBtn = '<button type="button" class="sampler-btn'+(ins.engine==='sampler'?' active':'')+'" data-ins="'+i+'">'+
+        (ins.engine==='sampler' ? '◆ sampler' : 'sampler') + '</button>';
+      var previewBtn = '<button type="button" class="preview-btn" data-preview-ins="'+i+'" title="preview this instrument">▶</button>';
+      return '<tr data-explain="ins-'+i+'" data-ins-row="'+i+'">'+
+        '<td>'+previewBtn+'</td>'+
         '<td><input type="color" class="ins-color-input" data-ins="'+i+'" value="'+ins.color+'" title="pattern-grid tint for this instrument"></td>'+
         '<td>'+i+'</td><td>'+esc(ins.name||'(unnamed)')+'</td>'+
-        '<td>'+waveCell+'</td>'+
+        '<td>'+samplerBtn+'</td>'+
         '<td>'+(gb.envVol!==undefined?gb.envVol:'')+'</td>'+
         '<td>'+(gb.envDir!==undefined?(gb.envDir?'up':'down'):'')+'</td>'+
         '<td>'+(gb.envLen!==undefined?gb.envLen:'')+'</td>'+
@@ -10761,13 +10890,13 @@
         '<td>'+((ins.macros||[]).length?(ins.macros.length+' macro(s)'):'')+'</td>'+
       '</tr>';
     }).join('');
-    return '<div class="field collapsed" id="field-instruments">'+
+    return '<div class="field" id="field-instruments">'+
       '<div class="field-header" data-toggle="instruments" data-explain="instruments">'+
         '<span class="flabel">Instruments</span>'+
         '<span class="field-summary">'+song.instruments.length+'</span>'+
-        '<span class="collapse-arrow">▸</span>'+
+        '<span class="collapse-arrow">▾</span>'+
       '</div>'+
-      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th>Color</th><th>#</th><th>Name</th><th>Wave</th><th>Env</th><th>Dir</th><th>Len</th><th>SndLen</th><th>SoftEnv</th><th>Macros</th></tr></thead>'+
+      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th>Color</th><th>#</th><th>Name</th><th>Sampler</th><th>Env</th><th>Dir</th><th>Len</th><th>SndLen</th><th>SoftEnv</th><th>Macros</th></tr></thead>'+
       '<tbody>'+rows+'</tbody></table></div></div>'+
     '</div>';
   }
@@ -10786,7 +10915,7 @@
       return '<option value="'+op+'">'+op+' (pattern '+pIdx+')</option>';
     }).join('');
     var chanHeadCells = song.channels.map(function(ch){
-      return '<th class="chan-head" colspan="'+(3+ch.effectColumns)+'" data-explain="chan-'+ch.index+'">CH'+ch.index+' · '+(GB_ROLE_HINT[ch.index]||'')+'</th>';
+      return '<th class="chan-head" colspan="'+(3+ch.effectColumns)+'" data-explain="chan-'+ch.index+'" data-chan-mute="'+ch.index+'" title="click to mute/unmute this channel">CH'+ch.index+' · '+(GB_ROLE_HINT[ch.index]||'')+'</th>';
     }).join('');
     var subHeadCells = song.channels.map(function(ch){
       var fxHeads = '';
@@ -10819,9 +10948,9 @@
   // Explainer, then the secondary/reference cards (Timing, Chips,
   // Instruments, Wavetables) stacked below it.
   var legend = document.getElementById('legend');
-  legend.innerHTML = songFieldHTML() + patternsFieldHTML();
+  legend.innerHTML = songFieldHTML() + patternsFieldHTML() + instrumentsFieldHTML();
   var sideLegend = document.getElementById('sideLegend');
-  sideLegend.innerHTML = timingFieldHTML() + chipsFieldHTML() + instrumentsFieldHTML() + wavetablesFieldHTML();
+  sideLegend.innerHTML = timingFieldHTML() + chipsFieldHTML() + wavetablesFieldHTML();
 
   // Instrument colour swatches: rainbow-assigned above, editable here — a
   // change re-tints the pattern grid immediately (renderPatternTable is
@@ -10883,6 +11012,16 @@
   var currentOrderPos = 0;
   var tintEnabled = true;
   var linesEnabled = true;
+  // Per-channel mute — click a Patterns column header to toggle. Live: since
+  // the scheduler only ever queues ~0.2s ahead (see the incremental
+  // scheduler further down), muting takes effect on the very next row
+  // rather than waiting out a whole loop, same reasoning as live sampler
+  // edits. Declared here (not next to scheduleRow, which also reads it)
+  // because renderPatternTable — which also reads it — runs for the first
+  // time much earlier in the script than that; a later declaration left it
+  // undefined for that first render (var hoisting only hoists the
+  // declaration, not the assignment).
+  var mutedChannels = [false, false, false, false];
   function currentChannelRows(){
     return song.channels.map(function(ch){
       var pIdx = ch.orderList[currentOrderPos];
@@ -10927,12 +11066,13 @@
         // order position.
         var nextRaw = perChan[c].rows[r+1];
         var endClass = (linesEnabled && nextRaw && nextRaw.note===NOTE_OFF) ? ' note-end' : '';
-        html += '<td class="note '+noteClass+tintClass+' '+lineClass+endClass+'"'+attrs+tintStyle+' data-field="note">'+(cell.noteName===null?'...':cell.noteName)+'</td>'+
-          '<td class="'+tintClass.trim()+' '+lineClass+endClass+'"'+attrs+tintStyle+' data-field="ins">'+hex2(cell.instrument)+'</td>'+
-          '<td class="'+tintClass.trim()+' '+lineClass+endClass+'"'+attrs+tintStyle+' data-field="vol">'+hex2(cell.volume)+'</td>';
+        var mutedClass = mutedChannels[c] ? ' chan-muted' : '';
+        html += '<td class="note '+noteClass+tintClass+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="note">'+(cell.noteName===null?'...':cell.noteName)+'</td>'+
+          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="ins">'+hex2(cell.instrument)+'</td>'+
+          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="vol">'+hex2(cell.volume)+'</td>';
         for(var fc=0;fc<cell.effects.length;fc++){
           var e = cell.effects[fc];
-          html += '<td class="fx'+tintClass+' '+lineClass+endClass+'"'+attrs+tintStyle+' data-field="fx" data-fxcol="'+fc+'">'+(e?(hex2(e.code)+hex2(e.value)):'....')+'</td>';
+          html += '<td class="fx'+tintClass+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="fx" data-fxcol="'+fc+'">'+(e?(hex2(e.code)+hex2(e.value)):'....')+'</td>';
         }
       }
       html += '</tr>';
@@ -10959,6 +11099,17 @@
     linesEnabled = e.target.checked;
     renderPatternTable();
   });
+  document.getElementById('patTable').addEventListener('click', function(e){
+    var th = e.target.closest('[data-chan-mute]');
+    if(!th) return;
+    var c = parseInt(th.getAttribute('data-chan-mute'), 10);
+    mutedChannels[c] = !mutedChannels[c];
+    th.classList.toggle('muted', mutedChannels[c]);
+    // Cut whatever's already sounding on that channel right away, rather
+    // than leaving it ringing until it would have naturally been replaced.
+    if(mutedChannels[c] && ac) stopVoice(c, ac.currentTime);
+    renderPatternTable(); // reflect the mute in the currently-visible cells (see chan-muted)
+  });
   renderPatternTable();
 
   // --- explainer: same hover-driven pattern as 0004/js-explorer ---
@@ -10967,6 +11118,7 @@
   function KW(x){ return '<span class="tk-kw">'+esc(x)+'</span>'; }
   function CODE(x){ return '<div class="tk-block">'+x+'</div>'; }
   function P(x){ return '<p class="tk-p">'+x+'</p>'; }
+  function LIVE(x){ return '<span class="tk-live">'+esc(x)+'</span>'; }
 
   // --- Patterns cell inspector: hovering any note/ins/vol/fx cell explains
   // exactly what that cell means at that point in time, in musician-legible
@@ -11120,7 +11272,8 @@
       }[ch.index] || '';
       return { title:'Channel '+ch.index+' · '+(GB_ROLE_HINT[ch.index]||''),
         html: P(roleText) +
-          P('Effect columns: '+N(ch.effectColumns)+' — how many independent effect commands can run on this channel per row.') };
+          P('Effect columns: '+N(ch.effectColumns)+' — how many independent effect commands can run on this channel per row.') +
+          P('Click this header to mute/unmute '+esc('CH'+ch.index)+' — handy for isolating one channel to check it in isolation.'+(mutedChannels[ch.index]?' Currently '+LIVE('muted')+'.':'')) };
     };
   });
   song.wavetables.forEach(function(w, i){
@@ -11152,6 +11305,912 @@
   document.querySelectorAll('[data-explain]').forEach(function(el){
     el.addEventListener('mouseenter', function(){ showExplain(el.getAttribute('data-explain')); });
   });
+
+  // ============================================================
+  // Stage C: Game Boy Web Audio renderer + scheduler — first real audio.
+  // Scope for this pass (see the shrine's plan): notes, instruments,
+  // duty/wavetable/noise timbre, and GB hardware volume envelopes. Pattern
+  // effects (arpeggio, pitch slides, vibrato, volume slide, panning,
+  // jump/break) are handled further down, in Stage D. The reverb/delay FX
+  // bus is Stage E.
+  //
+  // Scheduling: rather than a per-row setInterval lookahead loop, the
+  // whole song (every order, one full pass) is scheduled synchronously in
+  // one go using AudioContext.currentTime-based automation (setValueAtTime
+  // / osc.start(time)) — still fully sample-accurate, just simpler for a
+  // finite, loopable piece than the incremental "two clocks" pattern, and
+  // the exact same function works unmodified against an OfflineAudioContext
+  // for testing. As playback nears the end of what's scheduled, one more
+  // pass gets chained on seamlessly to loop.
+  //
+  // Each channel is monophonic, one oscillator/buffer-source PER NOTE
+  // (not a persistent oscillator whose params get pushed around) — this
+  // sidesteps a real Web Audio limitation: setPeriodicWave() takes effect
+  // immediately when called, it can't be scheduled for a future time like
+  // an AudioParam can. A fresh source per note, built with the right wave
+  // already attached before start(time), keeps everything scheduled ahead
+  // of time exactly where it should be.
+  // ============================================================
+
+  var DUTY_RATIOS = [0.125, 0.25, 0.5, 0.75];
+  function buildDutyPeriodicWave(ac, duty){
+    var n = 32;
+    var real = new Float32Array(n+1), imag = new Float32Array(n+1);
+    for(var k=1;k<=n;k++){ imag[k] = (2/(k*Math.PI)) * Math.sin(k*Math.PI*duty); }
+    return ac.createPeriodicWave(real, imag, {disableNormalization:false});
+  }
+  // A straightforward DFT of the wavetable's own samples — this is what
+  // makes the Wave channel play back the exact shape the composer drew in
+  // Furnace's wavetable editor, via the same additive-synthesis code path
+  // as the duty waves above.
+  function buildWavetablePeriodicWave(ac, wavetable){
+    var samples = wavetable.data, N = samples.length, max = wavetable.max || 15;
+    var x = new Float32Array(N);
+    for(var i=0;i<N;i++) x[i] = (samples[i]/max)*2-1;
+    var harmonics = Math.floor(N/2);
+    var real = new Float32Array(harmonics+1), imag = new Float32Array(harmonics+1);
+    for(var k=1;k<=harmonics;k++){
+      var re=0, im=0;
+      for(var nI=0;nI<N;nI++){
+        var ang = 2*Math.PI*k*nI/N;
+        re += x[nI]*Math.cos(ang);
+        im -= x[nI]*Math.sin(ang);
+      }
+      real[k] = re*(2/N); imag[k] = im*(2/N);
+    }
+    return ac.createPeriodicWave(real, imag, {disableNormalization:false});
+  }
+  function getInstrumentDuty(ins){
+    var m = ((ins&&ins.macros)||[]).filter(function(mc){ return mc.code===2; })[0];
+    return m ? m.data[0] : 2; // default 50% duty — GB hardware's power-on default
+  }
+
+  // GB noise: a real 15-bit LFSR (the actual Game Boy noise-channel
+  // hardware algorithm — public, documented hardware behavior, not
+  // Furnace's own expression). Generated once at a fixed reference clock
+  // and looped; pitch per note is then approximated via playbackRate
+  // rather than re-deriving the exact NR43 divisor/shift the real
+  // hardware would pick for that note number — a deliberate v1
+  // simplification, flagged here for whoever revisits it.
+  var NOISE_REF_NOTE = 96, NOISE_REF_CLOCK = 4000;
+  function buildNoiseBuffer(ac){
+    var dur = 0.5, sr = ac.sampleRate;
+    var buf = ac.createBuffer(1, Math.floor(sr*dur), sr);
+    var data = buf.getChannelData(0);
+    var lfsr = 0x7FFF, level = -1, samplesPerStep = sr/NOISE_REF_CLOCK, acc = 0;
+    for(var i=0;i<data.length;i++){
+      acc++;
+      if(acc>=samplesPerStep){
+        acc = 0;
+        var bit = (lfsr ^ (lfsr>>1)) & 1;
+        lfsr = (lfsr>>1) | (bit<<14);
+        level = (lfsr & 1) ? 1 : -1;
+      }
+      data[i] = level;
+    }
+    return buf;
+  }
+
+  // GB hardware volume envelope: a STAIRCASE (discrete steps, not a smooth
+  // ramp) — starts at envVol/15, then every envLen/64 seconds moves one
+  // step toward 0 or 15 (per envDir) until it hits that boundary. envLen
+  // of 0 means the envelope never moves (sustains at envVol until the
+  // note's voice is cut). Fully determined by the note's start time, so
+  // it's scheduled as one batch of setValueAtTime calls right here rather
+  // than needing a live per-frame updater.
+  function scheduleEnvelope(gainParam, T, envVol, envDir, envLen, scale){
+    var level = envVol;
+    gainParam.setValueAtTime((level/15)*scale, T);
+    if(envLen>0){
+      var step = envDir ? 1 : -1;
+      var t = T;
+      for(var i=0;i<16;i++){
+        level += step;
+        if(level<0 || level>15) break;
+        t += envLen/64;
+        gainParam.setValueAtTime((level/15)*scale, t);
+        if(level===0 || level===15) break;
+      }
+    }
+  }
+
+  // Headroom so 4 simultaneous full-volume channels don't clip (worst
+  // case each hits 1.0 → sum 4.0); baked into each voice's envelope scale
+  // rather than a separate master trim.
+  var MASTER_HEADROOM = 0.22;
+
+  var ac = null, master = null, dutyWaves = [], wavetablePeriodicWaves = {}, noiseBuffer = null;
+  var lastVoice = [null, null, null, null];
+
+  function stopVoice(c, atTime){
+    var v = lastVoice[c];
+    if(!v) return;
+    var g = v.gain.gain;
+    var rel = (v.releaseTime!==undefined && v.releaseTime!==null) ? Math.max(v.releaseTime, 0.005) : 0.008;
+    // cancelAndHoldAtTime freezes the param at whatever value it would
+    // have had at atTime (even mid-envelope-step) so the fade-out starts
+    // from the real current level instead of an unknown/stale one.
+    if(g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(atTime);
+    else g.cancelScheduledValues(atTime);
+    g.linearRampToValueAtTime(0, atTime+rel);
+    try{ v.source.stop(atTime+rel+0.005); }catch(e){}
+    lastVoice[c] = null;
+  }
+  // Builds one voice (source + gain, started, not yet stopped) for an
+  // instrument at a given channel/time/frequency — sampler engine if the
+  // instrument has one loaded, GB synthesis otherwise. Shared by the
+  // tracker scheduler (triggerNote, below) and the standalone preview
+  // trigger, so "preview" always sounds exactly like what would actually
+  // play, and neither path duplicates the engine-selection logic.
+  function createVoice(c, T, freq, insIndex){
+    var ins = song.instruments[insIndex];
+    var gainNode = ac.createGain();
+    // A second gain stage in series, dedicated to the volume-slide effect
+    // (0Axy) — kept separate from the envelope/ADSR gain above so the two
+    // automation curves multiply instead of fighting over one param.
+    var fxGain = ac.createGain();
+    gainNode.connect(fxGain);
+    fxGain.connect(channelPan[c] ? channelPan[c].input : master);
+    var source, releaseTime, pitchRefFreq = null;
+    if(ins && ins.engine==='sampler' && ins.sampler && ins.sampler.buffer){
+      var sp = ins.sampler;
+      pitchRefFreq = noteToFreq(sp.rootNote, song.meta.tuning);
+      source = ac.createBufferSource();
+      source.buffer = sp.buffer;
+      source.playbackRate.setValueAtTime(freq / pitchRefFreq, T);
+      if(sp.loop){
+        source.loop = true;
+        source.loopStart = sp.loopStart || 0;
+        source.loopEnd = sp.loopEnd || sp.buffer.duration;
+      }
+      var g = gainNode.gain;
+      var peak = MASTER_HEADROOM, sustainLevel = peak * sp.sustain;
+      g.setValueAtTime(0, T);
+      g.linearRampToValueAtTime(peak, T + Math.max(sp.attack, 0.001));
+      g.linearRampToValueAtTime(sustainLevel, T + sp.attack + Math.max(sp.decay, 0.001));
+      releaseTime = sp.release;
+    } else {
+      var gb = (ins && ins.gb) || {};
+      var envVol = gb.envVol!==undefined ? gb.envVol : 15;
+      var envDir = gb.envDir || 0;
+      var envLen = gb.envLen || 0;
+      if(c===0 || c===1){
+        source = ac.createOscillator();
+        source.setPeriodicWave(dutyWaves[getInstrumentDuty(ins)]);
+        source.frequency.setValueAtTime(freq, T);
+      } else if(c===2){
+        source = ac.createOscillator();
+        var waveIdx = (ins && ins.waveSynth) ? ins.waveSynth.wave1 : 0;
+        source.setPeriodicWave(wavetablePeriodicWaves[waveIdx] || wavetablePeriodicWaves[0] || dutyWaves[2]);
+        source.frequency.setValueAtTime(freq, T);
+      } else {
+        pitchRefFreq = noteToFreq(NOISE_REF_NOTE, song.meta.tuning);
+        source = ac.createBufferSource();
+        source.buffer = noiseBuffer;
+        source.loop = true;
+        source.playbackRate.setValueAtTime(freq / pitchRefFreq, T);
+      }
+      scheduleEnvelope(gainNode.gain, T, envVol, envDir, envLen, MASTER_HEADROOM);
+      releaseTime = null;
+    }
+    source.connect(gainNode);
+    source.start(T);
+    return { source: source, gain: gainNode, fxGain: fxGain, pitchRefFreq: pitchRefFreq, releaseTime: releaseTime };
+  }
+  // Pitch effects (slide/vibrato/arpeggio/portamento) all funnel through
+  // here — oscillator-based voices (GB pulse/wave) get their .frequency
+  // set directly; buffer-based voices (GB noise and every sampler
+  // instrument) get .playbackRate derived from the same target frequency
+  // relative to whatever reference frequency that voice was built against.
+  function setVoicePitch(voice, freqHz, t){
+    if(voice.source.frequency) voice.source.frequency.setValueAtTime(freqHz, t);
+    else if(voice.pitchRefFreq) voice.source.playbackRate.setValueAtTime(freqHz/voice.pitchRefFreq, t);
+  }
+  var instrumentFireEvents = []; // {insIndex, time} — drained by the rAF loop to flash the Instruments row live
+  function triggerNote(c, T, freq, insIndex){
+    stopVoice(c, T); // channels are monophonic — a new note cuts whatever was sounding
+    instrumentFireEvents.push({ insIndex: insIndex, time: T });
+    lastVoice[c] = createVoice(c, T, freq, insIndex);
+  }
+
+  // Standalone one-shot audition — deliberately independent of lastVoice/
+  // the tracker scheduler, so previewing an instrument never interrupts or
+  // gets interrupted by whatever's actually playing. Sampler instruments
+  // preview at their own root note (hear the sample exactly as loaded, no
+  // pitch-shift); GB instruments preview at a fixed reference note.
+  var PREVIEW_REF_NOTE = 96, PREVIEW_DUR_SEC = 1.0;
+  function previewInstrument(insIndex){
+    ensureAudioContext();
+    // A suspended context (paused/stopped playback) freezes ac.currentTime
+    // — anything scheduled against it would just sit there silently until
+    // something resumes it. Preview should always be audible immediately,
+    // regardless of the transport's state.
+    if(ac.state!=='running') ac.resume();
+    var ins = song.instruments[insIndex];
+    if(!ins) return;
+    var c = ins._previewChannel || 0;
+    var T = ac.currentTime + 0.02;
+    var usesSample = ins.engine==='sampler' && ins.sampler && ins.sampler.buffer;
+    var freq = noteToFreq(usesSample ? ins.sampler.rootNote : PREVIEW_REF_NOTE, song.meta.tuning);
+    var voice = createVoice(c, T, freq, insIndex);
+    var relTime = T + PREVIEW_DUR_SEC;
+    var g = voice.gain.gain;
+    if(g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(relTime); else g.cancelScheduledValues(relTime);
+    var relDur = (voice.releaseTime!==undefined && voice.releaseTime!==null) ? Math.max(voice.releaseTime, 0.02) : 0.03;
+    g.linearRampToValueAtTime(0, relTime + relDur);
+    try{ voice.source.stop(relTime + relDur + 0.02); }catch(e){}
+  }
+
+  // ============================================================
+  // Stage D: core tracker effects. Semantics confirmed against Furnace's
+  // own docs (tildearrow.org/furnace/doc — 3-pattern/effects.html), not
+  // guessed:
+  //   00xy arpeggio, 01xx/02xx pitch slide up/down, 03xx portamento
+  //   (glide into the new note instead of retriggering), 04xy vibrato
+  //   (speed x, depth y — max depth ±1 semitone at y=15), 08xy panning
+  //   (INDEPENDENT left/right gain, not a single position — x=left,
+  //   y=right), 0Axy volume slide, 0Bxx jump to order, 0Dxx break to the
+  //   next order at a given row.
+  //
+  // Of these, only 01/02 (pitch slide, 24+17 uses) and 04 (vibrato, once)
+  // actually appear anywhere in flight_school — the rest are implemented
+  // for completeness/future songs but unverified against real data here.
+  //
+  // Units for the continuous effects (how much "01 09" moves the pitch
+  // per tick, how fast "04 83" wobbles it, etc.) aren't numerically
+  // specified in Furnace's docs — this shrine works in semitones-per-tick
+  // rather than trying to replicate the GB's raw frequency-register
+  // arithmetic, and PITCH_SLIDE_UNIT below is calibrated so this song's
+  // own slides (value 9, held ~12 ticks) land close to the one-semitone
+  // step the composition clearly intends. A deliberate approximation,
+  // flagged here for whoever tunes it further.
+  // ============================================================
+  var PITCH_SLIDE_UNIT = 1/128;   // semitones per tick, per effect-value unit
+  var PORTAMENTO_UNIT = 1/64;     // semitones per tick, per portamento speed unit
+  var VIBRATO_DEPTH_UNIT = 1/15;  // semitone at full (y=15) depth, per Furnace's documented "±1 semitone max"
+  var VIBRATO_SPEED_UNIT = 4;     // phase units (of a 64-step cycle) advanced per tick, per speed nibble
+  var VOL_SLIDE_UNIT = 1/64;      // gain (0..1) per tick, per slide-value unit
+
+  function freshFxState(){
+    return {
+      currentNote: null,              // the "settled" note (float) — moved by slides/portamento, not by vibrato/arpeggio (those ride on top, per-tick, without displacing it)
+      pitchUp: 0, pitchDown: 0,       // active continuous slide rate (0 = none); persists across rows until changed or cleared with value 0
+      portamento: null,               // {speed, targetNote} while gliding into a new note instead of retriggering
+      vibratoSpeed: 0, vibratoDepth: 0, vibratoPhase: 0,
+      volSlideUp: 0, volSlideDown: 0, volFxLevel: 1,
+      panL: 1, panR: 1
+    };
+  }
+  var channelFx = [freshFxState(), freshFxState(), freshFxState(), freshFxState()];
+  function resetChannelFx(){ for(var c=0;c<4;c++) channelFx[c] = freshFxState(); }
+
+  // Applies this row's active continuous effects tick-by-tick across the
+  // row's duration — this is what turns "01 09" from a silent, ignored
+  // value into an actual audible slide. Skipped entirely when nothing is
+  // active, so the common case (most rows have no effects) stays cheap
+  // and doesn't perturb a plain note's own already-correct pitch/gain.
+  function scheduleChannelEffectsForRow(c, fx, hasArp, arpX, arpY, T){
+    var v = lastVoice[c];
+    var anyPitchFx = fx.pitchUp || fx.pitchDown || fx.portamento || fx.vibratoSpeed || hasArp;
+    var anyVolFx = fx.volSlideUp || fx.volSlideDown;
+    if(!anyPitchFx && !anyVolFx) return;
+    var ticks = song.meta.speeds[0];
+    var tickDur = rowDurationSec() / ticks;
+    for(var i=0; i<ticks; i++){
+      var t = T + i*tickDur;
+      if(anyPitchFx && v && fx.currentNote!==null){
+        if(fx.portamento && fx.portamento.targetNote!=null){
+          var diff = fx.portamento.targetNote - fx.currentNote;
+          var step = (fx.portamento.speed||1) * PORTAMENTO_UNIT;
+          if(Math.abs(diff) <= step){ fx.currentNote = fx.portamento.targetNote; fx.portamento = null; }
+          else fx.currentNote += (diff>0?1:-1) * step;
+        } else if(fx.pitchUp || fx.pitchDown){
+          fx.currentNote += (fx.pitchUp - fx.pitchDown) * PITCH_SLIDE_UNIT;
+        }
+        var offset = 0;
+        if(hasArp){
+          var state = i % 3;
+          offset += state===1 ? arpX : (state===2 ? arpY : 0);
+        }
+        if(fx.vibratoSpeed && fx.vibratoDepth){
+          fx.vibratoPhase = (fx.vibratoPhase + fx.vibratoSpeed*VIBRATO_SPEED_UNIT) % 64;
+          offset += Math.sin(fx.vibratoPhase/64*2*Math.PI) * fx.vibratoDepth * VIBRATO_DEPTH_UNIT;
+        }
+        setVoicePitch(v, noteToFreq(fx.currentNote+offset, song.meta.tuning), t);
+      }
+      if(anyVolFx && v){
+        fx.volFxLevel = Math.max(0, Math.min(1, fx.volFxLevel + (fx.volSlideUp-fx.volSlideDown)*VOL_SLIDE_UNIT));
+        v.fxGain.gain.setValueAtTime(fx.volFxLevel, t);
+      }
+    }
+  }
+
+  var playbackTimeline = [];
+  function rowDurationSec(){ return song.meta.speeds[0] / song.meta.tickRate; }
+  // Returns a jump/break request ({type:'jump',order} or {type:'break',row})
+  // when this row carries a 0Bxx/0Dxx — the caller (the live scheduler's
+  // tick, or scheduleWholeSong for offline tests) is what actually owns
+  // song-position progression, so it's the one that has to act on it.
+  function scheduleRow(orderPos, row, T){
+    var jumpRequest = null;
+    song.channels.forEach(function(ch, c){
+      if(mutedChannels[c]) return;
+      var pIdx = ch.orderList[orderPos];
+      var pat = ch.patterns[pIdx];
+      var raw = (pat && pat.rows) ? pat.rows[row] : null;
+      var fx = channelFx[c];
+      var noteEvent = raw && raw.note!==undefined ? raw.note : undefined;
+      var isNewNote = noteEvent!==undefined && noteEvent!==NOTE_OFF;
+
+      // A plain new note starts clean — any leftover slide/vibrato from
+      // whatever was playing before doesn't carry over onto it. This row's
+      // OWN effect commands (processed next) can immediately re-apply a
+      // fresh one if the composer put one on this same row.
+      if(isNewNote && !fx.portamento){
+        fx.pitchUp = 0; fx.pitchDown = 0; fx.vibratoSpeed = 0; fx.vibratoDepth = 0;
+      }
+
+      var hasArp = false, arpX = 0, arpY = 0;
+      (raw && raw.effects || []).forEach(function(e){
+        switch(e.code){
+          case 0: hasArp = true; arpX = (e.value>>4)&0xF; arpY = e.value&0xF; break;
+          case 1: fx.pitchUp = e.value; fx.pitchDown = 0; break;
+          case 2: fx.pitchDown = e.value; fx.pitchUp = 0; break;
+          case 3: fx.portamento = { speed: e.value || (fx.portamento && fx.portamento.speed) || 1, targetNote: fx.portamento ? fx.portamento.targetNote : null }; break;
+          case 4: fx.vibratoSpeed = (e.value>>4)&0xF; fx.vibratoDepth = e.value&0xF; break;
+          case 8: fx.panL = ((e.value>>4)&0xF)/15; fx.panR = (e.value&0xF)/15;
+            if(ac && channelPan[c]){ channelPan[c].gainL.gain.setValueAtTime(fx.panL, T); channelPan[c].gainR.gain.setValueAtTime(fx.panR, T); }
+            break;
+          case 10: fx.volSlideUp = (e.value>>4)&0xF; fx.volSlideDown = e.value&0xF; break;
+          case 11: jumpRequest = { type:'jump', order: e.value }; break;
+          case 13: jumpRequest = { type:'break', row: e.value }; break;
+        }
+      });
+
+      if(noteEvent===NOTE_OFF){
+        stopVoice(c, T);
+        fx.currentNote = null; fx.pitchUp = 0; fx.pitchDown = 0; fx.portamento = null;
+        fx.vibratoSpeed = 0; fx.vibratoDepth = 0; fx.volFxLevel = 1;
+      } else if(isNewNote){
+        var insIndex = ch.insTimeline[orderPos][row];
+        if(insIndex!==null){
+          if(fx.portamento && fx.currentNote!==null){
+            // 03xx: glide the currently-sounding voice toward the new note
+            // instead of cutting it and retriggering fresh.
+            fx.portamento.targetNote = noteEvent;
+          } else {
+            triggerNote(c, T, noteToFreq(noteEvent, song.meta.tuning), insIndex);
+            fx.currentNote = noteEvent;
+            fx.portamento = null;
+            fx.volFxLevel = 1; // fresh note starts full unless this row also sets an explicit volume (below)
+          }
+        }
+      }
+
+      // Volume column: sets (not slides) this channel's level, and — unlike
+      // a new note — persists across rows with no note at all, which is
+      // exactly how this song uses it: a held note fading out via a run of
+      // vol-only rows (15,13,12,...,1) right before its OFF. Reuses the same
+      // fxGain stage as the 0Axy volume-slide effect, since both are just
+      // "the channel's current level" and this song never uses both at once.
+      if(raw && raw.vol!==undefined) fx.volFxLevel = raw.vol/15;
+      if(lastVoice[c] && (isNewNote || (raw && raw.vol!==undefined))) lastVoice[c].fxGain.gain.setValueAtTime(fx.volFxLevel, T);
+
+      scheduleChannelEffectsForRow(c, fx, hasArp, arpX, arpY, T);
+    });
+    playbackTimeline.push({ orderPos: orderPos, row: row, time: T });
+    return jumpRequest;
+  }
+  // Applies a scheduleRow() jump/break result to advance song position —
+  // shared by the live incremental scheduler and scheduleWholeSong, so a
+  // jump/break behaves identically in both.
+  function advancePosition(jumpRequest, orderPos, row){
+    if(jumpRequest && jumpRequest.type==='jump'){
+      return { orderPos: jumpRequest.order % song.meta.orderLength, row: 0 };
+    }
+    if(jumpRequest && jumpRequest.type==='break'){
+      return { orderPos: (orderPos+1) % song.meta.orderLength, row: jumpRequest.row };
+    }
+    row++;
+    if(row>=song.meta.patternLength){ row = 0; orderPos = (orderPos+1) % song.meta.orderLength; }
+    return { orderPos: orderPos, row: row };
+  }
+  // Kept for the OfflineAudioContext test hook — offline rendering has no
+  // real-time clock for a setInterval-based scheduler to tick against, so
+  // tests still schedule a whole pass in one synchronous sweep. Live
+  // playback uses the incremental scheduler below instead (see why there).
+  function scheduleWholeSong(fromTime){
+    resetChannelFx(); // a fresh single-pass render starts with no slide/vibrato/portamento carried over
+    var t = fromTime, dur = rowDurationSec();
+    var pos = { orderPos: 0, row: 0 };
+    // Fixed step count (rather than "one lap of every order") since a
+    // 0Bxx/0Dxx jump/break can revisit or skip orders — position
+    // progression honors those via advancePosition(), but the total
+    // duration rendered here stays pinned to the song's nominal length.
+    var totalSteps = song.meta.orderLength * song.meta.patternLength;
+    for(var i=0; i<totalSteps; i++){
+      var jump = scheduleRow(pos.orderPos, pos.row, t);
+      t += dur;
+      pos = advancePosition(jump, pos.orderPos, pos.row);
+    }
+    return t;
+  }
+
+  // Live playback: a genuine incremental lookahead scheduler (the standard
+  // "two clocks" pattern) rather than the whole-song-in-one-pass approach
+  // above. This isn't just closer to the plan's original design — it's
+  // what makes editing an instrument's sampler settings WHILE the piece is
+  // playing actually take effect quickly. Scheduling the entire ~73s song
+  // synchronously up front would "bake in" whichever engine/sample each
+  // instrument had at that instant into already-created oscillator/buffer
+  // nodes; a change made a few seconds later wouldn't reach the audio
+  // graph until the next full loop. With only ~200ms ever scheduled ahead,
+  // a live edit reaches the next unscheduled row almost immediately.
+  var nextOrderPos = 0, nextRow = 0, nextRowTime = 0;
+  var SCHEDULE_AHEAD_SEC = 0.2, SCHEDULER_TICK_MS = 50;
+  var schedulerTimer = null;
+  function schedulerTick(){
+    while(nextRowTime < ac.currentTime + SCHEDULE_AHEAD_SEC){
+      var jump = scheduleRow(nextOrderPos, nextRow, nextRowTime);
+      nextRowTime += rowDurationSec();
+      var pos = advancePosition(jump, nextOrderPos, nextRow);
+      nextOrderPos = pos.orderPos; nextRow = pos.row;
+    }
+  }
+  function startScheduler(){
+    if(schedulerTimer) return;
+    schedulerTick();
+    schedulerTimer = setInterval(schedulerTick, SCHEDULER_TICK_MS);
+  }
+  function stopScheduler(){
+    if(schedulerTimer){ clearInterval(schedulerTimer); schedulerTimer = null; }
+  }
+
+  // Per-channel panning stage (effect 08xy — Furnace's own semantics are
+  // INDEPENDENT left/right gain, not a single -1..1 position): every
+  // voice on a channel routes mono into `input`, which splits into a
+  // `gainL`/`gainR` pair feeding a 2-channel merger. Persistent per
+  // channel (not per voice) so a mid-note pan change just updates two
+  // gain values rather than needing to touch whatever voice happens to be
+  // playing.
+  var channelPan = [null, null, null, null];
+  function buildChannelPanNodes(){
+    for(var c=0;c<4;c++){
+      var input = ac.createGain(); input.gain.value = 1;
+      var gainL = ac.createGain(); gainL.gain.value = 1;
+      var gainR = ac.createGain(); gainR.gain.value = 1;
+      var merger = ac.createChannelMerger(2);
+      input.connect(gainL); input.connect(gainR);
+      gainL.connect(merger, 0, 0);
+      gainR.connect(merger, 0, 1);
+      merger.connect(master);
+      channelPan[c] = { input: input, gainL: gainL, gainR: gainR };
+    }
+  }
+
+  function buildAudioGraph(externalAc){
+    ac = externalAc || new (window.AudioContext||window.webkitAudioContext)();
+    master = ac.createGain(); master.gain.value = 1;
+    master.connect(ac.destination);
+    dutyWaves = DUTY_RATIOS.map(function(d){ return buildDutyPeriodicWave(ac, d); });
+    wavetablePeriodicWaves = {};
+    song.wavetables.forEach(function(w, i){ wavetablePeriodicWaves[i] = buildWavetablePeriodicWave(ac, w); });
+    noiseBuffer = buildNoiseBuffer(ac);
+    buildChannelPanNodes();
+    // suspend()/resume() are async — ac.state doesn't flip the instant
+    // they're called, so reading it right after (as the transport buttons
+    // used to) can catch a stale value with nothing ever correcting it.
+    // This listener is the one source of truth: whenever the context's
+    // real state actually changes, re-sync the buttons from it.
+    if(!externalAc) ac.addEventListener('statechange', updateTransportUI);
+  }
+  // Sample import needs a real AudioContext to decode into (for
+  // decodeAudioData), which may happen before Play is ever clicked — build
+  // the graph lazily here too rather than requiring playback to start first.
+  function ensureAudioContext(){ if(!ac) buildAudioGraph(); return ac; }
+
+  // ============================================================
+  // Sampler modal: per-instrument WAV import + ADSR/loop editor. Two load
+  // paths — fetch a file already sitting in samples/ by name (the path
+  // meant for the shipped "Player" page: drop a WAV there, reference it by
+  // relative filename, no re-import needed), or import a file directly for
+  // a quick session-only preview while authoring. Only the fetch-by-name
+  // path is meant to survive into a saved/shared version of this page —
+  // baking imported files into the HTML itself isn't built yet.
+  // ============================================================
+  var samplerEditingIns = null;
+  function defaultSamplerState(){
+    return { buffer:null, fileName:'', src:null, rootNote:96,
+      attack:0.005, decay:0.10, sustain:0.80, release:0.15,
+      loop:false, loopStart:0, loopEnd:0 };
+  }
+  function updateSamplerButtonUI(i){
+    var btn = document.querySelector('.sampler-btn[data-ins="'+i+'"]');
+    if(!btn) return;
+    var ins = song.instruments[i];
+    btn.classList.toggle('active', ins.engine==='sampler');
+    btn.textContent = ins.engine==='sampler' ? '◆ sampler' : 'sampler';
+  }
+  function drawSamplerWave(buffer){
+    var canvas = document.getElementById('samplerWave');
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    if(!buffer) return;
+    var data = buffer.getChannelData(0);
+    var w = canvas.width, h = canvas.height, mid = h/2;
+    var samplesPerPx = data.length / w;
+    ctx.fillStyle = '#c9973a';
+    for(var x=0; x<w; x++){
+      var start = Math.floor(x*samplesPerPx), end = Math.floor((x+1)*samplesPerPx);
+      var min=1, max=-1;
+      for(var i=start; i<end && i<data.length; i++){ var v=data[i]; if(v<min)min=v; if(v>max)max=v; }
+      if(end<=start){ min=0; max=0; }
+      ctx.fillRect(x, mid+min*mid, 1, Math.max(1,(max-min)*mid));
+    }
+  }
+  function openSamplerModal(i){
+    samplerEditingIns = i;
+    var ins = song.instruments[i];
+    if(!ins.sampler) ins.sampler = defaultSamplerState();
+    var sp = ins.sampler;
+    document.getElementById('samplerModalTitle').textContent = 'Sampler — '+i+': '+(ins.name||'(unnamed)');
+    document.getElementById('samplerFilename').value = sp.src ? sp.src.replace(/^samples\//,'') : '';
+    document.getElementById('samplerRoot').value = sp.rootNote;
+    document.getElementById('samplerRootVal').textContent = noteToName(sp.rootNote);
+    document.getElementById('adsrA').value = sp.attack; document.getElementById('adsrAVal').textContent = sp.attack.toFixed(3)+'s';
+    document.getElementById('adsrD').value = sp.decay; document.getElementById('adsrDVal').textContent = sp.decay.toFixed(2)+'s';
+    document.getElementById('adsrS').value = sp.sustain; document.getElementById('adsrSVal').textContent = sp.sustain.toFixed(2);
+    document.getElementById('adsrR').value = sp.release; document.getElementById('adsrRVal').textContent = sp.release.toFixed(2)+'s';
+    document.getElementById('samplerLoop').checked = sp.loop;
+    document.getElementById('loopPointsRow').style.display = sp.loop ? 'flex' : 'none';
+    document.getElementById('loopStart').value = sp.loopStart.toFixed(3);
+    document.getElementById('loopEnd').value = sp.loopEnd.toFixed(3);
+    document.getElementById('samplerEnabled').checked = ins.engine==='sampler';
+    document.getElementById('samplerMsg').textContent = sp.buffer
+      ? (sp.fileName+' — '+sp.buffer.duration.toFixed(2)+'s, '+sp.buffer.sampleRate+'Hz')
+      : 'No sample loaded — this instrument is still using its Game Boy synthesis.';
+    drawSamplerWave(sp.buffer);
+    document.getElementById('samplerModal').classList.add('open');
+  }
+  function closeSamplerModal(){
+    document.getElementById('samplerModal').classList.remove('open');
+    samplerEditingIns = null;
+  }
+  // insIndex is explicit (not read from samplerEditingIns) so this same
+  // path can pre-assign samples at page-init time, not just from the
+  // modal's own Load button.
+  // Reads a WAV's RIFF 'smpl' chunk (root note + loop points) directly from
+  // the raw bytes — decodeAudioData only returns PCM, it throws this
+  // metadata away. Standard WAV sampler metadata (Furnace's own WAV export
+  // writes it, and plenty of other sample libraries do too), so root note
+  // and loop points can be picked up automatically instead of guessed.
+  function parseSmplChunk(arrayBuffer){
+    var bytes = new Uint8Array(arrayBuffer);
+    function id(off){ return String.fromCharCode(bytes[off],bytes[off+1],bytes[off+2],bytes[off+3]); }
+    if(bytes.length<12 || id(0)!=='RIFF' || id(8)!=='WAVE') return null;
+    var view = new DataView(arrayBuffer);
+    var pos = 12;
+    while(pos+8<=bytes.length){
+      var cid = id(pos);
+      var size = view.getUint32(pos+4, true);
+      var bodyStart = pos+8;
+      if(cid==='smpl' && bodyStart+36<=bytes.length){
+        var unityNote = view.getUint32(bodyStart+12, true);
+        var numLoops = view.getUint32(bodyStart+28, true);
+        var loops = [];
+        var off = bodyStart+36;
+        for(var i=0;i<numLoops && off+24<=bytes.length;i++){
+          loops.push({ start: view.getUint32(off+8, true), end: view.getUint32(off+12, true) });
+          off += 24;
+        }
+        return { unityNote: unityNote, loops: loops };
+      }
+      pos = bodyStart + size + (size % 2);
+    }
+    return null;
+  }
+  function refreshSamplerModalFields(insIndex){
+    if(samplerEditingIns!==insIndex) return;
+    var sp = song.instruments[insIndex].sampler;
+    document.getElementById('samplerRoot').value = sp.rootNote;
+    document.getElementById('samplerRootVal').textContent = noteToName(sp.rootNote);
+    document.getElementById('samplerLoop').checked = sp.loop;
+    document.getElementById('loopPointsRow').style.display = sp.loop ? 'flex' : 'none';
+    document.getElementById('loopStart').value = sp.loopStart.toFixed(3);
+    document.getElementById('loopEnd').value = sp.loopEnd.toFixed(3);
+    document.getElementById('samplerMsg').textContent = sp.fileName+' — '+sp.buffer.duration.toFixed(2)+'s, '+sp.buffer.sampleRate+'Hz'+(sp.loop?' · loop points from file':'');
+    document.getElementById('samplerEnabled').checked = true;
+    drawSamplerWave(sp.buffer);
+  }
+  function applyLoadedBuffer(insIndex, audioBuffer, fileName, src, smpl){
+    var ins = song.instruments[insIndex];
+    var sp = ins.sampler;
+    sp.buffer = audioBuffer;
+    sp.fileName = fileName;
+    sp.src = src;
+    sp.loopEnd = audioBuffer.duration;
+    if(smpl){
+      // MIDI unity note → our internal note numbering (our octave labels
+      // run one higher than scientific pitch — see noteToFreq/A_REF_NOTE).
+      sp.rootNote = smpl.unityNote + 60;
+      if(smpl.loops.length){
+        sp.loop = true;
+        sp.loopStart = smpl.loops[0].start / audioBuffer.sampleRate;
+        sp.loopEnd = smpl.loops[0].end / audioBuffer.sampleRate;
+      }
+    }
+    ins.engine = 'sampler';
+    updateSamplerButtonUI(insIndex);
+    renderPatternTable();
+    refreshSamplerModalFields(insIndex);
+  }
+  // Returns a Promise so page-init assignments can be fired off in
+  // parallel and (optionally) awaited/logged.
+  function loadSampleForInstrument(insIndex, filename){
+    var ins = song.instruments[insIndex];
+    if(!ins.sampler) ins.sampler = defaultSamplerState();
+    if(samplerEditingIns===insIndex) document.getElementById('samplerMsg').textContent = 'Loading '+filename+'…';
+    var ac2 = ensureAudioContext();
+    return fetch('samples/'+filename)
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
+      .then(function(rawBuf){
+        var smpl = parseSmplChunk(rawBuf);
+        return ac2.decodeAudioData(rawBuf).then(function(audioBuffer){ return { audioBuffer: audioBuffer, smpl: smpl }; });
+      })
+      .then(function(res){ applyLoadedBuffer(insIndex, res.audioBuffer, filename, 'samples/'+filename, res.smpl); })
+      .catch(function(err){
+        var msg = 'Could not load samples/'+filename+' ('+err.message+') — check the file is there and is a valid audio file.';
+        if(samplerEditingIns===insIndex) document.getElementById('samplerMsg').textContent = msg;
+        console.warn(msg);
+      });
+  }
+  function loadSampleFromFile(insIndex, file){
+    var ins = song.instruments[insIndex];
+    if(!ins.sampler) ins.sampler = defaultSamplerState();
+    if(samplerEditingIns===insIndex) document.getElementById('samplerMsg').textContent = 'Decoding '+file.name+'…';
+    var ac2 = ensureAudioContext();
+    file.arrayBuffer()
+      .then(function(rawBuf){
+        var smpl = parseSmplChunk(rawBuf);
+        return ac2.decodeAudioData(rawBuf).then(function(audioBuffer){ return { audioBuffer: audioBuffer, smpl: smpl }; });
+      })
+      .then(function(res){ applyLoadedBuffer(insIndex, res.audioBuffer, file.name, null, res.smpl); })
+      .catch(function(err){
+        if(samplerEditingIns===insIndex) document.getElementById('samplerMsg').textContent = 'Could not decode '+file.name+' ('+err.message+').';
+      });
+  }
+
+  document.getElementById('legend').addEventListener('click', function(e){
+    var samplerBtn = e.target.closest('.sampler-btn');
+    if(samplerBtn){ openSamplerModal(parseInt(samplerBtn.getAttribute('data-ins'), 10)); return; }
+    var previewBtn = e.target.closest('[data-preview-ins]');
+    if(previewBtn){ previewInstrument(parseInt(previewBtn.getAttribute('data-preview-ins'), 10)); return; }
+  });
+  document.getElementById('samplerPreviewBtn').addEventListener('click', function(){
+    if(samplerEditingIns!==null) previewInstrument(samplerEditingIns);
+  });
+  document.getElementById('samplerCloseBtn').addEventListener('click', closeSamplerModal);
+  document.getElementById('samplerModal').addEventListener('click', function(e){ if(e.target.id==='samplerModal') closeSamplerModal(); });
+  document.getElementById('samplerLoadBtn').addEventListener('click', function(){
+    var filename = document.getElementById('samplerFilename').value.trim();
+    if(!filename){ document.getElementById('samplerMsg').textContent = 'Type a filename first (must already be in src/0005/samples/).'; return; }
+    loadSampleForInstrument(samplerEditingIns, filename);
+  });
+  document.getElementById('samplerFileInput').addEventListener('change', function(e){
+    if(e.target.files[0]) loadSampleFromFile(samplerEditingIns, e.target.files[0]);
+  });
+  document.getElementById('samplerRoot').addEventListener('input', function(e){
+    var ins = song.instruments[samplerEditingIns]; if(!ins) return;
+    ins.sampler.rootNote = parseInt(e.target.value, 10);
+    document.getElementById('samplerRootVal').textContent = noteToName(ins.sampler.rootNote);
+  });
+  function wireAdsrInput(id, key, fmt){
+    document.getElementById(id).addEventListener('input', function(e){
+      var ins = song.instruments[samplerEditingIns]; if(!ins) return;
+      var v = parseFloat(e.target.value);
+      ins.sampler[key] = v;
+      document.getElementById(id+'Val').textContent = fmt(v);
+    });
+  }
+  wireAdsrInput('adsrA','attack', function(v){ return v.toFixed(3)+'s'; });
+  wireAdsrInput('adsrD','decay', function(v){ return v.toFixed(2)+'s'; });
+  wireAdsrInput('adsrS','sustain', function(v){ return v.toFixed(2); });
+  wireAdsrInput('adsrR','release', function(v){ return v.toFixed(2)+'s'; });
+  document.getElementById('samplerLoop').addEventListener('change', function(e){
+    var ins = song.instruments[samplerEditingIns]; if(!ins) return;
+    ins.sampler.loop = e.target.checked;
+    document.getElementById('loopPointsRow').style.display = e.target.checked ? 'flex' : 'none';
+  });
+  document.getElementById('loopStart').addEventListener('change', function(e){
+    var ins = song.instruments[samplerEditingIns]; if(!ins) return;
+    ins.sampler.loopStart = parseFloat(e.target.value) || 0;
+  });
+  document.getElementById('loopEnd').addEventListener('change', function(e){
+    var ins = song.instruments[samplerEditingIns]; if(!ins) return;
+    ins.sampler.loopEnd = parseFloat(e.target.value) || ins.sampler.buffer.duration;
+  });
+  document.getElementById('samplerEnabled').addEventListener('change', function(e){
+    var ins = song.instruments[samplerEditingIns]; if(!ins) return;
+    ins.engine = e.target.checked ? 'sampler' : 'gb';
+    updateSamplerButtonUI(samplerEditingIns);
+    renderPatternTable();
+  });
+
+  // Forces an immediate cut on every channel regardless of that voice's
+  // own release time — Stop means silence now, not "wait out the sampler's
+  // 2-second release tail."
+  function hardStopAllVoices(atTime){
+    for(var c=0;c<4;c++){
+      var v = lastVoice[c];
+      if(!v) continue;
+      var g = v.gain.gain;
+      if(g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(atTime);
+      else g.cancelScheduledValues(atTime);
+      g.linearRampToValueAtTime(0, atTime+0.01);
+      try{ v.source.stop(atTime+0.015); }catch(e){}
+      lastVoice[c] = null;
+    }
+  }
+
+  var songStarted = false; // separate from "does ac exist" — sample preloading
+                            // (see below) can create ac before Play is ever clicked
+  function isPlaying(){ return !!ac && ac.state==='running'; }
+  var playBtn = document.getElementById('playBtn');
+  var pauseBtn = document.getElementById('pauseBtn');
+  var stopBtn = document.getElementById('stopBtn');
+  function updateTransportUI(){
+    var playing = isPlaying();
+    playBtn.disabled = playing;
+    pauseBtn.disabled = !playing;
+    stopBtn.disabled = !songStarted;
+  }
+  function doPlay(){
+    ensureAudioContext();
+    if(!songStarted){
+      songStarted = true;
+      nextOrderPos = 0; nextRow = 0; nextRowTime = ac.currentTime + 0.15;
+      resetChannelFx(); // starting fresh — no slide/vibrato/portamento left over from a previous run
+      // resetChannelFx() only resets the JS-side state; the actual pan
+      // AudioParams need their own reset back to neutral (a prior run may
+      // have left a channel panned from an 08xy effect).
+      for(var c=0;c<4;c++){ if(channelPan[c]){ channelPan[c].gainL.gain.setValueAtTime(1, ac.currentTime); channelPan[c].gainR.gain.setValueAtTime(1, ac.currentTime); } }
+    }
+    startScheduler();
+    if(ac.state!=='running') ac.resume();
+    updateTransportUI();
+  }
+  function doPause(){
+    if(!isPlaying()) return;
+    ac.suspend();
+    stopScheduler(); // don't let it build up a backlog of "due" rows while paused
+    updateTransportUI();
+  }
+  function doStop(){
+    stopScheduler();
+    if(ac){
+      hardStopAllVoices(ac.currentTime);
+      if(ac.state==='running') ac.suspend();
+    }
+    songStarted = false;
+    nextOrderPos = 0; nextRow = 0; nextRowTime = 0;
+    playbackTimeline = [];
+    instrumentFireEvents = [];
+    lastShownOrderPos = null;
+    document.getElementById('orderSelect').value = 0;
+    renderPatternTable();
+    setPlayheadRow(null);
+    updateTransportUI();
+  }
+  playBtn.addEventListener('click', doPlay);
+  pauseBtn.addEventListener('click', doPause);
+  stopBtn.addEventListener('click', doStop);
+  updateTransportUI();
+
+  // Flash an Instruments row the instant it's actually triggered — instant
+  // snap-in (no transition while .firing is on), fading out via a plain
+  // CSS transition once the class is removed a beat later.
+  function flashInstrumentRow(i){
+    var row = document.querySelector('.ins-table tr[data-ins-row="'+i+'"]');
+    if(!row) return;
+    row.classList.remove('firing');
+    void row.offsetWidth; // restart the flash if it's still fading from the last one
+    row.classList.add('firing');
+    clearTimeout(row._flashTimer);
+    row._flashTimer = setTimeout(function(){ row.classList.remove('firing'); }, 150);
+  }
+
+  // rAF loop: purely visual now — the incremental scheduler above owns
+  // actually queuing audio. Keeps the Patterns card's order dropdown +
+  // playhead row following along live — "watch it play the way you'd see
+  // it inside Furnace," per the whole point of that card — and flashes
+  // each Instruments row the moment it's actually triggered.
+  var lastShownOrderPos = null;
+  function playbackRAF(){
+    if(ac){
+      while(playbackTimeline.length>8 && playbackTimeline[1].time < ac.currentTime-2) playbackTimeline.shift();
+      if(isPlaying()){
+        var now = ac.currentTime, current = null;
+        for(var i=playbackTimeline.length-1;i>=0;i--){ if(playbackTimeline[i].time<=now){ current=playbackTimeline[i]; break; } }
+        if(current){
+          if(current.orderPos!==lastShownOrderPos){
+            lastShownOrderPos = current.orderPos;
+            document.getElementById('orderSelect').value = current.orderPos;
+            renderPatternTable();
+          }
+          setPlayheadRow(current.row);
+        }
+        while(instrumentFireEvents.length && instrumentFireEvents[0].time<=now){
+          flashInstrumentRow(instrumentFireEvents.shift().insIndex);
+        }
+      }
+    }
+    requestAnimationFrame(playbackRAF);
+  }
+  requestAnimationFrame(playbackRAF);
+
+  // Starting-point sample assignments: direct WAV renders of the real Game
+  // Boy chip, exported straight out of Furnace (src/0005/samples/furnace-
+  // exports/) — about as close to "the original" as a sample can get,
+  // since it's not an approximation of GB hardware, it's a recording of it.
+  // Matched to each instrument by its ACTUAL register setting rather than
+  // guessed: Pulse-0N follows that instrument's own duty macro (getInstrumentDuty's
+  // same default of 2/50% when none is set), WaveTable-0N follows its
+  // waveSynth.wave1 index, Noise-0N is a reasonable pick for the two
+  // Noise-channel percussion instruments.
+  //
+  // Root notes: each file's own RIFF smpl chunk claims MIDI unity note 60
+  // ("middle C" for all of them), but that's turned out wrong more than
+  // once. The three WaveTable-*.wav files measured (autocorrelation on the
+  // raw PCM) a full octave below what they claim — C3, not C4 — which was
+  // making every Lead voice play a full octave sharp. Bass 1's Pulse-02.wav
+  // measured correct at C4, but John found by ear that C4 sounds too high
+  // in the actual mix and dropped it to C3 ("C-4" in this shrine's own
+  // octave labelling, which runs one higher than scientific pitch — see
+  // noteToFreq/A_REF_NOTE) — so ear beats the raw measurement here; worth
+  // checking the other Pulse-based instruments (Mid 1/2/3) the same way if
+  // any of them still sound off. `root` below is explicit and always wins
+  // over parseSmplChunk's auto-detection (see the .then() below).
+  var FEX = 'furnace-exports/';
+  var INITIAL_SAMPLE_ASSIGNMENTS = [
+    { ins: 0, file: FEX+'Pulse-02.wav', root: 108 },       // Bass 1 — no duty macro → default 50% (root confirmed by ear: C-4, not the metadata's C-5)
+    { ins: 1, file: FEX+'Pulse-03.wav', root: 120 },       // Mid 1 — duty 3 (75%)
+    { ins: 2, file: FEX+'WaveTable-00.wav', root: 108 },   // Lead 1 — wave1 index 0 (measured C3, not C4)
+    { ins: 3, file: FEX+'Noise-00.wav', root: 120 },       // Perc 1
+    { ins: 4, file: FEX+'WaveTable-01-Sine.wav', root: 108 }, // Lead 2 — wave1 index 1 (measured C3, not C4)
+    { ins: 5, file: FEX+'WaveTable-02-SineBuzz.wav', root: 108 }, // Lead 3 — wave1 index 2 (measured C3, not C4)
+    { ins: 6, file: FEX+'Pulse-01.wav', root: 120 },       // Mid 2 — duty 1 (25%)
+    { ins: 7, file: FEX+'Pulse-00.wav', root: 120 },       // Mid 3 — duty 0 (12.5%)
+    { ins: 8, file: FEX+'Noise-01.wav', root: 120 }        // Perc Long
+  ];
+  INITIAL_SAMPLE_ASSIGNMENTS.forEach(function(a){
+    var ins = song.instruments[a.ins];
+    if(!ins) return;
+    ins.sampler = defaultSamplerState();
+    ins.sampler.rootNote = a.root;
+    // These recordings already carry the GB hardware's own envelope —
+    // shaping them again with a slow attack/decay/sustain would double up
+    // on that, so this ADSR is close to a pass-through: just enough attack
+    // to avoid a click and a short release so notes don't hang past a stop.
+    ins.sampler.attack = 0.003; ins.sampler.decay = 0.01; ins.sampler.sustain = 1.0; ins.sampler.release = 0.08;
+    loadSampleForInstrument(a.ins, a.file).then(function(){
+      // Win over whatever parseSmplChunk auto-detected — see comment above.
+      if(ins.sampler && ins.sampler.buffer){
+        ins.sampler.rootNote = a.root;
+        refreshSamplerModalFields(a.ins);
+      }
+    });
+  });
+
+  // Test-only hook (harmless in normal use — just a couple of extra
+  // properties on window) so this exact scheduling/synthesis code can be
+  // exercised against an OfflineAudioContext without duplicating it.
+  window.__debugStageC = {
+    buildAudioGraph: buildAudioGraph, scheduleWholeSong: scheduleWholeSong, song: song,
+    getSchedState: function(){ return { ac: ac, nextRowTime: nextRowTime, songStarted: songStarted, isPlaying: isPlaying() }; },
+    lastVoice: function(){ return lastVoice; },
+    noiseBuffer: function(){ return noiseBuffer; },
+    mutedChannels: mutedChannels
+  };
 
 })();
 </script>
