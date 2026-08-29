@@ -152,6 +152,13 @@
   #samplerPreviewBtn{color:var(--amber);white-space:nowrap;}
   .sampler-btn.active{color:var(--amber);border-color:var(--amber);}
 
+  /* per-instrument engine switch — picks Game Boy synthesis vs. the
+     imported sample directly from the Instruments row, no modal needed */
+  .engine-switch{display:inline-flex;border:1px solid var(--edge);border-radius:3px;overflow:hidden;}
+  .eng-btn{font-size:9px;padding:3px 7px;border:none;border-radius:0;background:var(--panel);color:var(--dim);}
+  .eng-btn.active{background:var(--amber);color:#101012;}
+  .eng-btn+.eng-btn{border-left:1px solid var(--edge);}
+
   /* --- sampler modal: per-instrument sample import + ADSR/loop editor —
      the first concrete "swap this instrument for another synthesis engine"
      control. Reuses the dark chip/panel palette rather than introducing a
@@ -10877,10 +10884,15 @@
       var samplerBtn = '<button type="button" class="sampler-btn'+(ins.engine==='sampler'?' active':'')+'" data-ins="'+i+'">'+
         (ins.engine==='sampler' ? '◆ sampler' : 'sampler') + '</button>';
       var previewBtn = '<button type="button" class="preview-btn" data-preview-ins="'+i+'" title="preview this instrument">▶</button>';
+      var engineSwitch = '<div class="engine-switch" data-ins="'+i+'">'+
+        '<button type="button" class="eng-btn'+(ins.engine!=='sampler'?' active':'')+'" data-ins="'+i+'" data-eng="gb" title="Game Boy chip synthesis">Synth</button>'+
+        '<button type="button" class="eng-btn'+(ins.engine==='sampler'?' active':'')+'" data-ins="'+i+'" data-eng="sampler" title="the imported WAV sample for this instrument">Sampler</button>'+
+      '</div>';
       return '<tr data-explain="ins-'+i+'" data-ins-row="'+i+'">'+
         '<td>'+previewBtn+'</td>'+
         '<td><input type="color" class="ins-color-input" data-ins="'+i+'" value="'+ins.color+'" title="pattern-grid tint for this instrument"></td>'+
         '<td>'+i+'</td><td>'+esc(ins.name||'(unnamed)')+'</td>'+
+        '<td>'+engineSwitch+'</td>'+
         '<td>'+samplerBtn+'</td>'+
         '<td>'+(gb.envVol!==undefined?gb.envVol:'')+'</td>'+
         '<td>'+(gb.envDir!==undefined?(gb.envDir?'up':'down'):'')+'</td>'+
@@ -10896,7 +10908,7 @@
         '<span class="field-summary">'+song.instruments.length+'</span>'+
         '<span class="collapse-arrow">▾</span>'+
       '</div>'+
-      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th>Color</th><th>#</th><th>Name</th><th>Sampler</th><th>Env</th><th>Dir</th><th>Len</th><th>SndLen</th><th>SoftEnv</th><th>Macros</th></tr></thead>'+
+      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th>Color</th><th>#</th><th>Name</th><th>Engine</th><th>Sampler</th><th>Env</th><th>Dir</th><th>Len</th><th>SndLen</th><th>SoftEnv</th><th>Macros</th></tr></thead>'+
       '<tbody>'+rows+'</tbody></table></div></div>'+
     '</div>';
   }
@@ -11252,7 +11264,7 @@
     'wavetables': function(){
       return { title:'Wavetables — custom waveforms for the GB Wave channel',
         html: P('The Game Boy\'s 3rd channel plays back an arbitrary looping waveform instead of a fixed shape — each wavetable here is '+N('32')+' samples, each a 4-bit value ('+N('0–15')+'). An instrument on the Wave channel points at one of these.') +
-          P('Stage C will turn each one into a '+VR('PeriodicWave')+' via a small from-scratch Fourier transform, so the Wave channel plays the exact same shape Furnace does.') };
+          P('Each one is baked into a raw stepped waveform buffer (the exact 4-bit values, hard transitions — no smoothing) and played back at pitch via '+VR('playbackRate')+', so the Wave channel plays the exact same shape Furnace does, including the harmonic content real hardware has above what a smooth reconstruction would keep.') };
     },
     'patterns': function(){
       return { title:'Patterns — the actual note data',
@@ -11323,52 +11335,79 @@
   // for testing. As playback nears the end of what's scheduled, one more
   // pass gets chained on seamlessly to loop.
   //
-  // Each channel is monophonic, one oscillator/buffer-source PER NOTE
-  // (not a persistent oscillator whose params get pushed around) — this
-  // sidesteps a real Web Audio limitation: setPeriodicWave() takes effect
-  // immediately when called, it can't be scheduled for a future time like
-  // an AudioParam can. A fresh source per note, built with the right wave
-  // already attached before start(time), keeps everything scheduled ahead
-  // of time exactly where it should be.
+  // Each channel is monophonic, one buffer-source PER NOTE (not a
+  // persistent node whose params get pushed around) — every GB channel
+  // (pulse, wave, noise) and the sampler engine all play a small raw
+  // waveform buffer through AudioBufferSourceNode.playbackRate, which
+  // (unlike the oscillator+PeriodicWave approach this used to use) is a
+  // proper AudioParam that schedules cleanly ahead of time — but a fresh
+  // source per note is still what's wanted anyway, since retriggering a
+  // note needs the buffer to restart from sample 0 and the envelope to
+  // reset, exactly like a real GB channel trigger does.
   // ============================================================
 
-  var DUTY_RATIOS = [0.125, 0.25, 0.5, 0.75];
-  function buildDutyPeriodicWave(ac, duty){
-    var n = 32;
-    var real = new Float32Array(n+1), imag = new Float32Array(n+1);
-    for(var k=1;k<=n;k++){ imag[k] = (2/(k*Math.PI)) * Math.sin(k*Math.PI*duty); }
-    return ac.createPeriodicWave(real, imag, {disableNormalization:false});
+  // Real GB hardware never band-limits its channels — a pulse/wave channel
+  // is a literal hard-edged step function, and the "digital" character of
+  // the chip comes precisely from the aliasing that produces when it hits
+  // a real DAC/speaker. The previous approach here built a PeriodicWave
+  // via an analytic Fourier series truncated to 32 harmonics — correct
+  // *shape* (the GB's 4 duty ratios land exactly on the same values a
+  // continuous rectangular pulse of that duty would produce), but for any
+  // note below roughly Nyquist/32 (everything but the highest treble —
+  // certainly the whole bass register), that 32-harmonic cap threw away
+  // the vast majority of the harmonics a real square wave has below
+  // Nyquist, plus Web Audio's own PeriodicWave anti-aliasing softened
+  // what was left. Net effect: notes came out far rounder/duller than
+  // real hardware. Fixed by baking the *exact* 8-step bit pattern (Pan
+  // Docs, Audio_Registers.md § NR11) into a raw AudioBuffer and pitch-
+  // shifting it with playbackRate — the same technique already used for
+  // the noise channel and sampler engine below. Hard edges survive
+  // (only the ~1-sample transition itself gets linearly interpolated),
+  // and high notes alias naturally instead of being filtered clean.
+  var DUTY_PATTERNS = [
+    [0,0,0,0,0,0,0,1], // 00 — 12.5%
+    [1,0,0,0,0,0,0,1], // 01 — 25%
+    [1,0,0,0,0,1,1,1], // 10 — 50%
+    [0,1,1,1,1,1,1,0]  // 11 — 75%
+  ];
+  var GB_STEP_SAMPLES = 32; // resolution: native samples held per step before pitch-shifting
+  function buildStepBuffer(ac, levels){
+    // levels: array of values in [-1,1], one GB hardware "step". Baked as
+    // one buffer cycle at GB_STEP_SAMPLES native samples/step, looped and
+    // playbackRate-shifted to the target note — pitchRefFreq is the
+    // buffer's own natural (rate=1) cycle frequency.
+    var n = levels.length;
+    var buf = ac.createBuffer(1, n*GB_STEP_SAMPLES, ac.sampleRate);
+    var data = buf.getChannelData(0);
+    for(var i=0;i<data.length;i++) data[i] = levels[Math.floor(i/GB_STEP_SAMPLES)];
+    return { buffer: buf, pitchRefFreq: ac.sampleRate/(n*GB_STEP_SAMPLES) };
   }
-  // A straightforward DFT of the wavetable's own samples — this is what
-  // makes the Wave channel play back the exact shape the composer drew in
-  // Furnace's wavetable editor, via the same additive-synthesis code path
-  // as the duty waves above.
-  function buildWavetablePeriodicWave(ac, wavetable){
-    var samples = wavetable.data, N = samples.length, max = wavetable.max || 15;
-    var x = new Float32Array(N);
-    for(var i=0;i<N;i++) x[i] = (samples[i]/max)*2-1;
-    var harmonics = Math.floor(N/2);
-    var real = new Float32Array(harmonics+1), imag = new Float32Array(harmonics+1);
-    for(var k=1;k<=harmonics;k++){
-      var re=0, im=0;
-      for(var nI=0;nI<N;nI++){
-        var ang = 2*Math.PI*k*nI/N;
-        re += x[nI]*Math.cos(ang);
-        im -= x[nI]*Math.sin(ang);
-      }
-      real[k] = re*(2/N); imag[k] = im*(2/N);
-    }
-    return ac.createPeriodicWave(real, imag, {disableNormalization:false});
+  function buildDutyBuffer(ac, duty){
+    var levels = DUTY_PATTERNS[duty].map(function(b){ return b ? 1 : -1; });
+    return buildStepBuffer(ac, levels);
+  }
+  // Same raw-step technique, fed the wavetable's own 32 4-bit samples
+  // directly (no DFT) — this is what makes the Wave channel play back
+  // exactly the steps the composer drew in Furnace's wavetable editor,
+  // the same way real CH3 hardware reads Wave RAM one nibble at a time
+  // (Pan Docs, Audio_Registers.md § Wave pattern RAM).
+  function buildWavetableBuffer(ac, wavetable){
+    var samples = wavetable.data, max = wavetable.max || 15;
+    var levels = samples.map(function(s){ return (s/max)*2-1; });
+    return buildStepBuffer(ac, levels);
   }
   function getInstrumentDuty(ins){
     var m = ((ins&&ins.macros)||[]).filter(function(mc){ return mc.code===2; })[0];
     return m ? m.data[0] : 2; // default 50% duty — GB hardware's power-on default
   }
 
-  // GB noise: a real 15-bit LFSR (the actual Game Boy noise-channel
-  // hardware algorithm — public, documented hardware behavior, not
-  // Furnace's own expression). Generated once at a fixed reference clock
-  // and looped; pitch per note is then approximated via playbackRate
+  // GB noise: a real 15-bit LFSR, matching Pan Docs (Audio_details.md §
+  // Noise channel (CH4)) exactly — this had two real bugs before: the
+  // register was seeded to all-1s (0x7FFF) where hardware resets it to
+  // 0 on every trigger, and the feedback bit used bit0 XOR bit1 where
+  // hardware uses XNOR (1 when the two bits match, not when they
+  // differ). Both are fixed here. Generated once at a fixed reference
+  // clock and looped; pitch per note is approximated via playbackRate
   // rather than re-deriving the exact NR43 divisor/shift the real
   // hardware would pick for that note number — a deliberate v1
   // simplification, flagged here for whoever revisits it.
@@ -11377,12 +11416,12 @@
     var dur = 0.5, sr = ac.sampleRate;
     var buf = ac.createBuffer(1, Math.floor(sr*dur), sr);
     var data = buf.getChannelData(0);
-    var lfsr = 0x7FFF, level = -1, samplesPerStep = sr/NOISE_REF_CLOCK, acc = 0;
+    var lfsr = 0, level = 1, samplesPerStep = sr/NOISE_REF_CLOCK, acc = 0;
     for(var i=0;i<data.length;i++){
       acc++;
       if(acc>=samplesPerStep){
         acc = 0;
-        var bit = (lfsr ^ (lfsr>>1)) & 1;
+        var bit = 1 - ((lfsr ^ (lfsr>>1)) & 1); // XNOR(bit0,bit1): 1 when they match
         lfsr = (lfsr>>1) | (bit<<14);
         level = (lfsr & 1) ? 1 : -1;
       }
@@ -11398,9 +11437,22 @@
   // note's voice is cut). Fully determined by the note's start time, so
   // it's scheduled as one batch of setValueAtTime calls right here rather
   // than needing a live per-frame updater.
+  // A couple-ms attack instead of an instant jump — measured against a
+  // real trigger point in flight_school (pattern 2's fast bass ostinato,
+  // retriggering the same note every ~0.17s): the raw step buffer's
+  // amplitude at buffer-offset 0 is already near ±peak, not 0, so an
+  // instant setValueAtTime there is a genuine sample-domain discontinuity
+  // — combined with the previous voice's release tail still ramping out
+  // at the same instant, two of these clicks landing close together
+  // measured as a ~2-2.6x amplitude spike right at the retrigger boundary.
+  // Real hardware never has this (one oscillator reprogrammed instantly,
+  // not two voices overlapping) — this ramp and the shortened release
+  // tail in stopVoice both shrink that overlap window.
+  var GB_ATTACK_SEC = 0.002;
   function scheduleEnvelope(gainParam, T, envVol, envDir, envLen, scale){
     var level = envVol;
-    gainParam.setValueAtTime((level/15)*scale, T);
+    gainParam.setValueAtTime(0, T);
+    gainParam.linearRampToValueAtTime((level/15)*scale, T + GB_ATTACK_SEC);
     if(envLen>0){
       var step = envDir ? 1 : -1;
       var t = T;
@@ -11419,14 +11471,30 @@
   // rather than a separate master trim.
   var MASTER_HEADROOM = 0.22;
 
-  var ac = null, master = null, dutyWaves = [], wavetablePeriodicWaves = {}, noiseBuffer = null;
+  // Not from a spec — Pan Docs documents the digital logic, not the DMG's
+  // analog amp/speaker response, and that response is what actually
+  // rolls off a real cartridge's raw square/wave output before it reaches
+  // your ears (and before it reaches Furnace's own recorded renders).
+  // Picked by ear/measurement against 05-flight_school.wav after the raw
+  // (unfiltered) step buffers made two simultaneous pulse channels beat
+  // against each other far more roughly than the reference does — treat
+  // this as a tunable approximation, not a hardware constant.
+  var GB_OUTPUT_LOWPASS_HZ = 6000;
+
+  var ac = null, master = null, dutyBuffers = [], wavetableBuffers = {}, noiseBuffer = null;
   var lastVoice = [null, null, null, null];
 
   function stopVoice(c, atTime){
     var v = lastVoice[c];
     if(!v) return;
     var g = v.gain.gain;
-    var rel = (v.releaseTime!==undefined && v.releaseTime!==null) ? Math.max(v.releaseTime, 0.005) : 0.008;
+    // GB-engine voices (releaseTime null) get a short tail, not the old
+    // 8ms one — on a monophonic channel that's overlap time where the
+    // dying old voice and the new voice's attack (see GB_ATTACK_SEC) are
+    // both audible at once, and real hardware has zero overlap (one
+    // oscillator reprogrammed instantly). Kept just long enough (2ms) to
+    // still avoid a true zero-time discontinuity click on the old voice.
+    var rel = (v.releaseTime!==undefined && v.releaseTime!==null) ? Math.max(v.releaseTime, 0.005) : 0.002;
     // cancelAndHoldAtTime freezes the param at whatever value it would
     // have had at atTime (even mid-envelope-step) so the fade-out starts
     // from the real current level instead of an unknown/stale one.
@@ -11449,9 +11517,8 @@
     // (0Axy) — kept separate from the envelope/ADSR gain above so the two
     // automation curves multiply instead of fighting over one param.
     var fxGain = ac.createGain();
-    gainNode.connect(fxGain);
     fxGain.connect(channelPan[c] ? channelPan[c].input : master);
-    var source, releaseTime, pitchRefFreq = null;
+    var source, releaseTime, pitchRefFreq = null, tail = gainNode;
     if(ins && ins.engine==='sampler' && ins.sampler && ins.sampler.buffer){
       var sp = ins.sampler;
       pitchRefFreq = noteToFreq(sp.rootNote, song.meta.tuning);
@@ -11475,14 +11542,20 @@
       var envDir = gb.envDir || 0;
       var envLen = gb.envLen || 0;
       if(c===0 || c===1){
-        source = ac.createOscillator();
-        source.setPeriodicWave(dutyWaves[getInstrumentDuty(ins)]);
-        source.frequency.setValueAtTime(freq, T);
+        var db = dutyBuffers[getInstrumentDuty(ins)];
+        pitchRefFreq = db.pitchRefFreq;
+        source = ac.createBufferSource();
+        source.buffer = db.buffer;
+        source.loop = true;
+        source.playbackRate.setValueAtTime(freq / pitchRefFreq, T);
       } else if(c===2){
-        source = ac.createOscillator();
         var waveIdx = (ins && ins.waveSynth) ? ins.waveSynth.wave1 : 0;
-        source.setPeriodicWave(wavetablePeriodicWaves[waveIdx] || wavetablePeriodicWaves[0] || dutyWaves[2]);
-        source.frequency.setValueAtTime(freq, T);
+        var wb = wavetableBuffers[waveIdx] || wavetableBuffers[0] || dutyBuffers[2];
+        pitchRefFreq = wb.pitchRefFreq;
+        source = ac.createBufferSource();
+        source.buffer = wb.buffer;
+        source.loop = true;
+        source.playbackRate.setValueAtTime(freq / pitchRefFreq, T);
       } else {
         pitchRefFreq = noteToFreq(NOISE_REF_NOTE, song.meta.tuning);
         source = ac.createBufferSource();
@@ -11490,10 +11563,29 @@
         source.loop = true;
         source.playbackRate.setValueAtTime(freq / pitchRefFreq, T);
       }
+      if(c!==3){
+        // The buffers above are a mathematically raw step function — real
+        // hardware's output passes through an analog amp/speaker stage
+        // that isn't flat out to Nyquist, and Furnace's own render carries
+        // that same natural rolloff. Without it, two tonal GB channels
+        // playing together get audibly rough: their upper harmonics (very
+        // densely packed for these low bass/mid notes) beat against each
+        // other far more than real hardware — or a recorded sample, which
+        // inherits the real rolloff for free — ever would. This tames
+        // that without giving up the harmonic detail the old 32-harmonic
+        // PeriodicWave cap was wrongly throwing away.
+        var lp = ac.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = GB_OUTPUT_LOWPASS_HZ;
+        lp.Q.value = 0.707;
+        tail = lp;
+      }
       scheduleEnvelope(gainNode.gain, T, envVol, envDir, envLen, MASTER_HEADROOM);
       releaseTime = null;
     }
     source.connect(gainNode);
+    if(tail!==gainNode) gainNode.connect(tail);
+    tail.connect(fxGain);
     source.start(T);
     return { source: source, gain: gainNode, fxGain: fxGain, pitchRefFreq: pitchRefFreq, releaseTime: releaseTime };
   }
@@ -11792,9 +11884,9 @@
     ac = externalAc || new (window.AudioContext||window.webkitAudioContext)();
     master = ac.createGain(); master.gain.value = 1;
     master.connect(ac.destination);
-    dutyWaves = DUTY_RATIOS.map(function(d){ return buildDutyPeriodicWave(ac, d); });
-    wavetablePeriodicWaves = {};
-    song.wavetables.forEach(function(w, i){ wavetablePeriodicWaves[i] = buildWavetablePeriodicWave(ac, w); });
+    dutyBuffers = DUTY_PATTERNS.map(function(_, d){ return buildDutyBuffer(ac, d); });
+    wavetableBuffers = {};
+    song.wavetables.forEach(function(w, i){ wavetableBuffers[i] = buildWavetableBuffer(ac, w); });
     noiseBuffer = buildNoiseBuffer(ac);
     buildChannelPanNodes();
     // suspend()/resume() are async — ac.state doesn't flip the instant
@@ -11980,7 +12072,18 @@
       });
   }
 
+  function setInstrumentEngine(i, engine){
+    var ins = song.instruments[i]; if(!ins) return;
+    ins.engine = engine;
+    document.querySelectorAll('.engine-switch[data-ins="'+i+'"] .eng-btn').forEach(function(btn){
+      btn.classList.toggle('active', btn.getAttribute('data-eng')===engine);
+    });
+    updateSamplerButtonUI(i);
+    renderPatternTable();
+  }
   document.getElementById('legend').addEventListener('click', function(e){
+    var engBtn = e.target.closest('.eng-btn');
+    if(engBtn){ setInstrumentEngine(parseInt(engBtn.getAttribute('data-ins'), 10), engBtn.getAttribute('data-eng')); return; }
     var samplerBtn = e.target.closest('.sampler-btn');
     if(samplerBtn){ openSamplerModal(parseInt(samplerBtn.getAttribute('data-ins'), 10)); return; }
     var previewBtn = e.target.closest('[data-preview-ins]');
@@ -12030,10 +12133,8 @@
     ins.sampler.loopEnd = parseFloat(e.target.value) || ins.sampler.buffer.duration;
   });
   document.getElementById('samplerEnabled').addEventListener('change', function(e){
-    var ins = song.instruments[samplerEditingIns]; if(!ins) return;
-    ins.engine = e.target.checked ? 'sampler' : 'gb';
-    updateSamplerButtonUI(samplerEditingIns);
-    renderPatternTable();
+    if(samplerEditingIns===null) return;
+    setInstrumentEngine(samplerEditingIns, e.target.checked ? 'sampler' : 'gb');
   });
 
   // Forces an immediate cut on every channel regardless of that voice's
@@ -12162,17 +12263,21 @@
   // ("middle C" for all of them), but that's turned out wrong more than
   // once. The three WaveTable-*.wav files measured (autocorrelation on the
   // raw PCM) a full octave below what they claim — C3, not C4 — which was
-  // making every Lead voice play a full octave sharp. Bass 1's Pulse-02.wav
-  // measured correct at C4, but John found by ear that C4 sounds too high
-  // in the actual mix and dropped it to C3 ("C-4" in this shrine's own
-  // octave labelling, which runs one higher than scientific pitch — see
-  // noteToFreq/A_REF_NOTE) — so ear beats the raw measurement here; worth
-  // checking the other Pulse-based instruments (Mid 1/2/3) the same way if
-  // any of them still sound off. `root` below is explicit and always wins
-  // over parseSmplChunk's auto-detection (see the .then() below).
+  // making every Lead voice play a full octave sharp. All four Pulse-*.wav
+  // files (Bass 1, Mid 1/2/3) measure identically at ~260.95Hz = C4 = note
+  // 120 — confirmed directly against the raw exported WAVs, independent of
+  // any UI/preview round-trip (the Sampler modal's preview always plays a
+  // sample at rate 1 against its own rootNote, so it can never reveal a
+  // rootNote error by ear). Bass 1 was previously dropped to root 108 (an
+  // octave low) based on an in-mix "sounds better" judgement made before
+  // the sampler engine was actually wired into playback (see the engine
+  // default fix below) — that test was comparing against a different bug,
+  // not this one, so it's reverted here to match its measured pitch and
+  // its sibling Pulse instruments. `root` below is explicit and always
+  // wins over parseSmplChunk's auto-detection (see the .then() below).
   var FEX = 'furnace-exports/';
   var INITIAL_SAMPLE_ASSIGNMENTS = [
-    { ins: 0, file: FEX+'Pulse-02.wav', root: 108 },       // Bass 1 — no duty macro → default 50% (root confirmed by ear: C-4, not the metadata's C-5)
+    { ins: 0, file: FEX+'Pulse-02.wav', root: 120 },       // Bass 1 — no duty macro → default 50% (measured C4, matches sibling Pulse files)
     { ins: 1, file: FEX+'Pulse-03.wav', root: 120 },       // Mid 1 — duty 3 (75%)
     { ins: 2, file: FEX+'WaveTable-00.wav', root: 108 },   // Lead 1 — wave1 index 0 (measured C3, not C4)
     { ins: 3, file: FEX+'Noise-00.wav', root: 120 },       // Perc 1
@@ -12182,6 +12287,12 @@
     { ins: 7, file: FEX+'Pulse-00.wav', root: 120 },       // Mid 3 — duty 0 (12.5%)
     { ins: 8, file: FEX+'Noise-01.wav', root: 120 }        // Perc Long
   ];
+  // These samples are loaded but NOT made the active engine here — the
+  // shipped default is the Game Boy synthesis engine (accurate raw duty/
+  // wave/noise step waveforms, see buildStepBuffer/buildNoiseBuffer
+  // above), with these recordings sitting one click away via the
+  // Synth/Sampler switch on each Instruments row (or the Sampler modal)
+  // for anyone who wants to A/B against the real chip recording directly.
   INITIAL_SAMPLE_ASSIGNMENTS.forEach(function(a){
     var ins = song.instruments[a.ins];
     if(!ins) return;
@@ -12198,6 +12309,12 @@
         ins.sampler.rootNote = a.root;
         refreshSamplerModalFields(a.ins);
       }
+      // loadSampleForInstrument → applyLoadedBuffer always flips the
+      // instrument to the sampler engine (the right call for someone
+      // interactively picking a file) — but this is just background
+      // preloading, so switch it back to the shipped GB-synth default
+      // now that the sample is loaded and available.
+      setInstrumentEngine(a.ins, 'gb');
     });
   });
 
