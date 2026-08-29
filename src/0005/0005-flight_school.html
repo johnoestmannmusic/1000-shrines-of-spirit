@@ -50,6 +50,9 @@
   .table-scroll{overflow-x:auto;}
 
   .sidebar{display:flex;flex-direction:column;gap:8px;align-self:start;position:sticky;top:12px;}
+  .cover-art-wrap{width:240px;flex:none;}
+  #coverArt{width:240px;height:240px;background:#08080a;border:1px solid var(--edge);border-radius:2px;
+    display:block;image-rendering:pixelated;image-rendering:crisp-edges;cursor:pointer;}
   .explainer{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:10px 12px;
     height:280px;overflow-y:auto;flex:none;}
   .explain-title{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;
@@ -220,6 +223,18 @@
     <div class="fields" id="legend"></div>
 
     <div class="sidebar">
+      <div class="field" id="field-cover-art">
+        <div class="field-header" data-toggle="cover-art" data-explain="cover-art">
+          <span class="flabel">Cover Art</span>
+          <span class="field-summary">click to save a PNG</span>
+          <span class="collapse-arrow">▾</span>
+        </div>
+        <div class="field-body">
+          <div class="cover-art-wrap">
+            <canvas id="coverArt" width="240" height="240" title="jet trails fire whenever a note triggers — during playback or a preview click — coloured and sized by that note's instrument and volume. Click to save the current frame as a 1600×1600 PNG."></canvas>
+          </div>
+        </div>
+      </div>
       <div class="explainer" id="explainer">
         <div class="explain-title" id="explainTitle">Explainer</div>
         <div class="explain-body" id="explainBody">Hover a card's title bar, an instrument row, or a cell inside the pattern grid, to see exactly what that part of the tracker data means — with the live value where one applies.</div>
@@ -11278,6 +11293,7 @@
       var unmutedChannels = [0,1,2,3].filter(function(c){ return !mutedChannels[c]; });
       previewAtTime(unmutedChannels, (currentOrderPos*song.meta.patternLength + row) * rowDurationSec());
       flashPianoForChannelsAt(unmutedChannels, currentOrderPos, row);
+      unmutedChannels.forEach(function(c){ spawnJetForCell(c, currentOrderPos, row); });
       return;
     }
     var chCell = e.target.closest('td[data-ch]');
@@ -11287,6 +11303,7 @@
       if(ch>=0){
         previewAtTime([ch], (currentOrderPos*song.meta.patternLength + chRow) * rowDurationSec());
         flashPianoForChannelsAt([ch], currentOrderPos, chRow);
+        spawnJetForCell(ch, currentOrderPos, chRow);
       }
       return;
     }
@@ -11443,6 +11460,12 @@
         html: P('A standard keyboard sized to the pitch range this song actually uses. Any key currently held down lights up in the colour of whichever instrument is playing it — the same colours used everywhere else on this page (pattern-grid tint, instrument swatches).') +
           P('Clicking a pattern cell, a row number, or an instrument\'s preview button also flashes the relevant key(s) briefly, even when the track isn\'t playing — the same click-to-preview interactions as the Patterns panel below.') +
           P('CH3 (Noise) is left off the keyboard — its "note" selects a noise-LFSR rate, not a real pitch, so it wouldn\'t mean anything as a lit key. It\'s shown as text in the box on the right instead: the current note value and the instrument playing it.') };
+    },
+    'cover-art': function(){
+      return { title:'Cover Art — animated, driven by the same triggers as everything else',
+        html: P('A 240×240 pixel-art canvas, dithered down from a native 32×32 buffer with a 4×4 Bayer matrix (the same ordered-dithering technique as the cover art on shrine 0004) for a chunky, retro pixel look rather than a smooth gradient.') +
+          P('Every note trigger — real playback or a preview click from anywhere on this page — fires a jet trail through the clouds, coloured by that note\'s instrument and sized/brightened by its volume. All 4 channels trigger a trail, including Noise, even though Noise doesn\'t appear on the Piano Roll.') +
+          P('Click the canvas itself to save the current frame as a 1600×1600 PNG (a clean 50× upscale of the native 32×32 buffer, so the pixel edges stay crisp rather than blurring).') };
     },
     'wavetables': function(){
       return { title:'Wavetables — custom waveforms for the GB Wave channel',
@@ -11749,6 +11772,334 @@
     return { orderPos: orderPos, row: row };
   }
 
+  // --- Animated Cover Art: 240x240, 4x4 Bayer-dithered pixel art — same
+  // two-canvas low-res-buffer + nearest-neighbour-scale technique as
+  // src/0004/0004-rune_d.html's own cover art (composite at native 32x32
+  // into a float RGB buffer, ordered-dither down to a handful of levels
+  // per channel, blit up to the visible 240x240 canvas with smoothing
+  // off). A night sky with drifting noise-cloud texture sits behind a
+  // bright diagonal jet trail (bottom-right -> top-left) fired for every
+  // note trigger — real playback or a preview click alike — coloured by
+  // that note's instrument and sized/brightened by its volume. ---
+  var COVER_GRID = 32;
+  var coverVctx = document.getElementById('coverArt').getContext('2d');
+  var coverGridCanvas = document.createElement('canvas');
+  coverGridCanvas.width = COVER_GRID; coverGridCanvas.height = COVER_GRID;
+  var coverGctx = coverGridCanvas.getContext('2d');
+  var coverGridImg = coverGctx.createImageData(COVER_GRID, COVER_GRID);
+  var coverGridBuf = new Float32Array(COVER_GRID*COVER_GRID*3);
+
+  // Bayer-4 ordered dither — same derivation as 0004's bayer4()/
+  // ditherChannel(), copied verbatim (only the grid size/level count
+  // differ, via COVER_GRID/COVER_DITHER_LEVELS above/below).
+  function coverBayer4(){
+    var m = [[0,2],[3,1]], n = 2;
+    while(n < 4){
+      var nm = []; for(var y=0;y<n;y++){ nm.push([]); nm.push([]); }
+      for(y=0;y<n;y++){ for(var x=0;x<n;x++){
+        var v = m[y][x]*4;
+        nm[y][x]=v; nm[y][x+n]=v+2; nm[y+n][x]=v+3; nm[y+n][x+n]=v+1;
+      }}
+      m = nm; n *= 2;
+    }
+    var flat = new Float32Array(16);
+    for(y=0;y<4;y++) for(var x=0;x<4;x++) flat[y*4+x] = (m[y][x]+0.5)/16;
+    return flat;
+  }
+  var COVER_BAYER4 = coverBayer4();
+  var COVER_DITHER_LEVELS = 9; // higher than 0004's 6 — the noise-cloud background has more going on locally than a flat gradient, and more levels keeps the halftone pattern from reading as noise
+  function coverDitherChannel(v, x, y){
+    v = v<0?0:(v>255?255:v);
+    var step = 255/(COVER_DITHER_LEVELS-1);
+    var t = COVER_BAYER4[(y&3)*4 + (x&3)];
+    var idx = v/step;
+    var base = Math.floor(idx);
+    var q = ((idx-base) > t) ? base+1 : base;
+    if(q > COVER_DITHER_LEVELS-1) q = COVER_DITHER_LEVELS-1;
+    return Math.round(q*step);
+  }
+  function coverHexToRgb(hex){ var n = parseInt(hex.slice(1),16); return [(n>>16)&255, (n>>8)&255, n&255]; }
+
+  // Ring stamp for cloud puffs — same bounding-box-optimized technique as
+  // 0004's own addRing, but blends by lerping each pixel TOWARD the given
+  // colour (amt clamped to [0,1]) rather than 0004's pure additive
+  // accumulation. Additive worked there because it draws over a near-black
+  // background — adding a saturated colour to near-zero reads as that
+  // colour. This canvas's background is a bright daytime sky; adding
+  // colour on top of already-bright values just blows every channel
+  // toward 255, washing everything out to pale white instead of showing
+  // the intended colour. Lerping toward the target holds up on any
+  // background brightness, dark or light.
+  function coverAddRing(cx, cy, radius, ringWidth, color, intensity){
+    if(intensity <= 0) return;
+    var rOuter = radius + ringWidth;
+    var x0 = Math.max(0, Math.floor(cx-rOuter)), x1 = Math.min(COVER_GRID-1, Math.ceil(cx+rOuter));
+    var y0 = Math.max(0, Math.floor(cy-rOuter)), y1 = Math.min(COVER_GRID-1, Math.ceil(cy+rOuter));
+    for(var y=y0;y<=y1;y++){
+      for(var x=x0;x<=x1;x++){
+        var dx=x-cx, dy=y-cy, d=Math.sqrt(dx*dx+dy*dy);
+        var falloff = 1 - Math.abs(d-radius)/ringWidth;
+        if(falloff<=0) continue;
+        var amt = falloff*intensity; if(amt>1) amt=1;
+        var idx = (y*COVER_GRID+x)*3;
+        coverGridBuf[idx]   += (color[0]-coverGridBuf[idx])*amt;
+        coverGridBuf[idx+1] += (color[1]-coverGridBuf[idx+1])*amt;
+        coverGridBuf[idx+2] += (color[2]-coverGridBuf[idx+2])*amt;
+      }
+    }
+  }
+  // Line-segment stamp for jet trails — nothing to reuse from 0004 here
+  // (its addRing only does circles). Same bounding-box-optimized shape and
+  // lerp-toward-colour blending as coverAddRing above, but falloff is
+  // distance-to-segment rather than distance-to-centre, and brightness
+  // tapers along the segment (dim tail -> bright head) so it reads as a
+  // directional streak, not a blob.
+  function coverAddTrail(x0,y0,x1,y1,width,color,intensity){
+    if(intensity <= 0) return;
+    var minX = Math.max(0, Math.floor(Math.min(x0,x1)-width));
+    var maxX = Math.min(COVER_GRID-1, Math.ceil(Math.max(x0,x1)+width));
+    var minY = Math.max(0, Math.floor(Math.min(y0,y1)-width));
+    var maxY = Math.min(COVER_GRID-1, Math.ceil(Math.max(y0,y1)+width));
+    var dx = x1-x0, dy = y1-y0;
+    var lenSq = dx*dx+dy*dy || 1;
+    for(var y=minY;y<=maxY;y++){
+      for(var x=minX;x<=maxX;x++){
+        var t = ((x-x0)*dx+(y-y0)*dy)/lenSq;
+        t = t<0?0:(t>1?1:t);
+        var px = x0+t*dx, py = y0+t*dy;
+        var ddx = x-px, ddy = y-py, d = Math.sqrt(ddx*ddx+ddy*ddy);
+        var falloff = 1 - d/width;
+        if(falloff<=0) continue;
+        var amt = falloff*intensity*(0.35+0.65*t); if(amt>1) amt=1;
+        var idx = (y*COVER_GRID+x)*3;
+        coverGridBuf[idx]   += (color[0]-coverGridBuf[idx])*amt;
+        coverGridBuf[idx+1] += (color[1]-coverGridBuf[idx+1])*amt;
+        coverGridBuf[idx+2] += (color[2]-coverGridBuf[idx+2])*amt;
+      }
+    }
+  }
+
+  // --- Drifting cloud background: a small deterministic value-noise field
+  // (lattice + bilinear interpolation — no library, nothing in 0004 to
+  // reuse here since its background is a static two-colour gradient with
+  // no noise texture) sampled at a slowly shifting offset each frame for
+  // ambient drift, layered over a fixed night-sky gradient running the
+  // same bottom-right -> top-left axis as the jet trails themselves. ---
+  function coverMulberry32(seed){
+    return function(){
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function makeCoverValueNoise(size, seed){
+    var rng = coverMulberry32(seed);
+    var lattice = new Float32Array(size*size);
+    for(var i=0;i<lattice.length;i++) lattice[i] = rng();
+    return function(x, y){
+      x = ((x % size) + size) % size;
+      y = ((y % size) + size) % size;
+      var x0 = Math.floor(x), y0 = Math.floor(y);
+      var x1 = (x0+1)%size, y1 = (y0+1)%size;
+      var fx = x-x0, fy = y-y0;
+      var v00=lattice[y0*size+x0], v10=lattice[y0*size+x1];
+      var v01=lattice[y1*size+x0], v11=lattice[y1*size+x1];
+      var a = v00+(v10-v00)*fx, b = v01+(v11-v01)*fx;
+      return a+(b-a)*fy;
+    };
+  }
+  // Sampled at a low frequency (x*0.11 etc — one lattice cell spans a
+  // large fraction of the 32-wide grid) so each cloud reads as a soft,
+  // sizeable blob rather than fine mottled texture; a first version
+  // sampled ~3x faster and, combined with the ordered-dither pattern
+  // below, read as noisy checkerboard rather than clouds.
+  var coverNoiseA = makeCoverValueNoise(8, 1337); // coarse cloud shapes
+  var coverNoiseB = makeCoverValueNoise(5, 4242); // subtle texture on top
+  // Night sky, gradiented along the jets' own bottom-left->top-right axis:
+  // warmer near the horizon where jets originate, cooler/deeper up where
+  // they're headed.
+  var COVER_SKY_NEAR = [26,16,36], COVER_SKY_FAR = [6,7,15];
+  var COVER_CLOUD = [58,62,84]; // kept close in brightness to the sky tones — a bigger jump dithers harshly at this resolution
+  var coverDriftT = 0; // wall-clock seconds, advances every frame regardless of playback state
+  function drawCoverBackground(){
+    for(var y=0;y<COVER_GRID;y++){
+      for(var x=0;x<COVER_GRID;x++){
+        // t=0 at bottom-left (near, hazy horizon), t=1 at top-right (far,
+        // deep sky) — same corner-to-corner axis the jets themselves fly.
+        var t = (x + (COVER_GRID-1-y)) / (2*(COVER_GRID-1));
+        var idx = (y*COVER_GRID+x)*3;
+        var r = COVER_SKY_NEAR[0] + (COVER_SKY_FAR[0]-COVER_SKY_NEAR[0])*t;
+        var gg = COVER_SKY_NEAR[1] + (COVER_SKY_FAR[1]-COVER_SKY_NEAR[1])*t;
+        var b = COVER_SKY_NEAR[2] + (COVER_SKY_FAR[2]-COVER_SKY_NEAR[2])*t;
+        var n = coverNoiseA(x*0.11+coverDriftT*0.2, y*0.11-coverDriftT*0.12)*0.8
+              + coverNoiseB(x*0.3-coverDriftT*0.3, y*0.3+coverDriftT*0.17)*0.2;
+        // Smoothstep rather than a hard-ish linear ramp — a gentler
+        // sky->cloud transition means fewer pixels sit exactly on a
+        // dither-level boundary, which is what was reading as noise.
+        var cloud = Math.max(0, Math.min(1, (n-0.38)/0.3));
+        cloud = cloud*cloud*(3-2*cloud);
+        coverGridBuf[idx]   = r + (COVER_CLOUD[0]-r)*cloud;
+        coverGridBuf[idx+1] = gg + (COVER_CLOUD[1]-gg)*cloud;
+        coverGridBuf[idx+2] = b + (COVER_CLOUD[2]-b)*cloud;
+      }
+    }
+  }
+
+  // --- Jets: one per note trigger. Head travels a fixed bottom-left ->
+  // top-right diagonal at a constant speed; drawn each frame as a tapered
+  // trail behind the head, with a quick fade-in then a longer fade-out
+  // timed to land near the far corner. Colour = the triggering note's
+  // active instrument colour (same colour used everywhere else on this
+  // page); length/width/lifetime scale with that note's volume. Each
+  // channel gets its own lane (a fixed perpendicular offset, plus a little
+  // random jitter so repeated notes on one channel don't all launch from
+  // the exact same point) so simultaneous notes across channels don't
+  // stack directly on top of each other, and the lanes are spread wide
+  // enough that trails fill most of the canvas rather than a narrow band
+  // down the middle. ---
+  var JET_DIR = { x: Math.SQRT1_2, y: -Math.SQRT1_2 };
+  var JET_PERP = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
+  var JET_SPEED = 22; // grid units/sec
+  var JET_LANES = [-9, -3, 3, 9]; // one per channel (0-3), spread wide across the diagonal's width
+  var jets = [], cloudPuffs = [];
+  // The whole bundle of coloured engine streams (one per instrument/
+  // channel) is one aircraft, not four — so there's exactly one pair of
+  // wing air-lines, not one per stream. They sit just outside the
+  // widest jet lanes (one to either side of the whole bunch), always at
+  // least faintly present, white, and their brightness tracks overall
+  // volume across every channel rather than any single instrument's.
+  // coverOverallVol is a simple envelope-follower: jumps up on any new
+  // note trigger, decays smoothly when nothing's firing.
+  var coverOverallVol = 0;
+  var COVER_OVERALL_DECAY = 0.7; // per second
+  function spawnJet(channel, colorHex, volFrac){
+    volFrac = Math.max(0.15, Math.min(1, volFrac));
+    coverOverallVol = Math.max(coverOverallVol, volFrac);
+    var lane = JET_LANES[channel] || 0;
+    var jitter = (Math.random()*2.4-1.2);
+    // Clamped into the grid: the widest lanes, offset from a near-corner
+    // base point, would otherwise land slightly off-canvas — clamping
+    // keeps every trail visibly starting on-screen rather than "popping
+    // in" a frame or two after spawning.
+    var gx = Math.max(0, Math.min(COVER_GRID-1, 3 + JET_PERP.x*(lane+jitter)));
+    var gy = Math.max(0, Math.min(COVER_GRID-1, (COVER_GRID-4) + JET_PERP.y*(lane+jitter)));
+    jets.push({
+      gx: gx, gy: gy,
+      age: 0, maxAge: 1.6 + volFrac*0.5, // tuned so head*speed covers close to the full diagonal (~38 units) by the time it fades
+      color: coverHexToRgb(colorHex),
+      length: 4 + volFrac*7, width: 0.7 + volFrac*0.9
+    });
+  }
+  // Drawn once per frame regardless of how many (if any) individual jets
+  // are currently in flight — these represent fixed aircraft geometry,
+  // not a per-note event, so unlike the jets above they never spawn or
+  // age out. Span almost the full diagonal (well past where any
+  // individual jet actually reaches) since a plane's own wings are there
+  // the whole time, not just while an engine happens to be firing.
+  var WING_LANE = 13; // just outside the widest individual engine lane (9)
+  var WING_BASE_X = 3, WING_BASE_Y = COVER_GRID-4; // same base origin spawnJet uses
+  function drawWingAirLines(){
+    var farX = WING_BASE_X + JET_DIR.x*44, farY = WING_BASE_Y + JET_DIR.y*44; // well past the far corner
+    var intensity = 0.1 + coverOverallVol*0.45; // faint floor even at zero volume, brightens with the overall mix
+    [1,-1].forEach(function(side){
+      var ox = JET_PERP.x*WING_LANE*side, oy = JET_PERP.y*WING_LANE*side;
+      // Width 0.6, not thinner: at exactly 45 degrees (JET_DIR/JET_PERP are
+      // both unit diagonals) on a 32px grid, a narrower line's worst-case
+      // gap to the nearest pixel centre exceeds its own width, so most of
+      // it simply never lands on a pixel — it needs to stay reliably above
+      // that gap to render as a continuous line rather than a dashed one.
+      coverAddTrail(WING_BASE_X+ox, WING_BASE_Y+oy, farX+ox, farY+oy, 0.6, [255,255,255], intensity);
+    });
+  }
+  // A note's effective volume — GB channel volume defaults to max (15)
+  // when never explicitly lowered by a row, so an unset cell.vol reads as
+  // full volume rather than silence.
+  function noteVolumeAt(c, orderPos, row){
+    var ch = song.channels[c];
+    var pat = ch.patterns[ch.orderList[orderPos]];
+    var raw = pat ? pat.rows[row] : null;
+    return (raw && raw.vol!==undefined) ? raw.vol : 15;
+  }
+  function spawnJetForCell(c, orderPos, row){
+    var ch = song.channels[c];
+    if(ch.noteTimeline[orderPos][row]===null) return; // nothing held here — don't fire a trail for silence
+    var insIdx = ch.insTimeline[orderPos][row];
+    var color = (insIdx!==null && song.instruments[insIdx]) ? song.instruments[insIdx].color : '#c9973a';
+    spawnJet(c, color, noteVolumeAt(c, orderPos, row)/15);
+  }
+  function drawCoverArtFrame(dt){
+    coverDriftT += dt;
+    coverOverallVol = Math.max(0, coverOverallVol - dt*COVER_OVERALL_DECAY);
+    drawCoverBackground();
+    drawWingAirLines();
+
+    for(var i=jets.length-1;i>=0;i--){
+      var j = jets[i];
+      j.age += dt;
+      if(j.age >= j.maxAge){ jets.splice(i,1); continue; }
+      var t = j.age/j.maxAge;
+      var headX = j.gx + JET_DIR.x*JET_SPEED*j.age, headY = j.gy + JET_DIR.y*JET_SPEED*j.age;
+      var tailX = headX - JET_DIR.x*j.length, tailY = headY - JET_DIR.y*j.length;
+      var envelope = t<0.12 ? t/0.12 : 1-(t-0.12)/(1-0.12);
+      coverAddTrail(tailX, tailY, headX, headY, j.width, j.color, envelope*1.4);
+      // Occasional cloud puff left behind the head — ties the "jet trail"
+      // and "clouds" halves of the brief together visually. Probability
+      // is dt-scaled so puff density doesn't depend on frame rate.
+      if(t<0.6 && Math.random() < dt*5){
+        cloudPuffs.push({ gx: tailX, gy: tailY, age:0, maxAge: 0.7+Math.random()*0.4, color: j.color });
+      }
+    }
+    for(i=cloudPuffs.length-1;i>=0;i--){
+      var p = cloudPuffs[i];
+      p.age += dt;
+      if(p.age >= p.maxAge){ cloudPuffs.splice(i,1); continue; }
+      var pt = p.age/p.maxAge;
+      coverAddRing(p.gx, p.gy, pt*2.5, 1.2, p.color, (1-pt)*0.6);
+    }
+
+    var data = coverGridImg.data;
+    for(var y=0;y<COVER_GRID;y++){
+      for(var x=0;x<COVER_GRID;x++){
+        var idx = (y*COVER_GRID+x)*3, o = (y*COVER_GRID+x)*4;
+        data[o]   = coverDitherChannel(coverGridBuf[idx],   x, y);
+        data[o+1] = coverDitherChannel(coverGridBuf[idx+1], x, y);
+        data[o+2] = coverDitherChannel(coverGridBuf[idx+2], x, y);
+        data[o+3] = 255;
+      }
+    }
+    coverGctx.putImageData(coverGridImg, 0, 0);
+    coverVctx.imageSmoothingEnabled = false;
+    coverVctx.clearRect(0,0,240,240);
+    coverVctx.drawImage(coverGridCanvas, 0, 0, 240, 240);
+  }
+  drawCoverArtFrame(0); // paint the sky immediately at load, before anything's ever triggered
+
+  // Click-to-save: upscales from coverGridCanvas (the native 32x32 buffer)
+  // rather than the visible 240x240 canvas — 1600/32 = 50 exactly, an
+  // integer scale with imageSmoothingEnabled off, so pixel edges stay
+  // crisp. Scaling from the already-240px canvas instead would be a
+  // non-integer 6.667x and risk soft/uneven edges. Same Blob + temporary
+  // <a download> + revokeObjectURL pattern as exportMidi() below.
+  function exportCoverArtPng(){
+    var exportCanvas = document.createElement('canvas');
+    exportCanvas.width = 1600; exportCanvas.height = 1600;
+    var ectx = exportCanvas.getContext('2d');
+    ectx.imageSmoothingEnabled = false;
+    ectx.drawImage(coverGridCanvas, 0, 0, 1600, 1600);
+    exportCanvas.toBlob(function(blob){
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = (song.meta.name || 'flight_school') + '-cover.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    }, 'image/png');
+  }
+  document.getElementById('coverArt').addEventListener('click', exportCoverArtPng);
+
   function flashInstrumentRow(i){
     var el = document.querySelector('tr[data-ins-row="'+i+'"]');
     if(!el) return;
@@ -11763,6 +12114,7 @@
       if(raw && raw.note!==undefined && raw.note!==NOTE_OFF){
         var insIdx = ch.insTimeline[orderPos][row];
         if(insIdx!==null) flashInstrumentRow(insIdx);
+        spawnJetForCell(c, orderPos, row); // cover art — every channel fires a trail, including Noise
       }
     }
   }
@@ -11909,7 +12261,8 @@
   }
 
   var lastShownOrderPos = null, lastShownRow = null;
-  function playbackRAF(){
+  var coverLastFrameSec = null;
+  function playbackRAF(now){
     if(songStarted && ac && ac.state==='running'){
       // The track loops indefinitely (see armLoopContinuation) — no
       // stop-at-end branch needed here, currentSongTime() already wraps.
@@ -11926,6 +12279,15 @@
         updatePianoRollActive(pos.orderPos, pos.row);
       }
     }
+    // Cover art redraws every frame regardless of transport state — the
+    // ambient cloud drift and any in-flight jet trail/puff need to keep
+    // animating whether or not the song is actually playing (a preview
+    // click can fire a jet with nothing playing at all).
+    var nowSec = now/1000;
+    if(coverLastFrameSec===null) coverLastFrameSec = nowSec;
+    var coverDt = Math.min(0.1, nowSec-coverLastFrameSec); // clamp guards against a huge dt after e.g. a background-tab throttle
+    coverLastFrameSec = nowSec;
+    drawCoverArtFrame(coverDt);
     requestAnimationFrame(playbackRAF);
   }
   requestAnimationFrame(playbackRAF);
@@ -11983,6 +12345,7 @@
     if(!spot) return;
     previewAtTime([spot.channel], spot.time);
     flashPianoForChannelsAt([spot.channel], spot.orderPos, spot.row);
+    spawnJetForCell(spot.channel, spot.orderPos, spot.row);
   }
   document.getElementById('legend').addEventListener('click', function(e){
     var previewBtn = e.target.closest('[data-preview-ins]');
@@ -12210,7 +12573,10 @@
     instrumentPreviewSpots: instrumentPreviewSpots,
     mutedChannels: mutedChannels,
     pianoRoll: function(){ return { active: pianoRollActiveNotes, flashes: pianoRollFlashes, range: pianoRollRange }; },
-    noiseBox: function(){ return { active: noiseActive, flash: noiseFlash }; }
+    noiseBox: function(){ return { active: noiseActive, flash: noiseFlash }; },
+    coverArt: function(){ return { jets: jets.map(function(j){ return {gx:j.gx,gy:j.gy,age:j.age,maxAge:j.maxAge,width:j.width,length:j.length}; }), cloudPuffs: cloudPuffs.length, driftT: coverDriftT, overallVol: coverOverallVol }; },
+    coverBufAt: function(x,y){ var idx=(Math.round(y)*COVER_GRID+Math.round(x))*3; return [coverGridBuf[idx],coverGridBuf[idx+1],coverGridBuf[idx+2]]; },
+    spawnJetForCell: spawnJetForCell
   };
 
 })();
