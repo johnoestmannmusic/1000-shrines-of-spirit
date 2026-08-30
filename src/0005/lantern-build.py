@@ -16,8 +16,9 @@ Produces:
   ASSETS/0.ogg .. 3.ogg, ASSETS/<trackname>.fur, ASSETS/<trackname>.wav,
     ASSETS/<trackname>.mid (generated here — see build_midi_bytes() below,
     a port of the buildMidiBytes() that used to run in-browser)
-  <shrine-folder>-<trackname>.html   (e.g. 0005-flight_school.html)
-  <shrine-folder>-<trackname>-backup.html  (previous version, if any)
+  <trackname>.html   (e.g. flight_school.html) — deliberately has no shrine
+    number in it, so this same script works unmodified for any track this
+    shrine folder is pointed at.
 """
 import datetime
 import json
@@ -534,22 +535,25 @@ DOWNLOAD_BUTTONS_JS = """
 """
 
 
-def find_template(shrine_name, out_path):
+def find_template(out_path):
     """Prefer the exact trackname-matched output if it's already there
     (repeat build of the same track). Otherwise this shrine slot is being
-    swapped to a different track — fall back to whatever other shrine HTML
+    swapped to a different track — fall back to whatever other HTML file
     already exists here and use it as the structural template, since the
-    JS/CSS shell is identical across tracks."""
+    JS/CSS shell is identical across tracks. (SHRINE_DIR only ever holds
+    this one shrine's own output, so any *.html here is a fair candidate —
+    the content check right after this guards against a bad pick.)"""
     if os.path.isfile(out_path):
         return out_path
     candidates = [
         f for f in os.listdir(SHRINE_DIR)
-        if f.startswith(shrine_name + "-") and f.endswith(".html") and not f.endswith("-backup.html")
-    ]
+        if f.endswith(".html") and not f.endswith("-backup.html")
+    ]  # the -backup.html exclusion is only for any left over from an older
+       # version of this script — it hasn't written one itself in a while
     if not candidates:
-        fail("ERROR: no existing shrine HTML found at %s (or anywhere else in "
-             "%s) to use as a template — this script updates an existing "
-             "shrine HTML in place, it doesn't create one from scratch." % (out_path, SHRINE_DIR))
+        fail("ERROR: no existing HTML found in %s to use as a template — "
+             "this script updates an existing shrine HTML in place, it "
+             "doesn't create one from scratch." % SHRINE_DIR)
     if len(candidates) > 1:
         candidates.sort(key=lambda f: os.path.getmtime(os.path.join(SHRINE_DIR, f)), reverse=True)
         print("NOTE: multiple candidate templates found (%s) — using the most "
@@ -558,11 +562,10 @@ def find_template(shrine_name, out_path):
 
 
 def regenerate_html(trackname, data):
-    shrine_name = os.path.basename(SHRINE_DIR)
-    out_name = "%s-%s.html" % (shrine_name, trackname)
+    out_name = "%s.html" % trackname
     out_path = os.path.join(SHRINE_DIR, out_name)
 
-    template_path = find_template(shrine_name, out_path)
+    template_path = find_template(out_path)
     track_changed = template_path != out_path
 
     with open(template_path, "r", encoding="utf-8") as f:
@@ -573,15 +576,11 @@ def regenerate_html(trackname, data):
              "(missing the fur-json script tag or STEM_FILES array) — "
              "refusing to overwrite it." % template_path)
 
-    backup_path = os.path.splitext(template_path)[0] + "-backup.html"
-    shutil.copyfile(template_path, backup_path)
-    print("backed up previous HTML -> %s" % os.path.relpath(backup_path, SHRINE_DIR))
-
     if track_changed:
         os.remove(template_path)
         print("removed stale %s (superseded by %s; ASSETS/ is shared and now "
               "holds %s's data, so the old file would no longer be self-"
-              "consistent — it's preserved in the backup above)"
+              "consistent)"
               % (os.path.relpath(template_path, SHRINE_DIR), out_name, trackname))
 
     # 1. minify the embedded JSON into a single line
