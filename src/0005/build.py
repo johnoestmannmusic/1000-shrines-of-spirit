@@ -17,12 +17,18 @@ Produces:
   <shrine-folder>-<trackname>.html   (e.g. 0005-flight_school.html)
   <shrine-folder>-<trackname>-backup.html  (previous version, if any)
 """
+import datetime
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+from html import escape as html_escape
+
+GITHUB_REPO_URL = "https://github.com/johnoestmannmusic/1000-shrines-of-spirit"
+FURNACE_URL = "https://github.com/tildearrow/furnace"
+COMPOSER_SITE_URL = "https://johnoestmannmusic.com"
 
 SHRINE_DIR = os.path.dirname(os.path.abspath(__file__))
 INGEST_DIR = os.path.join(SHRINE_DIR, "INGEST")
@@ -176,7 +182,10 @@ def convert_assets(trackname):
 DOWNLOAD_BUTTONS_JS = """
   // Static-asset downloads (the source .fur module and the full mixed
   // .wav) — same temporary-<a> pattern as exportMidi()/exportCoverArtPng()
-  // above, but pointing at a real file in ASSETS/ instead of a Blob.
+  // above, but pointing at a real file in ASSETS/ instead of a Blob. Uses
+  // the build's trackname (matches the actual ASSETS/ filenames on disk),
+  // not song.meta.name — that's the human song title from the Furnace
+  // project, which can differ from the filename and would 404.
   function downloadAsset(filename){
     var a = document.createElement('a');
     a.href = 'ASSETS/' + filename;
@@ -186,12 +195,35 @@ DOWNLOAD_BUTTONS_JS = """
     document.body.removeChild(a);
   }
   document.getElementById('downloadFurBtn').addEventListener('click', function(){
-    downloadAsset((song.meta.name || '%s') + '.fur');
+    downloadAsset('%s.fur');
   });
   document.getElementById('downloadWavBtn').addEventListener('click', function(){
-    downloadAsset((song.meta.name || '%s') + '.wav');
+    downloadAsset('%s.wav');
   });
 """
+
+
+def find_template(shrine_name, out_path):
+    """Prefer the exact trackname-matched output if it's already there
+    (repeat build of the same track). Otherwise this shrine slot is being
+    swapped to a different track — fall back to whatever other shrine HTML
+    already exists here and use it as the structural template, since the
+    JS/CSS shell is identical across tracks."""
+    if os.path.isfile(out_path):
+        return out_path
+    candidates = [
+        f for f in os.listdir(SHRINE_DIR)
+        if f.startswith(shrine_name + "-") and f.endswith(".html") and not f.endswith("-backup.html")
+    ]
+    if not candidates:
+        fail("ERROR: no existing shrine HTML found at %s (or anywhere else in "
+             "%s) to use as a template — this script updates an existing "
+             "shrine HTML in place, it doesn't create one from scratch." % (out_path, SHRINE_DIR))
+    if len(candidates) > 1:
+        candidates.sort(key=lambda f: os.path.getmtime(os.path.join(SHRINE_DIR, f)), reverse=True)
+        print("NOTE: multiple candidate templates found (%s) — using the most "
+              "recently modified, %r." % (", ".join(candidates), candidates[0]))
+    return os.path.join(SHRINE_DIR, candidates[0])
 
 
 def regenerate_html(trackname, data):
@@ -199,22 +231,27 @@ def regenerate_html(trackname, data):
     out_name = "%s-%s.html" % (shrine_name, trackname)
     out_path = os.path.join(SHRINE_DIR, out_name)
 
-    if not os.path.isfile(out_path):
-        fail("ERROR: expected an existing template at %s to regenerate — "
-             "this script updates an existing shrine HTML in place, it "
-             "doesn't create one from scratch." % out_path)
+    template_path = find_template(shrine_name, out_path)
+    track_changed = template_path != out_path
 
-    with open(out_path, "r", encoding="utf-8") as f:
+    with open(template_path, "r", encoding="utf-8") as f:
         html = f.read()
 
     if 'id="fur-json"' not in html or "STEM_FILES" not in html:
         fail("ERROR: %s doesn't look like a recognized shrine template "
              "(missing the fur-json script tag or STEM_FILES array) — "
-             "refusing to overwrite it." % out_path)
+             "refusing to overwrite it." % template_path)
 
-    backup_path = os.path.join(SHRINE_DIR, "%s-%s-backup.html" % (shrine_name, trackname))
-    shutil.copyfile(out_path, backup_path)
+    backup_path = os.path.splitext(template_path)[0] + "-backup.html"
+    shutil.copyfile(template_path, backup_path)
     print("backed up previous HTML -> %s" % os.path.relpath(backup_path, SHRINE_DIR))
+
+    if track_changed:
+        os.remove(template_path)
+        print("removed stale %s (superseded by %s; ASSETS/ is shared and now "
+              "holds %s's data, so the old file would no longer be self-"
+              "consistent — it's preserved in the backup above)"
+              % (os.path.relpath(template_path, SHRINE_DIR), out_name, trackname))
 
     # 1. minify the embedded JSON into a single line
     minified = json.dumps(data, separators=(",", ":"))
@@ -228,14 +265,22 @@ def regenerate_html(trackname, data):
     if n != 1:
         fail("ERROR: could not find the fur-json <script> block to replace.")
 
-    # 2. repoint the stem paths at ASSETS/N.ogg, leaving trailing comments alone
+    # 2. repoint the stem paths at ASSETS/N.ogg, leaving trailing comments
+    # alone. Idempotent: matches either the original 'stems/name-N.ogg' form
+    # or an already-migrated 'ASSETS/N.ogg' form, since re-running this on a
+    # previously-built file (same track, or reused as a fallback template
+    # for a different one) is a normal case, not just a first-ever build.
     def replace_stem(m):
         return "'ASSETS/%s.ogg'" % m.group(1)
-    html, n = re.subn(r"'stems/[^']*?-(\d)\.ogg'", replace_stem, html)
+    html, n = re.subn(r"'(?:stems/[^']*?-|ASSETS/)(\d)\.ogg'", replace_stem, html)
     if n != 4:
         fail("ERROR: expected to replace 4 stem paths in STEM_FILES, replaced %d." % n)
 
-    # 3. add the two download buttons around exportMidiBtn
+    # 3. add the two download buttons around exportMidiBtn \u2014 strip any
+    # copies left by a previous run first, so re-running this script never
+    # duplicates them.
+    html = re.sub(r'\s*<button id="downloadFurBtn"[^>]*>[^<]*</button>', '', html)
+    html = re.sub(r'\s*<button id="downloadWavBtn"[^>]*>[^<]*</button>', '', html)
     fur_btn = ('<button id="downloadFurBtn" type="button" '
                'title="download the original Furnace module (.fur)">\u21e9 .fur</button>')
     wav_btn = ('<button id="downloadWavBtn" type="button" '
@@ -249,7 +294,9 @@ def regenerate_html(trackname, data):
     if n != 1:
         fail("ERROR: could not find exportMidiBtn to insert the new download buttons next to.")
 
-    # 4. wire up the two new buttons, right after exportMidi's own wiring
+    # 4. wire up the two new buttons, right after exportMidi's own wiring —
+    # again strip any previous copy first for idempotency.
+    html = re.sub(r"\n  // Static-asset downloads.*?downloadWavBtn.*?\n  \}\);\n", "\n", html, flags=re.DOTALL)
     js_block = DOWNLOAD_BUTTONS_JS % (trackname, trackname)
     html, n = re.subn(
         r"(document\.getElementById\('exportMidiBtn'\)\.addEventListener\('click', exportMidi\);\n)",
@@ -259,6 +306,54 @@ def regenerate_html(trackname, data):
     )
     if n != 1:
         fail("ERROR: could not find exportMidiBtn's click listener to attach the new handlers after.")
+
+    # 5. song title (the h1's bold track name), subtitle (with today's build
+    # date), and both footer lines. All keyed off stable tag/class anchors
+    # rather than the previous text, so re-running this is idempotent no
+    # matter what a prior run (for this track or another) left behind.
+    song_title = html_escape(data.get("songInfo", {}).get("name") or trackname)
+    html, n = re.subn(
+        r'(<h1>[^<]*<b>)[^<]*(</b></h1>)',
+        lambda m: m.group(1) + song_title + m.group(2),
+        html,
+        count=1,
+    )
+    if n != 1:
+        fail("ERROR: could not find the <h1><b>...</b></h1> track name to update.")
+
+    build_date = datetime.date.today().strftime("%y%m%d")
+    subtitle_html = (
+        'Lantern Music Player - build %s, track composed in '
+        '<a href="%s" target="_blank" rel="noreferrer noopener">Furnace</a>.'
+        % (build_date, FURNACE_URL)
+    )
+    html, n = re.subn(
+        r'<div class="subtitle">.*?</div>',
+        lambda m: '<div class="subtitle">' + subtitle_html + '</div>',
+        html,
+        count=1,
+        flags=re.DOTALL,
+    )
+    if n != 1:
+        fail("ERROR: could not find the .subtitle div to update.")
+
+    footer_html = (
+        '<footer>\n'
+        '    <span>Music License: CC0 / Public Domain  ·  Code License: MIT · '
+        '<a href="%s" target="_blank" rel="noreferrer noopener">view source</a></span>\n'
+        '    <span><a href="%s" target="_blank" rel="noreferrer noopener">johnoestmannmusic.com</a></span>\n'
+        '  </footer>'
+        % (GITHUB_REPO_URL, COMPOSER_SITE_URL)
+    )
+    html, n = re.subn(
+        r'<footer>.*?</footer>',
+        lambda m: footer_html,
+        html,
+        count=1,
+        flags=re.DOTALL,
+    )
+    if n != 1:
+        fail("ERROR: could not find the <footer> block to update.")
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)

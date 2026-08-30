@@ -1,0 +1,2336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0005 — shrines of SPIRIT</title>
+<link rel="icon" href="data:,">
+<style>
+  :root{
+    --bg:#101012; --panel:#17171a; --edge:#2a2a2e; --ink:#e9e6db; --dim:#8a877c;
+    --amber:#c9973a;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);}
+  body{padding:24px 16px 40px;display:flex;flex-direction:column;align-items:center;}
+  h1{font-size:13px;font-weight:400;letter-spacing:.08em;color:var(--dim);text-transform:uppercase;margin:0 0 4px;}
+  h1 b{color:var(--ink);font-weight:600;}
+  .subtitle{font-size:10px;color:var(--dim);margin:0 0 16px;text-align:center;}
+
+  .shrine{width:max-content;max-width:100%;display:flex;flex-direction:column;gap:20px;}
+  /* Main column sizes to its content (the pattern grid), not a stretched
+     1fr — with only 4 GB channels there's no reason for Song/Patterns to
+     be wider than what they actually show. If channel counts grow past
+     what comfortably fits, that's when a per-column shift-left/right control
+     gets added rather than letting this track grow unbounded. */
+  .panels{display:grid;grid-template-columns:max-content 300px;gap:20px;}
+
+  /* --- standard shrine field/explainer shell (matches 0004 and js-explorer —
+     this is the reusable pattern going forward: collapsible cards on the
+     left/middle, a sticky hover-driven Explainer on the right). Here the
+     sidebar also holds the secondary/reference cards (Timing, Chips,
+     Instruments, Wavetables) below the Explainer, so the main column stays
+     focused on Song + the Patterns grid — the thing you actually watch
+     while listening. --- */
+  .fields{display:flex;flex-direction:column;gap:8px;}
+  .field{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:6px 8px;
+    display:flex;flex-direction:column;gap:4px;
+    box-shadow:0 0 0 0 var(--flash-color,transparent);
+    transition:box-shadow .4s ease-out, background-color .4s ease-out;}
+  .flabel{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);}
+  .field-header{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;}
+  .field-summary{font-size:9px;color:var(--dim);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;text-align:right;display:none;}
+  .collapse-arrow{font-size:9px;color:var(--dim);flex:none;width:8px;}
+  .field-body{display:flex;flex-direction:column;gap:4px;margin-top:4px;}
+  .field.collapsed{padding-top:6px;padding-bottom:6px;}
+  .field.collapsed .field-body{display:none;}
+  .field.collapsed .field-summary{display:block;}
+  .table-scroll{overflow-x:auto;}
+
+  .sidebar{display:flex;flex-direction:column;gap:8px;align-self:start;position:sticky;top:12px;}
+  .cover-art-wrap{width:240px;flex:none;}
+  #coverArt{width:240px;height:240px;background:#08080a;border:1px solid var(--edge);border-radius:2px;
+    display:block;image-rendering:pixelated;image-rendering:crisp-edges;cursor:pointer;}
+  .explainer{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:10px 12px;
+    height:280px;overflow-y:auto;flex:none;}
+  .explain-title{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;
+    position:sticky;top:-10px;background:var(--panel);padding-top:10px;margin-top:-10px;}
+  .explain-body{font-size:10px;line-height:1.6;color:var(--ink);}
+  .explain-body .tk-p{margin:0 0 8px;}
+  .explain-body .tk-p:last-child{margin-bottom:0;}
+  .explain-body .tk-block{background:#0c0c0d;border:1px solid var(--edge);border-radius:2px;
+    padding:6px 7px;margin:0 0 8px;font-family:var(--mono);white-space:pre-wrap;overflow-wrap:break-word;}
+  .explain-body .tk-num{color:var(--amber);}
+  .explain-body .tk-var{color:#7fb3ff;}
+  .explain-body .tk-kw{color:#8fd0a0;}
+  .explain-body .tk-live{color:#fff;background:#242427;border-radius:2px;padding:0 3px;}
+
+  .song-line{font-size:11px;line-height:1.6;color:var(--ink);}
+  .song-line b{color:var(--ink);font-weight:600;}
+  .comments-text{font-size:11px;line-height:1.6;color:var(--ink);white-space:pre-wrap;word-break:break-word;}
+
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:11px;line-height:1.6;}
+  .kv .k{color:var(--dim);}
+  .kv .v{color:var(--ink);}
+
+  table.ins-table{width:100%;border-collapse:collapse;font-size:11px;}
+  table.ins-table th, table.ins-table td{text-align:left;padding:3px 8px;border-bottom:1px solid var(--edge);}
+  table.ins-table th{color:var(--dim);font-weight:400;text-transform:uppercase;font-size:9px;letter-spacing:.04em;}
+  table.ins-table td{color:var(--ink);}
+  table.ins-table tr[data-explain]{cursor:default;}
+  input.ins-color-input{width:22px;height:16px;padding:0;border:1px solid var(--edge);background:none;cursor:pointer;}
+  /* Flash an instrument row the instant it's actually triggered during
+     playback — instant snap-in (no transition while .firing is applied),
+     then a plain CSS fade once the class is removed a beat later. Same
+     technique as 0004's per-instrument card flash. */
+  table.ins-table tr{transition:background-color .5s ease-out;}
+  table.ins-table tr.firing{background-color:rgba(201,151,58,.35);transition:none;}
+  table.ins-table tr:hover{background-color:#1e1e22;}
+
+  /* Per-instrument wavetable mini-preview, inline in the Instruments
+     table — only Wave-channel instruments get one (empty td otherwise). */
+  .ins-wave-canvas{display:block;background:#08080a;border:1px solid var(--edge);
+    image-rendering:pixelated;width:64px;height:16px;cursor:default;}
+  .piano-roll-row{display:flex;align-items:stretch;gap:8px;}
+  .piano-roll-scroll{overflow-x:auto;overflow-y:hidden;border:1px solid var(--edge);border-radius:2px;background:#08080a;
+    width:max-content;max-width:100%;}
+  .piano-roll-canvas{display:block;}
+  .noise-box{border:1px solid var(--edge);border-radius:2px;background:#08080a;padding:6px 12px;
+    display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:100px;flex:none;}
+  .noise-box-label{font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);}
+  .noise-box-note{font-size:17px;font-weight:600;font-family:var(--mono);color:var(--dim);}
+  .noise-box-ins{font-size:10px;color:var(--dim);}
+
+  .order-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin-bottom:6px;font-size:10px;color:var(--dim);}
+  .order-row select{background:#0c0c0d;color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:10px;}
+
+  /* Custom order picker — a native <select> can't show a multi-colour
+     swatch per option in Chrome (option styling is text-only there), so
+     this replaces it for display/interaction while a hidden <select
+     id="orderSelect"> (kept, just display:none) stays the actual state
+     the rest of the app already reads/writes via .value, untouched. */
+  .order-picker{position:relative;display:inline-block;}
+  .order-picker-btn{display:inline-flex;align-items:center;gap:6px;background:#0c0c0d;color:var(--ink);
+    border:1px solid var(--edge);font-family:var(--mono);font-size:10px;padding:4px 8px;cursor:pointer;}
+  .order-picker-btn:hover{border-color:#555;}
+  .order-picker-arrow{color:var(--dim);font-size:8px;}
+  .order-swatch{display:inline-flex;gap:1px;flex:none;}
+  .order-swatch span{width:6px;height:11px;display:inline-block;background:var(--edge);border-radius:1px;}
+  .order-picker-list{display:none;position:absolute;top:100%;left:0;z-index:10;background:var(--panel);
+    border:1px solid var(--edge);border-radius:2px;max-height:280px;overflow-y:auto;min-width:150px;
+    margin-top:2px;box-shadow:0 4px 12px rgba(0,0,0,.4);}
+  .order-picker-list.open{display:block;}
+  .order-picker-row{display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;font-size:10px;
+    color:var(--ink);white-space:nowrap;}
+  .order-picker-row:hover{background:#232320;}
+  .order-picker-row.active{background:#2a2416;color:var(--amber);}
+  .order-picker-row .order-swatch span{width:8px;height:13px;}
+  .tint-toggle{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none;}
+  .tint-toggle input{margin:0;cursor:pointer;}
+
+  /* --- tracker grid: all channels side by side in one screen, like Furnace's
+     own pattern view. Row shading follows the song's own "highlights"
+     metadata (every Nth/Mth row, same convention Furnace uses) rather than
+     a fixed guess, so it matches whatever the composer set. .playhead is
+     driven live from real stem-playback time, see setPlayheadRow. --- */
+  .pattern-scroll{max-height:480px;overflow:auto;border:1px solid var(--edge);border-radius:2px;}
+  table.pat-table{border-collapse:collapse;font-size:10px;}
+  table.pat-table td, table.pat-table th{padding:2px 7px;white-space:nowrap;border-right:1px solid var(--edge);}
+  table.pat-table th{position:sticky;top:0;background:var(--panel);color:var(--dim);font-weight:400;text-align:left;
+    text-transform:uppercase;font-size:8px;letter-spacing:.04em;z-index:1;}
+  table.pat-table th.chan-head{text-align:center;top:0;cursor:pointer;user-select:none;}
+  table.pat-table th.chan-head:hover{color:var(--ink);}
+  table.pat-table th.chan-head.muted{color:#6a4040;text-decoration:line-through;background:rgba(180,60,60,.1);}
+  table.pat-table td.chan-muted{opacity:.32;}
+  table.pat-table thead tr:first-child th{top:0;}
+  table.pat-table thead tr:last-child th{top:16px;}
+  table.pat-table td.row-idx, table.pat-table th.row-idx-head{color:var(--dim);position:sticky;left:0;background:var(--panel);z-index:1;}
+  table.pat-table td.row-idx{cursor:pointer;}
+  table.pat-table td.row-idx:hover{color:var(--amber);background:#232320;}
+  /* Same click-to-preview affordance as row-idx, but per-channel-column
+     cells (note/ins/vol/fx) — clicking one previews just that stem at that
+     point in time rather than jumping/seeking the whole transport. */
+  table.pat-table td[data-field="note"],
+  table.pat-table td[data-field="ins"],
+  table.pat-table td[data-field="vol"],
+  table.pat-table td[data-field="fx"]{cursor:pointer;}
+  table.pat-table td[data-field="note"]:hover,
+  table.pat-table td[data-field="ins"]:hover,
+  table.pat-table td[data-field="vol"]:hover,
+  table.pat-table td[data-field="fx"]:hover{background:#232320;}
+  table.pat-table td.note{color:var(--ink);}
+  table.pat-table td.note.off{color:#c96a6a;}
+  table.pat-table td.note.empty{color:var(--dim);}
+  table.pat-table td.fx{color:var(--amber);}
+  table.pat-table tr.hl1{background:#1d1d21;}
+  table.pat-table tr.hl2{background:#28282d;}
+  /* Beat/bar row lines: drawn as a border-top on every cell (not just the
+     tr's own background) so they stay visible even under a translucent
+     instrument tint sitting on top — a background alone got lost there.
+     All three are shades of grey, not colour, so the instrument tint stays
+     the only colour cue on the grid. Bar (every highlights[1] rows) reads
+     a touch lighter than beat (every highlights[0] rows); the new-note
+     border (set inline per cell, see renderPatternTable) is lightest of
+     all and takes priority over both when a note starts. */
+  table.pat-table td.beat-line{border-top:1px solid #3d3b42;}
+  table.pat-table td.bar-line{border-top:1px solid #57545c;}
+  table.pat-table td.note-start{border-top:1px solid #8f8c94;}
+  table.pat-table td.note-end{border-bottom:1px solid #8f8c94;}
+  /* Instrument colour-tint (--ic set inline per cell): a translucent wash
+     so the row/hover highlights underneath still show through. */
+  table.pat-table td.ins-tint{background:color-mix(in srgb, var(--ic) 26%, transparent);}
+  table.pat-table tr:hover{background:#26262a;}
+  table.pat-table tr.playhead{background:#3a2f18;}
+  table.pat-table tr.playhead td{color:#fff;}
+  /* Cell-level highlight on top of the row highlight — the exact cell under
+     the mouse is what the Explainer is currently describing, so it gets its
+     own outline to make that link obvious at a glance. */
+  table.pat-table td[data-field]:hover{background:#40331a;outline:1px solid var(--amber);outline-offset:-1px;color:#fff;position:relative;z-index:2;}
+
+  .controls{display:flex;align-items:center;gap:10px;}
+  button{background:var(--panel);color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);
+    font-size:11px;padding:8px 14px;cursor:pointer;}
+  button:hover{border-color:#555;}
+  button:disabled{opacity:.4;cursor:default;}
+
+  .ins-table .preview-btn{font-size:9px;padding:3px 7px;line-height:1;color:var(--amber);}
+
+  footer{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:var(--dim);flex-wrap:wrap;gap:6px;width:1040px;max-width:100%;}
+  footer a{color:var(--dim);}
+
+  @media (max-width:900px){
+    .panels{grid-template-columns:minmax(0,1fr);}
+    .sidebar{position:static;}
+  }
+</style>
+</head>
+<body>
+
+<h1>1000 - shrines - /of/ - SPIRIT · <b>flight_school - Night Shift</b></h1>
+<div class="subtitle">Lantern Music Player - build 260830, track composed in <a href="https://github.com/tildearrow/furnace" target="_blank" rel="noreferrer noopener">Furnace</a>.</div>
+
+<div class="shrine">
+  <div class="controls">
+    <button id="playBtn" type="button">▶ play</button>
+    <button id="pauseBtn" type="button" disabled>❚❚ pause</button>
+    <button id="stopBtn" type="button" disabled>■ stop</button>
+    <button id="downloadFurBtn" type="button" title="download the original Furnace module (.fur)">⇩ .fur</button>
+    <button id="exportMidiBtn" type="button" title="download this composition as a Standard MIDI File, for use in a DAW">⇩ export MIDI</button>
+    <button id="downloadWavBtn" type="button" title="download the full mixed song as .wav">⇩ WAV</button>
+  </div>
+
+  <div class="panels">
+    <div class="fields" id="legend"></div>
+
+    <div class="sidebar">
+      <div class="field" id="field-cover-art">
+        <div class="field-header" data-toggle="cover-art" data-explain="cover-art">
+          <span class="flabel">Cover Art</span>
+          <span class="field-summary">click to save a PNG</span>
+          <span class="collapse-arrow">▾</span>
+        </div>
+        <div class="field-body">
+          <div class="cover-art-wrap">
+            <canvas id="coverArt" width="240" height="240" title="jet trails fire whenever a note triggers — during playback or a preview click — coloured and sized by that note's instrument and volume. Click to save the current frame as a 1600×1600 PNG."></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="explainer" id="explainer">
+        <div class="explain-title" id="explainTitle">Explainer</div>
+        <div class="explain-body" id="explainBody">Hover a card's title bar, an instrument row, or a cell inside the pattern grid, to see exactly what that part of the tracker data means — with the live value where one applies.</div>
+      </div>
+      <div class="fields" id="sideLegend"></div>
+    </div>
+  </div>
+
+  <footer>
+    <span>Music License: CC0 / Public Domain  ·  Code License: MIT · <a href="https://github.com/johnoestmannmusic/1000-shrines-of-spirit" target="_blank" rel="noreferrer noopener">view source</a></span>
+    <span><a href="https://johnoestmannmusic.com" target="_blank" rel="noreferrer noopener">johnoestmannmusic.com</a></span>
+  </footer>
+</div>
+
+<script id="fur-json" type="application/json">
+{"assetDirs":{"ins":[{"assets":[0,1,2,3,4,5,6,7,8,9],"name":""}],"wave":[{"assets":[0,1,2],"name":""}]},"chips":[{"flags":null,"frontRear":0.0,"id":6,"name":"Game Boy","panning":0.0,"volume":1.0}],"instruments":[{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":4,"envVol":13,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"name":"Bass 1","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":4,"envVol":13,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"macros":[{"code":2,"data":[3],"delay":0,"instantRelease":false,"length":1,"loop":255,"mode":0,"open":1,"release":255,"speed":1,"type":0,"wordSize":0}],"name":"Mid 1","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":2,"envVol":15,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":true,"soundLen":64},"name":"Lead 1","type":2,"waveSynth":{"effect":0,"enabled":true,"global":false,"oneShot":false,"param1":0,"param2":0,"param3":0,"param4":0,"rateDivider":1,"speed":0,"wave1":0,"wave2":0}},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":1,"envVol":8,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"name":"Perc 1","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":2,"envVol":15,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":true,"soundLen":64},"name":"Lead 2","type":2,"waveSynth":{"effect":0,"enabled":true,"global":false,"oneShot":false,"param1":0,"param2":0,"param3":0,"param4":0,"rateDivider":1,"speed":0,"wave1":1,"wave2":0}},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":2,"envVol":15,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":true,"soundLen":64},"name":"Lead 3","type":2,"waveSynth":{"effect":0,"enabled":true,"global":false,"oneShot":false,"param1":0,"param2":0,"param3":0,"param4":0,"rateDivider":1,"speed":0,"wave1":2,"wave2":0}},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":4,"envVol":12,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"macros":[{"code":2,"data":[1],"delay":0,"instantRelease":false,"length":1,"loop":255,"mode":0,"open":1,"release":255,"speed":1,"type":0,"wordSize":0}],"name":"Mid 2","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":4,"envVol":13,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"macros":[{"code":2,"data":[0],"delay":0,"instantRelease":false,"length":1,"loop":255,"mode":0,"open":1,"release":255,"speed":1,"type":0,"wordSize":0}],"name":"Mid 3","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":5,"envVol":3,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"name":"Perc Long","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":5,"envVol":11,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"name":"Night Harmonies","type":2}],"patchbay":{"auto":true,"connections":[0,65537,4290772992,4290838529,4290904066,4290969603,4291035140,4291100677,4291166214,4291231751,4291297288,4291362825,4291428362,4291493899,4291559436,4291624973,4291690510,4291756047,4291821568,4291821569,4291821570,4291821571,4291821572,4291821573,4291821574,4291821575,4291821576,4291821577,4291821578,4291821579,4291821580,4291821581,4291821582,4291821583,4292870144,4292870145,4292870146,4292870147,4292870148,4292870149,4292870150,4292870151,4292870152,4292870153,4292870154,4292870155,4292870156,4292870157,4292870158,4292870159]},"samples":null,"songInfo":{"album":"1000 - shrines - /of/ - SPIRIT","author":"John Oestmann","comments":"Remix of flight_school from my album \"minimal_worlds_ii\"\n\nMusic License: CC0 / Public Domain\nCode License: MIT","instrumentCount":10,"name":"flight_school - Night Shift","sampleCount":0,"system":[true,"Game Boy"],"tuning":440.0,"version":251,"wavetableCount":3},"subsongs":[{"channelData":[{"collapse":0,"effectColumns":1,"name":"","shortName":"","show":{"chanOsc":true,"pattern":true}},{"collapse":0,"effectColumns":1,"name":"","shortName":"","show":{"chanOsc":true,"pattern":true}},{"collapse":0,"effectColumns":1,"name":"","shortName":"","show":{"chanOsc":true,"pattern":true}},{"collapse":0,"effectColumns":1,"name":"","shortName":"","show":{"chanOsc":true,"pattern":true}}],"highlights":[4,16],"name":"","notes":"","orderLength":13,"orders":[[0,1,2,3,5,10,11,12,13,6,7,8,9],[0,1,2,3,5,10,11,12,13,6,7,8,9],[0,1,2,3,5,10,11,12,13,6,7,8,9],[0,1,2,3,5,10,11,12,13,6,7,8,9]],"patternLength":64,"patterns":[[{"rows":[{"ins":0,"note":89},{},{},{},{},{},{"ins":0,"note":91},{},{},{},{},{},{},{},{},{},{"ins":0,"note":95},{},{},{},{},{},{"ins":0,"note":96},{},{},{},{},{},{},{},{},{},{"ins":0,"note":89},{},{},{},{},{},{"ins":0,"note":91},{},{},{},{},{},{},{},{},{},{"ins":0,"note":88},{},{},{},{},{},{"ins":0,"note":89},{},{},{},{},{},{},{},{},{}]},{"rows":[{"ins":0,"note":89},{},{},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{},{},{},{},{"ins":0,"note":98},{},{"ins":0,"note":91},{}]},{"rows":[{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253}]},{"rows":[{"ins":0,"note":89},{},{},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{},{},{},{},{"ins":0,"note":98},{},{"ins":0,"note":91},{}]},null,{"rows":[{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253}]},{"rows":[{"ins":0,"note":89},{},{},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{},{},{},{},{"ins":0,"note":98},{},{"ins":0,"note":91},{}]},{"rows":[{"ins":0,"note":89},{},{},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{},{},{},{},{"ins":0,"note":98},{},{"ins":0,"note":91},{}]},{"rows":[{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253}]},{"rows":[{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253}]},{"rows":[{"ins":0,"note":89},{},{},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{"ins":0,"note":100},{"note":253},{"ins":0,"note":100},{"note":253},{"ins":0,"note":98},{},{},{}]},{"rows":[{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253}]},{"rows":[{"ins":0,"note":89},{},{},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":89},{},{"effects":[{"code":1,"value":8}],"ins":4,"note":90},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{},{},{},{},{"ins":0,"note":91},{},{},{}]},{"rows":[{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253}]},null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],[{"rows":[{"ins":1,"note":96},{},{},{},{},{},{"ins":1,"note":98},{},{},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{},{}]},{"rows":[{"ins":1,"note":96},{},{},{},{"ins":9,"note":108},{},{},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{"ins":9,"note":115},{},{},{},{"ins":9,"note":117},{},{"ins":1,"note":119},{},{"ins":1,"note":120},{},{},{},{"ins":1,"note":120},{},{},{},{},{},{"ins":1,"note":119},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":96},{},{},{},{"ins":9,"note":108},{},{},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{"ins":9,"note":115},{},{},{},{"ins":9,"note":117},{},{"ins":1,"note":119},{},{"ins":1,"note":120},{},{},{},{"ins":1,"note":120},{},{},{},{},{},{"ins":1,"note":119},{},{"ins":9,"note":103},{}]},null,{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":96},{},{},{},{"ins":9,"note":108},{},{},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{"ins":9,"note":115},{},{},{},{"ins":9,"note":117},{},{"ins":1,"note":119},{},{"ins":1,"note":120},{},{},{},{"ins":1,"note":120},{},{},{},{},{},{"ins":1,"note":119},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":96},{},{},{},{"ins":9,"note":108},{},{},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{"ins":9,"note":115},{},{},{},{"ins":9,"note":117},{},{"ins":1,"note":119},{},{"ins":1,"note":120},{},{},{},{"ins":1,"note":120},{},{},{},{},{},{"ins":1,"note":119},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{"ins":9,"note":103},{"ins":9,"note":105}]},{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{"ins":9,"note":103},{"ins":9,"note":105}]},{"rows":[{"ins":1,"note":110},{},{"ins":1,"note":112},{},{},{},{"ins":9,"note":108},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{},{},{"ins":1,"note":120},{},{"ins":1,"note":110},{},{"ins":1,"note":108},{},{"ins":9,"note":120},{},{},{},{"ins":1,"note":110},{},{"ins":9,"note":122},{},{"ins":9,"note":127},{},{},{},{"ins":9,"note":129},{},{"ins":1,"note":131},{},{"ins":1,"note":132},{},{},{},{"ins":1,"note":132},{},{},{},{},{},{"ins":1,"note":131},{},{},{}]},{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":108},{},{},{},{"ins":9,"note":120},{},{},{},{},{},{"ins":9,"note":119},{},{},{},{},{},{"ins":1,"note":115},{},{"ins":9,"note":122},{},{},{},{"ins":9,"note":115},{},{},{},{"ins":1,"note":112},{},{},{},{"ins":1,"note":110},{},{"ins":4,"note":110},{},{},{},{"effects":[{"code":1,"value":8}],"ins":4,"note":114},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":115},{},{},{},{"ins":9,"note":127},{},{},{},{"ins":9,"note":129},{},{"ins":1,"note":131},{},{"ins":1,"note":132},{},{},{},{"ins":1,"note":132},{},{},{},{},{},{"ins":9,"note":115},{},{},{}]},{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{"ins":9,"note":103},{}]},null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],[{"rows":[{},{},{},{},{"ins":2,"note":124,"vol":15},{"vol":13},{"note":253,"vol":12},{"vol":11},{"ins":2,"note":124,"vol":10},{"vol":8},{"vol":7},{"vol":6},{"vol":5},{"vol":3},{"vol":2},{"vol":1},{"vol":0},{},{},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"note":253,"vol":12},{"vol":11},{"ins":2,"note":122,"vol":10},{"vol":8},{"vol":7},{"vol":6},{"vol":5},{"vol":3},{"vol":2},{"vol":1},{"vol":0},{},{},{},{"ins":2,"note":124,"vol":15},{"vol":13},{"note":253,"vol":12},{"vol":11},{"ins":2,"note":124,"vol":10},{"vol":8},{"vol":7},{"vol":6},{"vol":5},{"vol":3},{"vol":2},{"vol":1},{"vol":0},{},{},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"note":253,"vol":12},{"vol":11},{"ins":2,"note":122,"vol":10},{"vol":8},{"vol":7},{"vol":6},{"vol":5},{"vol":3},{"vol":2},{"vol":1}]},{"rows":[{"effects":[{"code":4,"value":131}],"ins":5,"note":127,"vol":15},{},{},{},{},{},{},{},{"vol":13},{},{"vol":11},{},{"vol":9},{},{"vol":5},{},{"ins":5,"note":127,"vol":15},{},{"ins":5,"note":131},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":5,"note":132},{},{"ins":2,"note":122,"vol":10},{"vol":8},{},{},{"ins":5,"note":139,"vol":15},{},{},{},{},{},{"effects":[{"code":2,"value":6}]},{},{"effects":[{"code":2,"value":0}],"ins":5,"note":136},{},{"vol":12},{"vol":11},{"vol":10},{"vol":8},{"ins":5,"note":132,"vol":15},{},{},{},{"ins":5,"note":134,"vol":15},{"note":253},{"ins":5,"note":139},{},{"ins":5,"note":141},{},{},{"effects":[{"code":2,"value":10}]},{"effects":[{"code":2,"value":0}],"ins":5,"note":136},{},{},{"vol":12},{"vol":10},{"vol":8},{"ins":5,"note":134,"vol":15},{},{},{}]},{"rows":[{},{},{},{},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":134,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8}]},{"rows":[{"effects":[{"code":4,"value":131}],"ins":5,"note":127,"vol":15},{},{},{},{},{},{"ins":5,"note":129,"vol":15},{},{"vol":10},{"vol":8},{"vol":15},{},{"ins":5,"note":124,"vol":15},{},{},{"ins":4,"note":124,"vol":10},{"ins":4,"note":127,"vol":15},{},{"ins":4,"note":131},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":4,"note":132,"vol":15},{},{"ins":2,"note":122,"vol":10},{"vol":8},{"ins":4,"note":134,"vol":15},{},{"ins":4,"note":139},{},{},{},{},{},{"effects":[{"code":2,"value":6}]},{},{"effects":[{"code":2,"value":0}],"ins":4,"note":136,"vol":15},{},{"vol":12},{"vol":11},{"ins":2,"note":124,"vol":10},{"vol":8},{"ins":4,"note":132,"vol":15},{},{"note":253},{},{"ins":4,"note":134},{"note":253},{"ins":4,"note":139},{},{"ins":4,"note":141},{},{},{"effects":[{"code":2,"value":10}]},{"effects":[{"code":2,"value":0}],"ins":4,"note":136},{},{"ins":2,"note":122,"vol":10},{"vol":8},{"vol":7},{},{"ins":4,"note":134,"vol":15},{},{},{}]},null,{"rows":[{"vol":15},{"vol":12},{"vol":10},{"vol":8},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":134,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8}]},{"rows":[{"ins":5,"note":131,"vol":15},{},{"ins":4,"note":127},{},{"ins":4,"note":132},{},{},{},{},{},{},{},{"ins":4,"note":127,"vol":15},{},{},{},{"ins":4,"note":134},{},{},{"note":253},{"ins":4,"note":134,"vol":10},{},{},{"note":253},{"ins":4,"note":134,"vol":7},{},{},{"note":253},{"ins":4,"note":134,"vol":3},{},{},{"note":253},{"ins":5,"note":131,"vol":15},{},{"ins":4,"note":127},{},{"ins":4,"note":132},{},{},{},{},{},{},{},{"ins":4,"note":127,"vol":15},{},{},{},{"ins":4,"note":134},{},{},{"note":253},{"ins":4,"note":134,"vol":10},{},{},{"note":253},{"ins":4,"note":134,"vol":7},{},{"effects":[{"code":1,"value":9}]},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":139,"vol":15},{},{},{}]},{"rows":[{"ins":5,"note":131},{},{"ins":4,"note":127},{},{"ins":4,"note":132},{},{},{},{},{},{},{"note":253},{"ins":4,"note":127,"vol":15},{"note":253},{"ins":4,"note":131},{"note":253},{"ins":4,"note":134},{},{},{"note":253},{"ins":4,"note":134,"vol":10},{},{},{"note":253},{"ins":4,"note":134,"vol":7},{},{},{"note":253},{"ins":4,"note":134,"vol":3},{},{},{"note":253},{"ins":4,"note":131,"vol":15},{},{"ins":4,"note":127},{},{"ins":4,"note":132},{},{},{},{},{},{},{"note":253},{"ins":4,"note":127,"vol":15},{"note":253},{"ins":4,"note":131},{},{"ins":4,"note":134},{},{},{"note":253},{"ins":4,"note":134,"vol":10},{},{},{"note":253},{"ins":4,"note":134,"vol":7},{},{"effects":[{"code":1,"value":9}]},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":139,"vol":15},{},{},{}]},{"rows":[{},{},{},{},{"ins":4,"note":132},{},{},{},{},{},{},{},{"ins":4,"note":137},{},{},{},{},{},{},{},{"ins":4,"note":136},{},{},{},{},{},{"effects":[{"code":2,"value":8}]},{},{"effects":[{"code":2,"value":0}],"ins":4,"note":131},{},{},{},{},{},{},{},{"ins":4,"note":132},{},{},{},{},{},{},{},{"ins":4,"note":137},{},{},{},{},{},{},{},{"ins":4,"note":136},{},{},{},{},{},{},{},{"ins":4,"note":131},{},{},{}]},{"rows":[{},{},{},{},{"ins":4,"note":132},{},{},{},{"ins":2,"note":143},{},{"ins":5,"note":139},{},{"ins":4,"note":131},{},{"ins":4,"note":127},{},{"ins":4,"note":134},{},{},{},{"ins":2,"note":136},{},{"ins":5,"note":137},{},{"ins":2,"note":136},{},{"ins":5,"note":134},{},{"ins":5,"note":131},{},{},{},{"ins":4,"note":131},{},{"ins":4,"note":127},{},{"ins":4,"note":132},{},{},{},{"ins":2,"note":143},{},{"ins":5,"note":136},{},{"ins":4,"note":127},{},{"ins":4,"note":131},{},{"ins":4,"note":134},{},{},{},{"ins":2,"note":136},{},{"ins":5,"note":137},{},{"ins":2,"note":136},{},{"ins":5,"note":134},{},{"effects":[{"code":1,"value":6}],"ins":4,"note":137},{"effects":[{"code":1,"value":0}],"ins":4,"note":139},{},{}]},{"rows":[{"ins":4,"note":127,"vol":15},{},{},{},{},{},{"ins":4,"note":124,"vol":15},{},{"vol":10},{"vol":8},{"ins":4,"note":129,"vol":15},{},{},{},{},{"ins":4,"note":124},{"ins":4,"note":127},{},{"ins":4,"note":131},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":4,"note":132,"vol":15},{},{"ins":4,"note":131,"vol":15},{"note":253},{"ins":4,"note":132,"vol":15},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":139,"vol":15},{},{},{},{"ins":4,"note":139},{"note":253},{"ins":4,"note":143},{},{"ins":4,"note":144},{"note":253},{"ins":4,"note":146},{},{},{},{"effects":[{"code":2,"value":10}]},{},{"effects":[{"code":2,"value":0}],"ins":4,"note":136},{},{"ins":4,"note":134},{},{"ins":4,"note":139},{},{"ins":4,"note":141},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":4,"note":136,"vol":15},{},{},{"vol":12},{"ins":2,"note":122,"vol":15},{"vol":8},{"ins":4,"note":134,"vol":15},{},{},{}]},{"rows":[{"vol":15},{"vol":12},{"vol":10},{"vol":8},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":134,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8}]},{"rows":[{"ins":4,"note":127,"vol":15},{},{},{},{"ins":2,"note":124,"vol":15},{},{},{},{"vol":10},{"vol":8},{"ins":4,"note":127,"vol":15},{},{},{},{},{"ins":4,"note":124},{"ins":4,"note":127},{},{"ins":4,"note":131},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":4,"note":132,"vol":15},{},{"effects":[{"code":1,"value":8}]},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":139},{},{},{},{},{},{"ins":4,"note":139},{"note":253},{"effects":[{"code":1,"value":8}],"ins":4,"note":143},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":144},{},{},{},{},{},{"effects":[{"code":2,"value":10}]},{},{"effects":[{"code":2,"value":0}],"ins":4,"note":136},{},{"ins":4,"note":134},{"note":253},{"ins":4,"note":139},{},{"ins":4,"note":141},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":4,"note":136,"vol":15},{},{},{"vol":12},{"vol":10},{"vol":8},{"ins":4,"note":134,"vol":15},{},{},{}]},{"rows":[{"effects":[{"code":2,"value":6}]},{"effects":[{"code":2,"value":0}],"ins":4,"note":132},{},{},{"effects":[{"code":2,"value":0}],"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":134,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":134,"vol":15},{"vol":14},{"vol":13},{}]},null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],[{"rows":[{"ins":8,"note":124},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{"ins":8,"note":124},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{"ins":8,"note":124},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{"ins":8,"note":124},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{},{},{},{},{"ins":3,"note":124},{"note":253},{},{}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},null,{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{},{},{},{},{},{},{},{},{},{"ins":8,"note":124},{},{},{},{"ins":8,"note":124},{},{},{},{},{},{},{},{},{},{"ins":8,"note":124},{},{},{},{},{},{"ins":8,"note":124},{},{},{},{},{},{},{},{},{},{},{},{"ins":8,"note":124},{},{},{},{"ins":8,"note":124},{},{},{},{},{},{},{},{},{},{},{},{"ins":8,"note":124},{},{},{}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{},{},{"ins":8,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{"ins":8,"note":124},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{"ins":8,"note":124},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{"ins":8,"note":124},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{},{},{}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]],"speeds":[6],"tickRate":47.20000076293945,"virtualTempo":[150,150]}],"wavetables":[{"data":[3,5,7,8,10,12,13,14,15,15,9,12,15,15,15,12,5,3,2,1,0,0,0,0,1,2,3,4,5,6,7,7],"len":32,"max":15},{"data":[0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14,15,15],"len":32,"max":15},{"data":[14,14,14,14,14,14,14,14,14,14,14,14,11,11,11,11,11,11,11,11,11,11,11,2,2,2,2,2,2,2,2,2],"len":32,"max":15}]}
+</script>
+
+<script>
+(function(){
+  "use strict";
+
+  // --- Stage A: load the embedded Furnace JSON export and read its
+  // top-level shape into a raw "FurModule" object. This stays a plain
+  // reshape of Furnace's own export, not a binary parser (see the shrine's
+  // plan for why JSON was chosen over .fur for v1).
+  var FUR_JSON = JSON.parse(document.getElementById('fur-json').textContent);
+
+  function readFurModule(json){
+    return {
+      songInfo: json.songInfo,
+      chips: json.chips,
+      instruments: json.instruments,
+      wavetables: json.wavetables,
+      subsong: json.subsongs[0]
+    };
+  }
+  var mod = readFurModule(FUR_JSON);
+
+  // --- Normalize the raw module into a chip-agnostic SongModel.
+  // channels[]/patterns[]/instruments[] deliberately don't assume Game Boy
+  // anywhere in their shape — this page doesn't synthesize audio at all
+  // (it plays Furnace's own real-recorded stems, see the transport code
+  // below), but the data stays chip-agnostic anyway since it also drives
+  // the Instruments/Patterns/Wavetables interrogation panel, which needs
+  // to describe whatever chip the export is actually from.
+  //
+  // Note encoding, reverse-engineered against flight-school.txt's note names
+  // (F-2, C-3, E-5, ...): note = octave*12 + semitone + 60, and the sentinel
+  // value 253 is "note off" (confirmed against every "OFF" in the .txt
+  // dump). No other sentinel values appear in this song.
+  var NOTE_NAMES = ['C-','C#','D-','D#','E-','F-','F#','G-','G#','A-','A#','B-'];
+  var NOTE_OFF = 253;
+  function noteToName(n){
+    if(n===null || n===undefined) return null;
+    if(n===NOTE_OFF) return 'OFF';
+    var rel = n-60;
+    var semi = ((rel%12)+12)%12;
+    var oct = Math.floor(rel/12);
+    return NOTE_NAMES[semi]+oct;
+  }
+  function hex2(n){ return (n===null||n===undefined) ? '..' : (n<16?'0':'')+n.toString(16).toUpperCase(); }
+  // Furnace's own octave labels run one higher than scientific pitch
+  // notation (its "A-5" is the tuning reference, not scientific "A4") —
+  // reverse-engineered the same way as noteToName, by matching known note
+  // numbers against the .txt export's names. REF is that A-5 note number.
+  var A_REF_NOTE = 60 + 5*12 + 9;
+  function noteToFreq(n, tuning){
+    if(n===null || n===undefined || n===NOTE_OFF) return null;
+    return tuning * Math.pow(2, (n - A_REF_NOTE)/12);
+  }
+  // Human-readable meaning of the core tracker effect codes — for the
+  // Patterns panel's explainer only. The real audio comes from Furnace's
+  // own recorded stems (this page doesn't synthesize anything), so these
+  // descriptions exist purely to explain what each effect *did* to produce
+  // what you're hearing, confirmed against Furnace's own effect docs. Only
+  // 01/02 (pitch slide) and 04 (vibrato) actually appear in flight_school
+  // itself; the rest are documented for other songs that might reuse this
+  // page. Codes outside this set still parse fine — normalizeCell keeps
+  // every effect — they just don't have a friendly name yet.
+  var CORE_EFFECTS = {
+    0: 'Arpeggio — cycles rapidly between this note and two offsets (nibbles below) each tick, faking a chord on one channel.',
+    1: 'Pitch Up — slides pitch upward continuously by the given amount each tick, until cleared with value 00 or a plain new note.',
+    2: 'Pitch Down — slides pitch downward continuously by the given amount each tick, until cleared with value 00 or a plain new note.',
+    3: 'Tone Portamento — glides smoothly from whatever note was playing to this row\'s new note, at the given speed, instead of retriggering.',
+    4: 'Vibrato — oscillates pitch using the nibbles below as speed/depth (max depth ±1 semitone).',
+    8: 'Panning — sets this channel\'s LEFT and RIGHT volume independently (nibbles below: left/right, 0–15 each) — not a single left↔right position.',
+    10: 'Volume Slide — ramps this channel\'s volume up or down each tick (nibbles below).',
+    11: 'Position Jump — after this row, playback continues at a different order position.',
+    13: 'Pattern Break — ends the current pattern early and jumps to the given row of the next order.'
+  };
+
+  function buildSongModel(mod){
+    var ss = mod.subsong;
+    var channels = ss.channelData.map(function(cd, ch){
+      return {
+        index: ch,
+        effectColumns: cd.effectColumns,
+        orderList: ss.orders[ch].slice(),
+        patterns: ss.patterns[ch] // sparse: patterns[patternIndex] = {rows:[...]} | null, indexed as Furnace stores it
+      };
+    });
+    return {
+      meta: {
+        name: mod.songInfo.name, author: mod.songInfo.author, album: mod.songInfo.album,
+        system: mod.songInfo.system && mod.songInfo.system[1], tuning: mod.songInfo.tuning,
+        formatVersion: mod.songInfo.version, comments: mod.songInfo.comments || '',
+        tickRate: ss.tickRate, speeds: ss.speeds, virtualTempo: ss.virtualTempo,
+        highlights: ss.highlights, orderLength: ss.orderLength, patternLength: ss.patternLength
+      },
+      chips: mod.chips,
+      channels: channels,
+      instruments: mod.instruments,
+      wavetables: mod.wavetables
+    };
+  }
+  // Normalize one raw pattern-cell into a fixed shape: note name/raw, ins,
+  // vol, and an effects array padded out to the channel's effect-column
+  // count (so the table always has a stable number of fx cells).
+  function normalizeCell(raw, effectColumns){
+    raw = raw || {};
+    var effects = [];
+    for(var i=0;i<effectColumns;i++){
+      var e = (raw.effects||[])[i];
+      effects.push(e ? {code:e.code, value:e.value} : null);
+    }
+    return {
+      noteRaw: raw.note===undefined ? null : raw.note,
+      noteName: raw.note===undefined ? null : noteToName(raw.note),
+      instrument: raw.ins===undefined ? null : raw.ins,
+      volume: raw.vol===undefined ? null : raw.vol,
+      effects: effects
+    };
+  }
+
+  var song = buildSongModel(mod);
+
+  // --- instrument colors: auto-assigned in a rainbow on import (golden-angle
+  // hue step, so even a handful of instruments look visually distinct rather
+  // than bunching up), editable afterward from the Instruments card. ---
+  function hslToHex(h, s, l){
+    s/=100; l/=100;
+    var c=(1-Math.abs(2*l-1))*s, x=c*(1-Math.abs((h/60)%2-1)), m=l-c/2, r,g,b;
+    if(h<60){r=c;g=x;b=0;} else if(h<120){r=x;g=c;b=0;} else if(h<180){r=0;g=c;b=x;}
+    else if(h<240){r=0;g=x;b=c;} else if(h<300){r=x;g=0;b=c;} else {r=c;g=0;b=x;}
+    function ch(v){ var hx=Math.round((v+m)*255).toString(16); return hx.length<2?'0'+hx:hx; }
+    return '#'+ch(r)+ch(g)+ch(b);
+  }
+  song.instruments.forEach(function(ins, i){
+    if(!ins.color){
+      var hue = Math.round((i*137.508)%360);
+      ins.color = hslToHex(hue, 65, 55);
+    }
+  });
+
+  // --- per-channel instrument timeline: which instrument is "active" at
+  // every row across the WHOLE song's play order (not just whatever pattern
+  // is currently displayed), so the pattern grid's colour-tint is correct
+  // even when jumping straight to a later order position. An instrument
+  // stays active until either a NOTE OFF (tint clears) or a new INS value
+  // (tint switches) — matches how the channel actually keeps sounding it. ---
+  function buildInstrumentTimeline(ch){
+    var timeline = [];
+    var current = null;
+    ch.orderList.forEach(function(pIdx){
+      var pat = ch.patterns[pIdx];
+      var rows = (pat && pat.rows) ? pat.rows : [];
+      var arr = [];
+      for(var r=0;r<song.meta.patternLength;r++){
+        var raw = rows[r];
+        if(raw){
+          if(raw.ins!==undefined) current = raw.ins;
+          if(raw.note===NOTE_OFF) current = null;
+        }
+        arr.push(current);
+      }
+      timeline.push(arr);
+    });
+    return timeline;
+  }
+  song.channels.forEach(function(ch){ ch.insTimeline = buildInstrumentTimeline(ch); });
+
+  // --- per-channel note timeline: same forward-walk as insTimeline above,
+  // but recording the actual held note number instead of the instrument
+  // index — what the Piano Roll needs to know exactly which pitch is
+  // sounding on each channel at any row, independent of which instrument
+  // is playing it. ---
+  function buildNoteTimeline(ch){
+    var timeline = [];
+    var current = null;
+    ch.orderList.forEach(function(pIdx){
+      var pat = ch.patterns[pIdx];
+      var rows = (pat && pat.rows) ? pat.rows : [];
+      var arr = [];
+      for(var r=0;r<song.meta.patternLength;r++){
+        var raw = rows[r];
+        if(raw && raw.note!==undefined) current = (raw.note===NOTE_OFF) ? null : raw.note;
+        arr.push(current);
+      }
+      timeline.push(arr);
+    });
+    return timeline;
+  }
+  song.channels.forEach(function(ch){ ch.noteTimeline = buildNoteTimeline(ch); });
+
+  // --- Piano Roll key range & geometry: sized to just the notes this song
+  // actually uses (plus a little headroom) rather than a full 88-key
+  // keyboard, computed once at load. Black/white classification reuses
+  // NOTE_NAMES' own sharp/natural convention so it lines up with every
+  // other note-name display on this page. Black keys are centered evenly
+  // on the boundary between their neighbouring white keys — a common
+  // simplification for canvas keyboards; a real piano widens the E-F/B-C
+  // gaps slightly, which this doesn't reproduce. ---
+  var PIANO_ROLL_PAD = 2; // semitones of headroom either side of the used range
+  var PIANO_WHITE_KEY_W = 14, PIANO_WHITE_KEY_H = 60, PIANO_BLACK_KEY_W = 9, PIANO_BLACK_KEY_H = 36;
+  var PIANO_BLACK_SEMITONES = {1:true,3:true,6:true,8:true,10:true}; // rel%12 values that are '#' in NOTE_NAMES
+  function computeNoteRange(){
+    var min = null, max = null;
+    // Channel 3 (Noise) is excluded — it's not tonal, doesn't appear on the
+    // Piano Roll at all (see the Noise box instead), and its note values
+    // would otherwise skew the keyboard's range for no musical reason.
+    song.channels.slice(0,3).forEach(function(ch){
+      ch.noteTimeline.forEach(function(arr){
+        arr.forEach(function(n){
+          if(n!==null){
+            if(min===null || n<min) min = n;
+            if(max===null || n>max) max = n;
+          }
+        });
+      });
+    });
+    if(min===null){ min = A_REF_NOTE-12; max = A_REF_NOTE+12; } // no notes at all — shouldn't happen, safe fallback
+    return { min: min-PIANO_ROLL_PAD, max: max+PIANO_ROLL_PAD };
+  }
+  var pianoRollRange = computeNoteRange();
+  function computePianoKeyGeometry(range){
+    var geo = {}, whiteXs = {}, whiteIdx = 0, n;
+    for(n=range.min; n<=range.max; n++){
+      var rel = n-60, semi = ((rel%12)+12)%12;
+      if(!PIANO_BLACK_SEMITONES[semi]){
+        geo[n] = { white:true, x: whiteIdx*PIANO_WHITE_KEY_W, w: PIANO_WHITE_KEY_W, h: PIANO_WHITE_KEY_H };
+        whiteXs[n] = whiteIdx*PIANO_WHITE_KEY_W;
+        whiteIdx++;
+      }
+    }
+    for(n=range.min; n<=range.max; n++){
+      var rel2 = n-60, semi2 = ((rel2%12)+12)%12;
+      if(PIANO_BLACK_SEMITONES[semi2] && whiteXs[n-1]!==undefined){
+        geo[n] = { white:false, x: whiteXs[n-1]+PIANO_WHITE_KEY_W-PIANO_BLACK_KEY_W/2, w: PIANO_BLACK_KEY_W, h: PIANO_BLACK_KEY_H };
+      }
+    }
+    return { keys: geo, totalWidth: whiteIdx*PIANO_WHITE_KEY_W };
+  }
+  var pianoKeyGeo = computePianoKeyGeometry(pianoRollRange);
+  // Declared here (not next to drawPianoRoll/flashPianoKey further down,
+  // which also read/write these) because the initial drawPianoRoll() call
+  // right after the HTML is inserted runs much earlier in the script than
+  // that — var hoisting only hoists the declaration, not the `= {}`
+  // initializer, so a later declaration left these undefined for that
+  // first call (Object.keys(undefined) throws). Same reasoning as
+  // mutedChannels' own declaration-placement comment above.
+  var pianoRollActiveNotes = {}; // note -> color, from real playback position
+  var pianoRollFlashes = {}, pianoRollFlashTimers = {}; // note -> color, temporary
+  // Noise (channel 3) box — same sustained/flash split as the piano keys
+  // above, but for a single non-tonal channel shown as text (note name +
+  // instrument colour/name) rather than a lit key, since "which pitch" on
+  // Noise isn't a musically meaningful question the way it is for the
+  // other 3 channels.
+  var noiseActive = null, noiseFlash = null, noiseFlashTimer = null;
+
+  // Which channel each instrument actually gets played on in this song —
+  // read straight from the timeline rather than guessed, so the preview
+  // button uses the right synthesis path (duty/wave/noise) for GB-engine
+  // instruments. Falls back to channel 0 for an instrument that's never
+  // actually triggered anywhere.
+  song.instruments.forEach(function(ins, i){
+    ins._previewChannel = 0;
+    for(var c=0; c<song.channels.length; c++){
+      var tl = song.channels[c].insTimeline, found = false;
+      for(var op=0; op<tl.length && !found; op++){ if(tl[op].indexOf(i)!==-1) found = true; }
+      if(found){ ins._previewChannel = c; break; }
+    }
+  });
+
+  // --- card scaffolding: same collapsible .field pattern as 0004/js-explorer ---
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  function songFieldHTML(){
+    var m = song.meta;
+    return '<div class="field" id="field-song">'+
+      '<div class="field-header" data-toggle="song" data-explain="song">'+
+        '<span class="flabel">Song</span>'+
+        '<span class="field-summary">'+esc(m.name)+' — '+esc(m.author)+'</span>'+
+        '<span class="collapse-arrow">▾</span>'+
+      '</div>'+
+      '<div class="field-body"><div class="song-line">'+
+        '<b>'+esc(m.name||'(untitled)')+'</b> — '+esc(m.author||'')+
+        (m.album ? ' · '+esc(m.album) : '')+
+        ' · '+esc(m.system||'')+
+        ' · tuning '+m.tuning+'Hz · format v'+m.formatVersion+
+      '</div></div>'+
+    '</div>';
+  }
+  // Only rendered when the composer actually wrote something — an empty
+  // box would just be clutter for a future song reusing this page with
+  // no comments field filled in.
+  function commentsFieldHTML(){
+    var c = song.meta.comments;
+    if(!c || !c.trim()) return '';
+    return '<div class="field" id="field-comments">'+
+      '<div class="field-header" data-toggle="comments" data-explain="comments">'+
+        '<span class="flabel">Song Comments</span>'+
+        '<span class="collapse-arrow">▾</span>'+
+      '</div>'+
+      '<div class="field-body"><div class="comments-text">'+esc(c)+'</div></div>'+
+    '</div>';
+  }
+  function timingFieldHTML(){
+    var m = song.meta;
+    return '<div class="field collapsed" id="field-timing">'+
+      '<div class="field-header" data-toggle="timing" data-explain="timing">'+
+        '<span class="flabel">Timing</span>'+
+        '<span class="field-summary">'+m.tickRate.toFixed(1)+'Hz · speed '+m.speeds.join('/')+'</span>'+
+        '<span class="collapse-arrow">▸</span>'+
+      '</div>'+
+      '<div class="field-body"><div class="kv">'+
+        '<div class="k">tick rate</div><div class="v">'+m.tickRate.toFixed(3)+'Hz</div>'+
+        '<div class="k">speed(s)</div><div class="v">'+m.speeds.join(', ')+'</div>'+
+        '<div class="k">virtual tempo</div><div class="v">'+m.virtualTempo.join(' / ')+'</div>'+
+        '<div class="k">highlights</div><div class="v">'+m.highlights.join(', ')+'</div>'+
+        '<div class="k">order length</div><div class="v">'+m.orderLength+'</div>'+
+        '<div class="k">pattern length</div><div class="v">'+m.patternLength+'</div>'+
+        '<div class="k">channels</div><div class="v">'+song.channels.length+'</div>'+
+      '</div></div>'+
+    '</div>';
+  }
+  function chipsFieldHTML(){
+    var rows = song.chips.map(function(c){
+      return '<div class="k">'+esc(c.name)+'</div><div class="v">vol '+c.volume+' · pan '+c.panning+' · front/rear '+c.frontRear+'</div>';
+    }).join('');
+    return '<div class="field collapsed" id="field-chips">'+
+      '<div class="field-header" data-toggle="chips" data-explain="chips">'+
+        '<span class="flabel">Chips</span>'+
+        '<span class="field-summary">'+song.chips.map(function(c){return c.name;}).join(', ')+'</span>'+
+        '<span class="collapse-arrow">▸</span>'+
+      '</div>'+
+      '<div class="field-body"><div class="kv">'+rows+'</div></div>'+
+    '</div>';
+  }
+  var GB_ROLE_HINT = { 0:'pulse 1', 1:'pulse 2', 2:'wave', 3:'noise' };
+  function instrumentsFieldHTML(){
+    var rows = song.instruments.map(function(ins, i){
+      var gb = ins.gb || {};
+      var previewBtn = '<button type="button" class="preview-btn" data-preview-ins="'+i+'" title="preview 2 rows of this instrument, from its first appearance in the song">▶</button>';
+      // Mini bar-graph of the raw wavetable this instrument points at —
+      // only Wave-channel instruments have one; the canvas is empty here
+      // and gets its pixels drawn in right after this HTML is inserted
+      // (a canvas can't carry pre-rendered content as a string).
+      var waveCell = '';
+      if(ins.waveSynth){
+        var w = song.wavetables[ins.waveSynth.wave1];
+        if(w) waveCell = '<canvas class="ins-wave-canvas" width="'+w.len+'" height="16" data-explain="wave-'+ins.waveSynth.wave1+'" data-wave-idx="'+ins.waveSynth.wave1+'" title="wavetable '+ins.waveSynth.wave1+'"></canvas>';
+      }
+      return '<tr data-explain="ins-'+i+'" data-ins-row="'+i+'">'+
+        '<td>'+previewBtn+'</td>'+
+        '<td><input type="color" class="ins-color-input" data-ins="'+i+'" value="'+ins.color+'" title="pattern-grid tint for this instrument"></td>'+
+        '<td>'+i+'</td><td>'+esc(ins.name||'(unnamed)')+'</td>'+
+        '<td>'+waveCell+'</td>'+
+        '<td>'+(gb.envVol!==undefined?gb.envVol:'')+'</td>'+
+        '<td>'+(gb.envDir!==undefined?(gb.envDir?'up':'down'):'')+'</td>'+
+        '<td>'+(gb.envLen!==undefined?gb.envLen:'')+'</td>'+
+        '<td>'+(gb.soundLen!==undefined?gb.soundLen:'')+'</td>'+
+        '<td>'+(gb.softEnv?'yes':'no')+'</td>'+
+        '<td>'+((ins.macros||[]).length?(ins.macros.length+' macro(s)'):'')+'</td>'+
+      '</tr>';
+    }).join('');
+    return '<div class="field" id="field-instruments">'+
+      '<div class="field-header" data-toggle="instruments" data-explain="instruments">'+
+        '<span class="flabel">Instruments</span>'+
+        '<span class="field-summary">'+song.instruments.length+'</span>'+
+        '<span class="collapse-arrow">▾</span>'+
+      '</div>'+
+      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th>Color</th><th>#</th><th>Name</th><th data-explain="wavetables" title="which wavetable this instrument\'s Wave channel points at, if any">Wave</th><th>Env</th><th>Dir</th><th>Len</th><th>SndLen</th><th>SoftEnv</th><th>Macros</th></tr></thead>'+
+      '<tbody>'+rows+'</tbody></table></div></div>'+
+    '</div>';
+  }
+  function pianoRollFieldHTML(){
+    return '<div class="field" id="field-piano-roll">'+
+      '<div class="field-header" data-toggle="piano-roll" data-explain="piano-roll">'+
+        '<span class="flabel">Piano Roll</span>'+
+        '<span class="field-summary">keys currently sounding</span>'+
+        '<span class="collapse-arrow">▾</span>'+
+      '</div>'+
+      '<div class="field-body">'+
+        '<div class="piano-roll-row">'+
+          '<div class="piano-roll-scroll"><canvas id="pianoRollCanvas" class="piano-roll-canvas"></canvas></div>'+
+          '<div class="noise-box" title="CH3 · noise isn\'t tonal, so it doesn\'t light up a key — shown here instead">'+
+            '<span class="noise-box-label">Noise</span>'+
+            '<span class="noise-box-note" id="noiseBoxNote">—</span>'+
+            '<span class="noise-box-ins" id="noiseBoxIns"></span>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }
+  function patternsFieldHTML(){
+    var opts = song.channels[0].orderList.map(function(pIdx, op){
+      return '<option value="'+op+'">'+op+' (pattern '+pIdx+')</option>';
+    }).join('');
+    var chanHeadCells = song.channels.map(function(ch){
+      return '<th class="chan-head" colspan="'+(3+ch.effectColumns)+'" data-explain="chan-'+ch.index+'" data-chan-mute="'+ch.index+'" title="click to mute/unmute this channel">CH'+ch.index+' · '+(GB_ROLE_HINT[ch.index]||'')+'</th>';
+    }).join('');
+    var subHeadCells = song.channels.map(function(ch){
+      var fxHeads = '';
+      for(var i=0;i<ch.effectColumns;i++) fxHeads += '<th>'+(ch.effectColumns>1?'fx'+(i+1):'fx')+'</th>';
+      return '<th>note</th><th>ins</th><th>vol</th>'+fxHeads;
+    }).join('');
+    return '<div class="field" id="field-patterns">'+
+      '<div class="field-header" data-toggle="patterns" data-explain="patterns">'+
+        '<span class="flabel">Patterns</span>'+
+        '<span class="field-summary">'+song.meta.orderLength+' orders × '+song.meta.patternLength+' rows</span>'+
+        '<span class="collapse-arrow">▾</span>'+
+      '</div>'+
+      '<div class="field-body">'+
+        '<div class="order-row">order '+
+          '<div class="order-picker" id="orderPicker">'+
+            '<button type="button" class="order-picker-btn" id="orderPickerBtn" aria-haspopup="listbox">'+
+              '<span id="orderPickerNum">0</span>'+
+              '<span class="order-swatch" id="orderPickerSwatch"></span>'+
+              '<span class="order-picker-arrow">▾</span>'+
+            '</button>'+
+            '<div class="order-picker-list" id="orderPickerList" role="listbox"></div>'+
+          '</div>'+
+          '<select id="orderSelect" style="display:none">'+opts+'</select>'+
+          '<label class="tint-toggle"><input type="checkbox" id="tintToggle" checked> colour-code instruments</label>'+
+          '<label class="tint-toggle"><input type="checkbox" id="linesToggle" checked> note/beat lines</label>'+
+        '</div>'+
+        '<div class="pattern-scroll"><table class="pat-table" id="patTable">'+
+          '<thead>'+
+            '<tr><th class="row-idx-head">row</th>'+chanHeadCells+'</tr>'+
+            '<tr><th></th>'+subHeadCells+'</tr>'+
+          '</thead>'+
+          '<tbody id="patTableBody"></tbody>'+
+        '</table></div>'+
+      '</div>'+
+    '</div>';
+  }
+
+  // Main column: Song + Patterns — the "watch it play" view. Sidebar: the
+  // Explainer, then the secondary/reference cards (Timing, Chips,
+  // Instruments, Wavetables) stacked below it.
+  var legend = document.getElementById('legend');
+  legend.innerHTML = songFieldHTML() + patternsFieldHTML() + pianoRollFieldHTML() + instrumentsFieldHTML();
+  var sideLegend = document.getElementById('sideLegend');
+  sideLegend.innerHTML = commentsFieldHTML() + timingFieldHTML() + chipsFieldHTML();
+
+  // Instrument colour swatches: rainbow-assigned above, editable here — a
+  // change re-tints the pattern grid immediately (renderPatternTable is
+  // defined further down but hoisted, and by the time this fires the whole
+  // script has already run once).
+  document.querySelectorAll('.ins-color-input').forEach(function(inp){
+    inp.addEventListener('input', function(){
+      var i = parseInt(inp.getAttribute('data-ins'), 10);
+      song.instruments[i].color = inp.value;
+      buildOrderPickerList(); // order picker swatches — defined further down, but hoisted
+      renderPatternTable();
+    });
+  });
+
+  // --- wavetables: drawn as tiny bar graphs of the raw 4-bit sample
+  // values, inline in the Instruments table (see instrumentsFieldHTML's
+  // waveCell) rather than as their own card — a wavetable only matters in
+  // the context of the instrument(s) actually using it. The <canvas>
+  // elements are already in the DOM (empty) from that HTML string; this
+  // just draws into each one. ---
+  document.querySelectorAll('.ins-wave-canvas').forEach(function(canvas){
+    var w = song.wavetables[parseInt(canvas.getAttribute('data-wave-idx'), 10)];
+    if(!w) return;
+    var ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#c9973a';
+    for(var x=0;x<w.len;x++){
+      var v = w.data[x] / (w.max||15);
+      var h = Math.round(v*16);
+      ctx.fillRect(x, 16-h, 1, h);
+    }
+  });
+
+  // Piano Roll: same "empty canvas in the HTML string, draw into it right
+  // after insertion" approach as the wavetable bars above. drawPianoRoll
+  // (defined further down, but hoisted) paints the base keys and then any
+  // currently-active/flashed notes on top — nothing's active yet at load.
+  drawPianoRoll();
+  updateNoiseDisplay(); // both hoisted; initializes the noise box to "—"
+
+  // --- collapsible cards, each toggling independently (unlike 0004's
+  // one-open-at-a-time accordion): Song + Patterns are meant to stay open
+  // together by default so the tracker grid and the play button/song info
+  // are all visible at once while listening — the whole point of this view
+  // is "watch the piece play the way you'd see it inside Furnace." ---
+  function setCollapsed(id, collapsed){
+    var el = document.getElementById('field-'+id);
+    if(!el) return;
+    el.classList.toggle('collapsed', collapsed);
+    var arrow = el.querySelector('.collapse-arrow');
+    if(arrow) arrow.textContent = collapsed ? '▸' : '▾';
+  }
+  document.querySelectorAll('.field-header').forEach(function(header){
+    header.addEventListener('click', function(){
+      var id = header.getAttribute('data-toggle');
+      var el = document.getElementById('field-'+id);
+      setCollapsed(id, !el.classList.contains('collapsed'));
+    });
+  });
+
+  // --- Patterns card: all 4 GB channels rendered side by side for one
+  // order-position at a time — the same "see the whole song at a glance"
+  // view Furnace's own pattern editor gives you, just read-only for now.
+  // Row shading follows the song's own highlight spacing (song.meta.highlights,
+  // e.g. every 4th/16th row) rather than a hardcoded guess.
+  var highlight1 = song.meta.highlights[0] || 0;
+  var highlight2 = song.meta.highlights[1] || 0;
+  var currentOrderPos = 0;
+  var tintEnabled = true;
+  var linesEnabled = true;
+  // Per-channel mute — click a Patterns column header to toggle. Live: since
+  // the scheduler only ever queues ~0.2s ahead (see the incremental
+  // scheduler further down), muting takes effect on the very next row
+  // rather than waiting out a whole loop, same reasoning as live sampler
+  // edits. Declared here (not next to scheduleRow, which also reads it)
+  // because renderPatternTable — which also reads it — runs for the first
+  // time much earlier in the script than that; a later declaration left it
+  // undefined for that first render (var hoisting only hoists the
+  // declaration, not the assignment).
+  var mutedChannels = [false, false, false, false];
+  function currentChannelRows(){
+    return song.channels.map(function(ch){
+      var pIdx = ch.orderList[currentOrderPos];
+      var pat = ch.patterns[pIdx];
+      return { effectColumns: ch.effectColumns, rows: (pat && pat.rows) ? pat.rows : [] };
+    });
+  }
+  function renderPatternTable(){
+    currentOrderPos = parseInt(document.getElementById('orderSelect').value, 10) || 0;
+    var perChan = currentChannelRows();
+    var body = document.getElementById('patTableBody');
+    var html = '';
+    for(var r=0;r<song.meta.patternLength;r++){
+      // Beat/bar line class for this row — border-based (see CSS) so it
+      // stays visible even under an instrument tint sitting on top of it.
+      var rowLineClass = linesEnabled ? ((highlight2 && r%highlight2===0) ? 'bar-line' : ((highlight1 && r%highlight1===0) ? 'beat-line' : '')) : '';
+      var rowBgClass = (highlight2 && r%highlight2===0) ? 'hl2' : ((highlight1 && r%highlight1===0) ? 'hl1' : '');
+      html += '<tr class="'+rowBgClass+'" data-row="'+r+'">'+
+        '<td class="row-idx '+rowLineClass+'" data-ch="-1" data-row="'+r+'" data-field="rowidx" title="click to jump playback here (and preview all unmuted stems at this row)">'+(r<16?'0':'')+r.toString(16).toUpperCase()+'</td>';
+      for(var c=0;c<perChan.length;c++){
+        var cell = normalizeCell(perChan[c].rows[r], perChan[c].effectColumns);
+        var noteClass = cell.noteName===null ? 'empty' : (cell.noteName==='OFF' ? 'off' : '');
+        var attrs = ' data-ch="'+c+'" data-row="'+r+'"';
+        // Colour-tint: which instrument is "active" on this channel at this
+        // row (per the whole-song timeline, not just this pattern) — tints
+        // NOTE/INS/VOL/FX together so a switch or an OFF is visible at a
+        // glance without reading every cell. Toggleable via the checkbox.
+        var activeIns = (tintEnabled && song.channels[c].insTimeline[currentOrderPos][r]!==null) ? song.channels[c].insTimeline[currentOrderPos][r] : null;
+        var tintStyle = activeIns!==null ? ' style="--ic:'+song.instruments[activeIns].color+'"' : '';
+        var tintClass = activeIns!==null ? ' ins-tint' : '';
+        // A real new note takes priority over the beat/bar line — it's the
+        // more locally useful signal, and marking it this way (rather than
+        // just relying on the row grid) is what makes consecutive notes on
+        // the same instrument readable as separate events.
+        var isNoteStart = cell.noteName!==null && cell.noteName!=='OFF';
+        var lineClass = linesEnabled ? (isNoteStart ? 'note-start' : rowLineClass) : '';
+        // Mirror of note-start on the row right before an OFF: brackets the
+        // note's duration (top border = where it starts, bottom border =
+        // its last sounding row) rather than only marking the start. Only
+        // looks within this displayed pattern, same scope as the hover
+        // inspector's "prior value" lookups — doesn't cross into the next
+        // order position.
+        var nextRaw = perChan[c].rows[r+1];
+        var endClass = (linesEnabled && nextRaw && nextRaw.note===NOTE_OFF) ? ' note-end' : '';
+        var mutedClass = mutedChannels[c] ? ' chan-muted' : '';
+        var previewTitle = ' title="click to preview CH'+c+' at this row"';
+        html += '<td class="note '+noteClass+tintClass+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="note"'+previewTitle+'>'+(cell.noteName===null?'...':cell.noteName)+'</td>'+
+          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="ins"'+previewTitle+'>'+hex2(cell.instrument)+'</td>'+
+          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="vol"'+previewTitle+'>'+hex2(cell.volume)+'</td>';
+        for(var fc=0;fc<cell.effects.length;fc++){
+          var e = cell.effects[fc];
+          html += '<td class="fx'+tintClass+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="fx" data-fxcol="'+fc+'"'+previewTitle+'>'+(e?(hex2(e.code)+hex2(e.value)):'....')+'</td>';
+        }
+      }
+      html += '</tr>';
+    }
+    body.innerHTML = html;
+    updateOrderPickerDisplay();
+  }
+  // Called from the stem-playback rAF loop (playbackRAF, further down) to
+  // highlight the row currently sounding, the same way Furnace's own
+  // editor tracks playback. No-op (nothing to highlight) when called with
+  // null, e.g. on Stop.
+  var lastPlayheadEl = null;
+  function setPlayheadRow(rowIndex){
+    if(lastPlayheadEl) lastPlayheadEl.classList.remove('playhead');
+    if(rowIndex===null || rowIndex===undefined) { lastPlayheadEl = null; return; }
+    var el = document.querySelector('#patTableBody tr[data-row="'+rowIndex+'"]');
+    if(el){
+      el.classList.add('playhead');
+      lastPlayheadEl = el;
+      scrollPatternToRow(el);
+    }
+  }
+  // Keeps the playhead row roughly above center in the scrollable grid as
+  // playback advances, the same way a tracker's own editor follows along.
+  // Uses getBoundingClientRect rather than offsetTop — offsetTop's
+  // ancestor semantics get murky inside a table with sticky headers, but
+  // viewport-relative rects are unambiguous regardless of table layout.
+  function scrollPatternToRow(el){
+    var container = el.closest('.pattern-scroll');
+    if(!container) return;
+    var containerRect = container.getBoundingClientRect();
+    var elRect = el.getBoundingClientRect();
+    var elTopInContainer = (elRect.top - containerRect.top) + container.scrollTop;
+    var targetScrollTop = elTopInContainer - container.clientHeight*0.4;
+    container.scrollTop = Math.max(0, targetScrollTop);
+  }
+  // --- custom order picker: a native <option> can't carry a multi-colour
+  // swatch in Chrome (option styling there is text-only), so this small
+  // dropdown replaces the visible select for both display and input. The
+  // real <select id="orderSelect"> stays in the DOM (just hidden) as the
+  // single source of truth every other read/write site already uses —
+  // this only ever writes to it via seekToPosition, never reads it back
+  // for its own state, so there's nothing to keep in sync by hand. ---
+  // Instrument index per (order, channel), not baked-in colour — colours
+  // are looked up live at render time so editing an instrument's colour
+  // swatch (see the .ins-color-input handler below) stays reflected here
+  // too, not just in the pattern grid's own tinting.
+  var orderInsIndices = song.channels[0].orderList.map(function(pIdx, op){
+    return [0,1,2,3].map(function(c){
+      var ch = song.channels[c];
+      var insIdx = ch.insTimeline[op][0];
+      for(var r=1; insIdx===null && r<song.meta.patternLength; r++) insIdx = ch.insTimeline[op][r];
+      return insIdx;
+    });
+  });
+  function orderSwatchInnerHTML(op){
+    return orderInsIndices[op].map(function(insIdx){
+      var color = (insIdx!==null && song.instruments[insIdx]) ? song.instruments[insIdx].color : null;
+      return '<span style="background:'+(color||'var(--edge)')+';"></span>';
+    }).join('');
+  }
+  function buildOrderPickerList(){
+    document.getElementById('orderPickerList').innerHTML = orderInsIndices.map(function(_, op){
+      return '<div class="order-picker-row" data-order="'+op+'" role="option">'+
+        '<span class="order-swatch">'+orderSwatchInnerHTML(op)+'</span>'+
+        '<span>order '+op+' · pattern '+song.channels[0].orderList[op]+'</span>'+
+      '</div>';
+    }).join('');
+  }
+  buildOrderPickerList();
+  function updateOrderPickerDisplay(){
+    document.getElementById('orderPickerNum').textContent = currentOrderPos;
+    document.getElementById('orderPickerSwatch').innerHTML = orderSwatchInnerHTML(currentOrderPos);
+    document.querySelectorAll('.order-picker-row').forEach(function(row){
+      row.classList.toggle('active', parseInt(row.getAttribute('data-order'), 10)===currentOrderPos);
+    });
+  }
+  var orderPickerBtn = document.getElementById('orderPickerBtn');
+  var orderPickerList = document.getElementById('orderPickerList');
+  orderPickerBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    orderPickerList.classList.toggle('open');
+  });
+  document.addEventListener('click', function(){ orderPickerList.classList.remove('open'); });
+  orderPickerList.addEventListener('click', function(e){
+    var row = e.target.closest('[data-order]');
+    if(!row) return;
+    orderPickerList.classList.remove('open');
+    // Moves both the visual playhead and actual stem playback to the
+    // start of the chosen pattern — picking a different pattern is a
+    // real jump, not just a different view of the same moment.
+    seekToPosition(parseInt(row.getAttribute('data-order'), 10), 0);
+  });
+  document.getElementById('tintToggle').addEventListener('change', function(e){
+    tintEnabled = e.target.checked;
+    renderPatternTable();
+  });
+  document.getElementById('linesToggle').addEventListener('change', function(e){
+    linesEnabled = e.target.checked;
+    renderPatternTable();
+  });
+  document.getElementById('patTable').addEventListener('click', function(e){
+    var th = e.target.closest('[data-chan-mute]');
+    if(th){
+      var c = parseInt(th.getAttribute('data-chan-mute'), 10);
+      mutedChannels[c] = !mutedChannels[c];
+      th.classList.toggle('muted', mutedChannels[c]);
+      setChannelMute(c, mutedChannels[c]); // just a gain toggle on that stem — see below
+      renderPatternTable(); // reflect the mute in the currently-visible cells (see chan-muted)
+      return;
+    }
+    var rowCell = e.target.closest('td[data-field="rowidx"]');
+    if(rowCell){
+      var row = parseInt(rowCell.getAttribute('data-row'), 10);
+      seekToPosition(currentOrderPos, row);
+      // Extra audio feedback beyond the seek itself: seeking alone is
+      // silent unless the track is already playing, so also preview every
+      // unmuted stem at that row — same "audition this instant" purpose
+      // as the per-cell preview below, just across all channels at once.
+      var unmutedChannels = [0,1,2,3].filter(function(c){ return !mutedChannels[c]; });
+      previewAtTime(unmutedChannels, (currentOrderPos*song.meta.patternLength + row) * rowDurationSec());
+      flashPianoForChannelsAt(unmutedChannels, currentOrderPos, row);
+      unmutedChannels.forEach(function(c){ spawnJetForCell(c, currentOrderPos, row); });
+      return;
+    }
+    var chCell = e.target.closest('td[data-ch]');
+    if(chCell){
+      var ch = parseInt(chCell.getAttribute('data-ch'), 10);
+      var chRow = parseInt(chCell.getAttribute('data-row'), 10);
+      if(ch>=0){
+        previewAtTime([ch], (currentOrderPos*song.meta.patternLength + chRow) * rowDurationSec());
+        flashPianoForChannelsAt([ch], currentOrderPos, chRow);
+        spawnJetForCell(ch, currentOrderPos, chRow);
+      }
+      return;
+    }
+  });
+  renderPatternTable();
+
+  // --- explainer: same hover-driven pattern as 0004/js-explorer ---
+  function N(x){ return '<span class="tk-num">'+esc(x)+'</span>'; }
+  function VR(x){ return '<span class="tk-var">'+esc(x)+'</span>'; }
+  function KW(x){ return '<span class="tk-kw">'+esc(x)+'</span>'; }
+  function CODE(x){ return '<div class="tk-block">'+x+'</div>'; }
+  function P(x){ return '<p class="tk-p">'+x+'</p>'; }
+  function LIVE(x){ return '<span class="tk-live">'+esc(x)+'</span>'; }
+
+  // --- Patterns cell inspector: hovering any note/ins/vol/fx cell explains
+  // exactly what that cell means at that point in time, in musician-legible
+  // terms (real note name + Hz, plain-language effect meaning) rather than
+  // just raw tracker hex — this same SongModel data is meant to eventually
+  // drive a sheet-music view, so the inspector doubles as a check that the
+  // data reads clearly outside of tracker jargon. ---
+  function findPriorValue(chIndex, rowIndex, key){
+    var rows = currentChannelRows()[chIndex].rows;
+    for(var r=rowIndex-1;r>=0;r--){ var raw = rows[r]; if(raw && raw[key]!==undefined) return raw[key]; }
+    return null;
+  }
+  function instrumentShortDesc(i){
+    var ins = song.instruments[i]; if(!ins) return 'instrument '+i;
+    var gb = ins.gb||{};
+    return esc(ins.name||('#'+i))+' (envelope '+gb.envVol+' '+(gb.envDir?'up':'down')+'/'+gb.envLen+(gb.softEnv?', software envelope':'')+')';
+  }
+  function explainCellFor(chIndex, rowIndex, field, fxCol){
+    // The row-idx column carries a sentinel chIndex of -1 (it's not a real
+    // channel) — handle it first, before any of the channel-indexed
+    // lookups below, which would throw on a -1 index (this used to crash
+    // whenever this specific column was hovered/clicked).
+    if(field==='rowidx'){
+      var absRow = currentOrderPos*song.meta.patternLength + rowIndex;
+      var rowDur = song.meta.speeds[0] / song.meta.tickRate;
+      var vt = song.meta.virtualTempo;
+      var vtNote = (vt[0]===vt[1]) ? '' : ' (approximate — virtual tempo '+vt[0]+'/'+vt[1]+' isn\'t modeled here yet, so timing may drift slightly from Furnace\'s own playback)';
+      return { title:'Row 0x'+hex2(rowIndex)+' · order '+currentOrderPos,
+        html: P('At the current tempo (speed '+N(song.meta.speeds[0])+' ticks/row, tick rate '+N(song.meta.tickRate.toFixed(2))+'Hz), this row lands at roughly '+N((absRow*rowDur).toFixed(2)+'s')+' into the piece'+vtNote+'. Click it to jump playback here.') };
+    }
+    var raw = (currentChannelRows()[chIndex] || {}).rows[rowIndex];
+    var ch = song.channels[chIndex];
+    var cell = ch ? normalizeCell(raw, ch.effectColumns) : null;
+    var chLabel = 'CH'+chIndex+' · '+(GB_ROLE_HINT[chIndex]||'');
+
+    if(field==='note'){
+      if(cell.noteName===null){
+        // Distinguish "still sounding an earlier note" from "actually
+        // silent" — the most recent note EVENT (which may be a real note
+        // or an OFF) on this channel decides which one this is.
+        var priorNote = findPriorValue(chIndex, rowIndex, 'note');
+        if(priorNote===null){
+          return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · note',
+            html: P('No note has played on this channel yet within this view.') };
+        }
+        if(priorNote===NOTE_OFF){
+          return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · note',
+            html: P('No note playing — the last event on this channel was a '+esc('NOTE OFF')+'.') };
+        }
+        var contName = noteToName(priorNote);
+        var contFreq = noteToFreq(priorNote, song.meta.tuning);
+        var contIns = findPriorValue(chIndex, rowIndex, 'ins');
+        return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · continuing '+contName,
+          html: CODE(VR('note')+' = continuation of '+N(contName)+'  (raw '+N(priorNote)+')') +
+            P('Still sounding from an earlier row, not a new note here — ≈ '+N(contFreq.toFixed(2)+'Hz')+'.') +
+            (contIns!==null ? P('Playing on instrument '+N(contIns)+' · '+instrumentShortDesc(contIns)+'.') : '') };
+      }
+      if(cell.noteName==='OFF'){
+        return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · NOTE OFF',
+          html: P('Releases whatever note this channel is currently sounding — the Game Boy hardware envelope (or the instrument\'s software envelope) then decays/cuts from here rather than a new pitch starting.') };
+      }
+      var freq = noteToFreq(cell.noteRaw, song.meta.tuning);
+      var insHolding = cell.instrument!==null ? cell.instrument : findPriorValue(chIndex, rowIndex, 'ins');
+      return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · '+cell.noteName,
+        html: CODE(VR('note')+' = '+N(cell.noteName)+'  (raw '+N(cell.noteRaw)+')') +
+          P('≈ '+N(freq.toFixed(2)+'Hz')+' at this song\'s tuning ('+N(song.meta.tuning)+'Hz reference).') +
+          (insHolding!==null ? P('Plays on instrument '+N(insHolding)+' · '+instrumentShortDesc(insHolding)+'.') : P('No instrument has been set on this channel yet at this point.')) };
+    }
+    if(field==='ins'){
+      if(cell.instrument===null){
+        var prior = findPriorValue(chIndex, rowIndex, 'ins');
+        return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · instrument',
+          html: P('No instrument change this row — the channel keeps whatever instrument was last triggered'+(prior!==null?' ('+N(prior)+' · '+instrumentShortDesc(prior)+').':' (none set yet in this view).')) };
+      }
+      return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · instrument '+cell.instrument,
+        html: P('Selects instrument '+N(cell.instrument)+' · '+instrumentShortDesc(cell.instrument)+' for notes on this channel from here on, until the next instrument change.') };
+    }
+    if(field==='vol'){
+      if(cell.volume===null){
+        return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · volume',
+          html: P('No per-row volume override — the channel plays at whatever level its instrument\'s envelope and any active volume-slide effect already have it at.') };
+      }
+      return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · volume '+cell.volume,
+        html: CODE(VR('volume')+' = '+N(cell.volume)+' / 15') +
+          P('Sets this channel\'s volume to '+N(cell.volume)+' out of 15 (≈'+N(Math.round(cell.volume/15*100))+'%) from this row on, until the next volume cell or a volume-slide effect changes it.') };
+    }
+    if(field==='fx'){
+      var e = cell.effects[fxCol];
+      if(!e){
+        return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · effect '+(fxCol+1),
+          html: P('No effect in this column this row.') };
+      }
+      var meaning = CORE_EFFECTS[e.code] || ('Effect 0x'+hex2(e.code)+' — not one of the core effects this shrine documents yet; still parsed and preserved, just not explained in detail here.');
+      var nibbleLine = (e.code===0||e.code===4||e.code===10) ? P('As two nibbles: high '+N((e.value>>4).toString(16).toUpperCase())+' / low '+N((e.value&0xF).toString(16).toUpperCase())+'.') : '';
+      return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · effect 0x'+hex2(e.code)+hex2(e.value),
+        html: CODE(VR('effect')+' = code '+N('0x'+hex2(e.code))+', value '+N('0x'+hex2(e.value))) +
+          P(meaning) + nibbleLine };
+    }
+    return null;
+  }
+  document.getElementById('patTableBody').addEventListener('mouseover', function(e){
+    var td = e.target.closest('td[data-field]');
+    if(!td) return;
+    var chIndex = parseInt(td.getAttribute('data-ch'), 10);
+    var rowIndex = parseInt(td.getAttribute('data-row'), 10);
+    var field = td.getAttribute('data-field');
+    var fxCol = td.hasAttribute('data-fxcol') ? parseInt(td.getAttribute('data-fxcol'), 10) : 0;
+    var result = explainCellFor(chIndex, rowIndex, field, fxCol);
+    if(!result) return;
+    currentExplainKey = null; // cell-driven explain isn't a static registry key
+    document.getElementById('explainTitle').textContent = result.title;
+    document.getElementById('explainBody').innerHTML = result.html;
+  });
+
+  var EXPLAIN = {
+    'song': function(){
+      return { title:'Song — top-level metadata',
+        html: P('Read straight from the Furnace JSON export\'s '+VR('songInfo')+' object — name, author, album, target system, and the reference tuning ('+N(song.meta.tuning)+'Hz = the frequency treated as A4 when converting note numbers to pitch).') +
+          P('This is the whole export, JSON-parsed and reshaped — no binary parsing involved for this pass (see Future section of the plan for the eventual '+VR('.fur')+' binary parser).') };
+    },
+    'comments': function(){
+      return { title:'Song Comments — from the composer',
+        html: P('The '+VR('songInfo.comments')+' field from the Furnace JSON export, verbatim — whatever the composer wrote there (notes on the recording process, licensing, credits, anything else worth knowing before you dig into the data below).') };
+    },
+    'timing': function(){
+      return { title:'Timing — how fast the tracker ticks',
+        html: CODE(VR('rowDurationSec')+' = speed / tickRate') +
+          P('Tick rate = '+N(song.meta.tickRate.toFixed(3))+'Hz — the base clock. Speed = '+N(song.meta.speeds.join('/'))+' ticks per row, so each row lasts '+N((song.meta.speeds[0]/song.meta.tickRate*1000).toFixed(1))+'ms. Virtual tempo ('+N(song.meta.virtualTempo.join('/'))+') is a Furnace-specific fine-tune multiplier on top of that.') +
+          P('Order length '+N(song.meta.orderLength)+' × pattern length '+N(song.meta.patternLength)+' rows = the full arrangement length per channel, before any per-channel effect (like a jump/break) changes the path.') };
+    },
+    'chips': function(){
+      return { title:'Chips — the sound hardware being emulated',
+        html: P('One Game Boy chip, contributing all 4 channels below. '+VR('volume')+'/'+VR('panning')+'/'+VR('front/rear')+' are master-bus trims applied to everything this chip outputs — separate from any per-instrument or per-row volume.') };
+    },
+    'instruments': function(){
+      return { title:'Instruments — GB channel presets',
+        html: P(song.instruments.length+' instruments, each a preset of Game Boy envelope + (optionally) duty-cycle or wavetable settings that a pattern row can trigger by index. Hover a row for that instrument\'s specific envelope.') };
+    },
+    'piano-roll': function(){
+      return { title:'Piano Roll — what\'s sounding right now',
+        html: P('A standard keyboard sized to the pitch range this song actually uses. Any key currently held down lights up in the colour of whichever instrument is playing it — the same colours used everywhere else on this page (pattern-grid tint, instrument swatches).') +
+          P('Clicking a pattern cell, a row number, or an instrument\'s preview button also flashes the relevant key(s) briefly, even when the track isn\'t playing — the same click-to-preview interactions as the Patterns panel below.') +
+          P('CH3 (Noise) is left off the keyboard — its "note" selects a noise-LFSR rate, not a real pitch, so it wouldn\'t mean anything as a lit key. It\'s shown as text in the box on the right instead: the current note value and the instrument playing it.') };
+    },
+    'cover-art': function(){
+      return { title:'Cover Art — animated, driven by the same triggers as everything else',
+        html: P('A 240×240 pixel-art canvas, dithered down from a native 32×32 buffer with a 4×4 Bayer matrix (the same ordered-dithering technique as the cover art on shrine 0004) for a chunky, retro pixel look rather than a smooth gradient.') +
+          P('Every note trigger — real playback or a preview click from anywhere on this page — fires a jet trail through the clouds, coloured by that note\'s instrument and sized/brightened by its volume. All 4 channels trigger a trail, including Noise, even though Noise doesn\'t appear on the Piano Roll.') +
+          P('Click the canvas itself to save the current frame as a 1600×1600 PNG (a clean 50× upscale of the native 32×32 buffer, so the pixel edges stay crisp rather than blurring).') };
+    },
+    'wavetables': function(){
+      return { title:'Wavetables — custom waveforms for the GB Wave channel',
+        html: P('The Game Boy\'s 3rd channel plays back an arbitrary looping waveform instead of a fixed shape — each wavetable here is '+N('32')+' samples, each a 4-bit value ('+N('0–15')+'). An instrument on the Wave channel points at one of these.') +
+          P('This page doesn\'t synthesize the Wave channel — you\'re hearing Furnace\'s own real recording of it (see the stem playback below), which plays back these exact steps directly. The raw values here are what actually produced that shape.') };
+    },
+    'patterns': function(){
+      return { title:'Patterns — the actual note data',
+        html: P('All 4 channels shown side by side for one order position at a time — the same whole-song-at-a-glance view Furnace\'s own pattern editor gives you. Each channel has its own independent order list ('+N(song.meta.orderLength)+' positions) pointing at pattern indices, and each pattern is '+N(song.meta.patternLength)+' rows of note/instrument/volume/effect data — same shape Furnace itself dumps in its '+VR('.txt')+' export (\''+esc('NOTE INS VOL FXFX')+'\' per column), which is what this table was verified against.') +
+          P('Row shading follows this song\'s own highlight spacing (every '+N(song.meta.highlights[0])+'/'+N(song.meta.highlights[1])+' rows) — same convention Furnace uses, read from the file rather than assumed.') +
+          P(esc('OFF')+' means "note off" (raw value '+N('253')+' — a sentinel above any real pitch, confirmed against every OFF in the .txt dump). '+esc('...')+' means no note this row; '+esc('..')+' means no instrument/volume; '+esc('....')+' means no effect in that column.') +
+          P('The playhead row highlights here in real time as the real audio plays, mapped from elapsed playback time back onto this data — same as watching it play back inside Furnace.') };
+    }
+  };
+  song.channels.forEach(function(ch){
+    EXPLAIN['chan-'+ch.index] = function(){
+      var roleText = {
+        0:'Pulse 1 — a square wave with selectable duty cycle (12.5/25/50/75%) and the GB\'s hardware volume envelope.',
+        1:'Pulse 2 — identical hardware to Pulse 1, just a second independent voice (no frequency-sweep unit, which only Pulse 1 has on real GB hardware).',
+        2:'Wave — plays back a custom 32-sample 4-bit waveform (one of this song\'s wavetables) instead of a fixed shape.',
+        3:'Noise — a pseudo-random LFSR generator instead of a pitched oscillator, typically used for percussion.'
+      }[ch.index] || '';
+      return { title:'Channel '+ch.index+' · '+(GB_ROLE_HINT[ch.index]||''),
+        html: P(roleText) +
+          P('Effect columns: '+N(ch.effectColumns)+' — how many independent effect commands can run on this channel per row.') +
+          P('Click this header to mute/unmute '+esc('CH'+ch.index)+' — handy for isolating one channel to check it in isolation.'+(mutedChannels[ch.index]?' Currently '+LIVE('muted')+'.':'')) };
+    };
+  });
+  song.wavetables.forEach(function(w, i){
+    EXPLAIN['wave-'+i] = function(){
+      return { title:'Wavetable '+i,
+        html: P(N(w.len)+' samples, 4-bit (max '+N(w.max)+'). Raw values: '+esc(w.data.join(','))+'.') };
+    };
+  });
+  song.instruments.forEach(function(ins, i){
+    EXPLAIN['ins-'+i] = function(){
+      var gb = ins.gb || {};
+      var role = ins.waveSynth ? 'wave channel (points at wavetable '+ins.waveSynth.wave1+')' : 'pulse/noise channel (built-in envelope)';
+      var duty = (ins.macros||[]).filter(function(m){ return m.code===2; })[0];
+      return { title:'Instrument '+i+' · '+ins.name,
+        html: CODE(VR('envelope')+' = start at '+N(gb.envVol)+', '+KW(gb.envDir?'count up':'count down')+' every '+N(gb.envLen)+' GB envelope step(s)') +
+          P('Sound length '+N(gb.soundLen)+' (64 = held indefinitely). Software envelope: '+N(gb.softEnv?'yes':'no')+' — when on, Furnace drives the volume itself instead of the GB\'s built-in hardware envelope stepper, which is what lets a Lead voice fade more expressively than raw hardware steps allow.') +
+          P('This is a '+role+'.'+(duty?' Has a fixed duty-cycle macro (value '+N(duty.data[0])+', where 0–3 = 12.5/25/50/75%).':'')) };
+    };
+  });
+
+  var currentExplainKey = null;
+  function showExplain(key){
+    var fn = EXPLAIN[key]; if(!fn) return;
+    currentExplainKey = key;
+    var e = fn();
+    document.getElementById('explainTitle').textContent = e.title;
+    document.getElementById('explainBody').innerHTML = e.html;
+  }
+  document.querySelectorAll('[data-explain]').forEach(function(el){
+    el.addEventListener('mouseenter', function(){ showExplain(el.getAttribute('data-explain')); });
+  });
+
+  // ============================================================
+  // Lantern Music Player — real-stem playback, no synthesis.
+  // Furnace's own render (split into 4 per-channel stems by the composer)
+  // IS the audio; everything below just plays those 4 stems back in
+  // lock-step and maps elapsed time onto the already-parsed SongModel to
+  // drive the same visual highlighting a synthesized scheduler used to.
+  // See the shrine's plan (okay-we-re-up-to-encapsulated-charm.md) for
+  // the reasoning behind dropping the from-scratch synthesis engine.
+  // ============================================================
+
+  function rowDurationSec(){ return song.meta.speeds[0] / song.meta.tickRate; }
+
+  var STEM_FILES = [
+    'ASSETS/0.ogg', // CH0 — pulse 1
+    'ASSETS/1.ogg', // CH1 — pulse 2
+    'ASSETS/2.ogg', // CH2 — wave
+    'ASSETS/3.ogg'  // CH3 — noise
+  ];
+
+  var ac = null, master = null;
+  var stemBuffers = [null, null, null, null];
+  var channelGain = [null, null, null, null];
+  var stemSources = [null, null, null, null];
+  var songDuration = 0;
+
+  function ensureAudioContext(){
+    if(ac) return ac;
+    ac = new (window.AudioContext||window.webkitAudioContext)();
+    master = ac.createGain(); master.gain.value = 1;
+    master.connect(ac.destination);
+    for(var c=0;c<4;c++){
+      channelGain[c] = ac.createGain();
+      channelGain[c].gain.value = mutedChannels[c] ? 0 : 1;
+      channelGain[c].connect(master);
+    }
+    // suspend()/resume() are async — ac.state doesn't flip the instant
+    // they're called, so reading it right after (as the transport buttons
+    // would) can catch a stale value. This listener is the one source of
+    // truth: whenever the context's real state actually changes, re-sync
+    // the buttons from it.
+    ac.addEventListener('statechange', updateTransportUI);
+    return ac;
+  }
+
+  // Mute just toggles that stem's own gain — no scheduler to coordinate
+  // with, so this takes effect on literally the next audio sample.
+  function setChannelMute(c, muted){
+    if(channelGain[c]) channelGain[c].gain.setValueAtTime(muted ? 0 : 1, ac ? ac.currentTime : 0);
+  }
+
+  var stemsReady = false;
+  function loadStems(){
+    ensureAudioContext();
+    return Promise.all(STEM_FILES.map(function(f){
+      return fetch(f)
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status+' for '+f); return r.arrayBuffer(); })
+        .then(function(buf){ return ac.decodeAudioData(buf); });
+    })).then(function(buffers){
+      stemBuffers = buffers;
+      songDuration = buffers[0].duration;
+      stemsReady = true;
+    }).catch(function(err){
+      console.error('Failed to load one or more stems:', err);
+    });
+  }
+  var stemsLoadingPromise = loadStems();
+
+  // --- transport: 4 sources started in one batch at the same time/offset,
+  // so they stay sample-locked for the whole playthrough with no need for
+  // independent sync logic. Pause uses ac.suspend()/resume() rather than
+  // manual offset bookkeeping — suspending the whole context freezes
+  // ac.currentTime AND every source's internal playback position together
+  // for free, so currentSongTime() stays correct across a suspend/resume
+  // with no need to ever recreate a source node for Pause specifically
+  // (only Stop tears sources down and rebuilds them). ---
+  var songStartOffset = 0, songStartCtxTime = 0, songStarted = false, playRequested = false;
+
+  function currentSongTime(){
+    if(!songStarted) return songStartOffset;
+    var t = songStartOffset + (ac.currentTime - songStartCtxTime);
+    // Wrap for the loop — normally songStartOffset/songStartCtxTime get
+    // reset to the new loop's baseline the instant it starts (see the
+    // onended swap in armLoopContinuation below), but a background tab's
+    // throttled rAF can lag behind the audio thread's own precise
+    // scheduling for a bit; this keeps the reported position sane in the
+    // meantime instead of reporting a time past the end of the song.
+    return songDuration ? (t % songDuration) : t;
+  }
+
+  function createStemSourceSet(offset, startCtxTime){
+    var srcs = [];
+    for(var c=0;c<4;c++){
+      var src = ac.createBufferSource();
+      src.buffer = stemBuffers[c];
+      src.connect(channelGain[c]);
+      src.start(startCtxTime, offset);
+      srcs.push(src);
+    }
+    return srcs;
+  }
+
+  // The track loops indefinitely. Rather than reactively creating the next
+  // loop's sources in an onended handler (JS event-loop latency plus a
+  // fresh lookahead would land tens of ms late — an audible gap/click),
+  // this pre-schedules the *next* loop's 4 sources at the exact sample-
+  // accurate moment the current ones will end, right when the current
+  // ones start. Web Audio's own clock honors that precise start time
+  // regardless of JS timer jitter, so the loop point is seamless.
+  var nextLoopSources = null, nextLoopStartCtxTime = 0;
+  function armLoopContinuation(loopStartCtxTime){
+    nextLoopSources = createStemSourceSet(0, loopStartCtxTime);
+    nextLoopStartCtxTime = loopStartCtxTime;
+    // All 4 end at the same instant (equal-length stems) — watching just
+    // one is enough to catch the natural end of the song.
+    stemSources[0].onended = function(){
+      if(!songStarted) return; // stopped/seeked before the natural loop point — ignore
+      stemSources = nextLoopSources;
+      songStartOffset = 0;
+      songStartCtxTime = nextLoopStartCtxTime;
+      lastShownOrderPos = null; lastShownRow = null; // force a fresh visual update right at the loop
+      armLoopContinuation(nextLoopStartCtxTime + songDuration);
+    };
+  }
+
+  function startStemsAt(offset){
+    var T = ac.currentTime + 0.05;
+    stemSources = createStemSourceSet(offset, T);
+    songStartOffset = offset;
+    songStartCtxTime = T;
+    songStarted = true;
+    armLoopContinuation(T + (songDuration - offset));
+  }
+
+  function stopStems(){
+    for(var c=0;c<4;c++){
+      if(stemSources[c]){
+        stemSources[c].onended = null;
+        try{ stemSources[c].stop(); }catch(e){}
+        stemSources[c] = null;
+      }
+    }
+    // The next loop's sources are already committed into the audio graph
+    // (scheduled ahead of time, see armLoopContinuation) — without this
+    // they'd still fire at their scheduled moment even after a Stop/seek.
+    if(nextLoopSources){
+      for(var c=0;c<4;c++){ try{ nextLoopSources[c].stop(); }catch(e){} }
+      nextLoopSources = null;
+    }
+    songStarted = false;
+  }
+
+  function doPlay(){
+    ensureAudioContext();
+    if(!stemsReady){ playRequested = true; return; } // resolved by stemsLoadingPromise below
+    playRequested = false;
+    if(!songStarted) startStemsAt(songStartOffset);
+    if(ac.state!=='running') ac.resume();
+    updateTransportUI();
+  }
+  function doPause(){
+    if(!ac || ac.state!=='running') return;
+    // ac.suspend() is async — ac.state can still read 'running' for a
+    // frame or two while it resolves. If only songStartOffset were
+    // updated here, currentSongTime() called during that gap would add
+    // (ac.currentTime - songStartCtxTime) on top of an offset that
+    // already accounts for that same elapsed time — double-counting it,
+    // which could jump the displayed order/pattern forward right at the
+    // moment of pausing. Resetting both together keeps the pair
+    // consistent so any call in that gap is a no-op instead of a jump.
+    songStartOffset = currentSongTime();
+    songStartCtxTime = ac.currentTime;
+    ac.suspend();
+    updateTransportUI();
+  }
+  function doStop(){
+    stopStems();
+    songStartOffset = 0;
+    if(ac && ac.state==='running') ac.suspend();
+    setPlayheadRow(null);
+    lastShownOrderPos = null; lastShownRow = null; // force a fresh update on next play
+    pianoRollActiveNotes = {}; drawPianoRoll(); // no channel is sounding once stopped
+    noiseActive = null; updateNoiseDisplay();
+    updateTransportUI();
+  }
+  // Jump playback to an arbitrary song-time — keeps playing from the new
+  // spot if it was already playing, otherwise just repositions where the
+  // next Play will start from. Updates the visual immediately rather than
+  // waiting for the next rAF tick, so a click feels instant.
+  function doSeek(t){
+    t = Math.max(0, Math.min(t, songDuration||t));
+    var wasPlaying = isPlaying();
+    stopStems();
+    songStartOffset = t;
+    if(wasPlaying) startStemsAt(t);
+    var pos = songPositionAt(t);
+    lastShownOrderPos = pos.orderPos;
+    lastShownRow = pos.row;
+    document.getElementById('orderSelect').value = pos.orderPos;
+    renderPatternTable();
+    setPlayheadRow(pos.row);
+    updatePianoRollActive(pos.orderPos, pos.row);
+    updateTransportUI();
+  }
+  function seekToPosition(orderPos, row){
+    doSeek((orderPos*song.meta.patternLength + row) * rowDurationSec());
+  }
+  stemsLoadingPromise.then(function(){ if(playRequested) doPlay(); });
+
+  var playBtn = document.getElementById('playBtn');
+  var pauseBtn = document.getElementById('pauseBtn');
+  var stopBtn = document.getElementById('stopBtn');
+  // Deliberately not just "ac.state==='running'" — previewInstrument also
+  // resumes the (shared) AudioContext to make itself audible, which would
+  // otherwise make a preview click alone look like the song started
+  // playing (disabling Play, enabling Pause/Stop) via the statechange
+  // listener below. Actual song playback requires songStarted too.
+  function isPlaying(){ return songStarted && !!ac && ac.state==='running'; }
+  function updateTransportUI(){
+    playBtn.disabled = isPlaying();
+    pauseBtn.disabled = !isPlaying();
+    stopBtn.disabled = !songStarted && !isPlaying();
+  }
+  playBtn.addEventListener('click', doPlay);
+  pauseBtn.addEventListener('click', doPause);
+  stopBtn.addEventListener('click', doStop);
+  updateTransportUI();
+
+  // --- time -> row/order mapping, driving the visual playhead + instrument
+  // flash. Assumes strict sequential order playback with no jump/break
+  // effects — true for flight_school (never uses 0Bxx/0Dxx), but worth
+  // knowing if this file is ever adapted for a song that does use them. ---
+  function songPositionAt(t){
+    // Clamp to 0: startStemsAt schedules sources ~50ms into the future
+    // (T = ac.currentTime+0.05), so for that brief pre-roll window
+    // ac.currentTime < songStartCtxTime and t can come out as a tiny
+    // negative float. JS's % (unlike Python's) preserves the sign of a
+    // negative dividend, so an unclamped totalRows here would yield
+    // orderPos/row of -1 instead of wrapping to the end — harmless
+    // everywhere this was only ever fed through a falsy-check (pat ? ... :
+    // null, a DOM query returning null), but a direct array index
+    // (noteTimeline[orderPos][row]) throws on it. Treat "still in the
+    // pre-roll" as row 0, which is what it actually means.
+    var totalRows = Math.max(0, Math.floor(t / rowDurationSec()));
+    var orderPos = Math.floor(totalRows / song.meta.patternLength) % song.meta.orderLength;
+    var row = totalRows % song.meta.patternLength;
+    return { orderPos: orderPos, row: row };
+  }
+
+  // --- Animated Cover Art: 240x240, 4x4 Bayer-dithered pixel art — same
+  // two-canvas low-res-buffer + nearest-neighbour-scale technique as
+  // src/0004/0004-rune_d.html's own cover art (composite at native 32x32
+  // into a float RGB buffer, ordered-dither down to a handful of levels
+  // per channel, blit up to the visible 240x240 canvas with smoothing
+  // off). A night sky with drifting noise-cloud texture sits behind a
+  // bright diagonal jet trail (bottom-right -> top-left) fired for every
+  // note trigger — real playback or a preview click alike — coloured by
+  // that note's instrument and sized/brightened by its volume. ---
+  var COVER_GRID = 32;
+  var coverVctx = document.getElementById('coverArt').getContext('2d');
+  var coverGridCanvas = document.createElement('canvas');
+  coverGridCanvas.width = COVER_GRID; coverGridCanvas.height = COVER_GRID;
+  var coverGctx = coverGridCanvas.getContext('2d');
+  var coverGridImg = coverGctx.createImageData(COVER_GRID, COVER_GRID);
+  var coverGridBuf = new Float32Array(COVER_GRID*COVER_GRID*3);
+
+  // Bayer-4 ordered dither — same derivation as 0004's bayer4()/
+  // ditherChannel(), copied verbatim (only the grid size/level count
+  // differ, via COVER_GRID/COVER_DITHER_LEVELS above/below).
+  function coverBayer4(){
+    var m = [[0,2],[3,1]], n = 2;
+    while(n < 4){
+      var nm = []; for(var y=0;y<n;y++){ nm.push([]); nm.push([]); }
+      for(y=0;y<n;y++){ for(var x=0;x<n;x++){
+        var v = m[y][x]*4;
+        nm[y][x]=v; nm[y][x+n]=v+2; nm[y+n][x]=v+3; nm[y+n][x+n]=v+1;
+      }}
+      m = nm; n *= 2;
+    }
+    var flat = new Float32Array(16);
+    for(y=0;y<4;y++) for(var x=0;x<4;x++) flat[y*4+x] = (m[y][x]+0.5)/16;
+    return flat;
+  }
+  var COVER_BAYER4 = coverBayer4();
+  var COVER_DITHER_LEVELS = 9; // higher than 0004's 6 — the noise-cloud background has more going on locally than a flat gradient, and more levels keeps the halftone pattern from reading as noise
+  function coverDitherChannel(v, x, y){
+    v = v<0?0:(v>255?255:v);
+    var step = 255/(COVER_DITHER_LEVELS-1);
+    var t = COVER_BAYER4[(y&3)*4 + (x&3)];
+    var idx = v/step;
+    var base = Math.floor(idx);
+    var q = ((idx-base) > t) ? base+1 : base;
+    if(q > COVER_DITHER_LEVELS-1) q = COVER_DITHER_LEVELS-1;
+    return Math.round(q*step);
+  }
+  function coverHexToRgb(hex){ var n = parseInt(hex.slice(1),16); return [(n>>16)&255, (n>>8)&255, n&255]; }
+
+  // Ring stamp for cloud puffs — same bounding-box-optimized technique as
+  // 0004's own addRing, but blends by lerping each pixel TOWARD the given
+  // colour (amt clamped to [0,1]) rather than 0004's pure additive
+  // accumulation. Additive worked there because it draws over a near-black
+  // background — adding a saturated colour to near-zero reads as that
+  // colour. This canvas's background is a bright daytime sky; adding
+  // colour on top of already-bright values just blows every channel
+  // toward 255, washing everything out to pale white instead of showing
+  // the intended colour. Lerping toward the target holds up on any
+  // background brightness, dark or light.
+  function coverAddRing(cx, cy, radius, ringWidth, color, intensity){
+    if(intensity <= 0) return;
+    var rOuter = radius + ringWidth;
+    var x0 = Math.max(0, Math.floor(cx-rOuter)), x1 = Math.min(COVER_GRID-1, Math.ceil(cx+rOuter));
+    var y0 = Math.max(0, Math.floor(cy-rOuter)), y1 = Math.min(COVER_GRID-1, Math.ceil(cy+rOuter));
+    for(var y=y0;y<=y1;y++){
+      for(var x=x0;x<=x1;x++){
+        var dx=x-cx, dy=y-cy, d=Math.sqrt(dx*dx+dy*dy);
+        var falloff = 1 - Math.abs(d-radius)/ringWidth;
+        if(falloff<=0) continue;
+        var amt = falloff*intensity; if(amt>1) amt=1;
+        var idx = (y*COVER_GRID+x)*3;
+        coverGridBuf[idx]   += (color[0]-coverGridBuf[idx])*amt;
+        coverGridBuf[idx+1] += (color[1]-coverGridBuf[idx+1])*amt;
+        coverGridBuf[idx+2] += (color[2]-coverGridBuf[idx+2])*amt;
+      }
+    }
+  }
+  // Line-segment stamp for jet trails — nothing to reuse from 0004 here
+  // (its addRing only does circles). Same bounding-box-optimized shape and
+  // lerp-toward-colour blending as coverAddRing above, but falloff is
+  // distance-to-segment rather than distance-to-centre, and brightness
+  // tapers along the segment so it reads as a directional streak, not a
+  // blob — dim (x0,y0) -> bright (x1,y1) by default (an individual jet's
+  // own exhaust, brightest at its moving head), or reversed with
+  // `reverseTaper` (the wing air-lines, meant to read brightest near the
+  // engines at the near/bottom-left end rather than the far end).
+  function coverAddTrail(x0,y0,x1,y1,width,color,intensity,reverseTaper){
+    if(intensity <= 0) return;
+    var minX = Math.max(0, Math.floor(Math.min(x0,x1)-width));
+    var maxX = Math.min(COVER_GRID-1, Math.ceil(Math.max(x0,x1)+width));
+    var minY = Math.max(0, Math.floor(Math.min(y0,y1)-width));
+    var maxY = Math.min(COVER_GRID-1, Math.ceil(Math.max(y0,y1)+width));
+    var dx = x1-x0, dy = y1-y0;
+    var lenSq = dx*dx+dy*dy || 1;
+    for(var y=minY;y<=maxY;y++){
+      for(var x=minX;x<=maxX;x++){
+        var t = ((x-x0)*dx+(y-y0)*dy)/lenSq;
+        t = t<0?0:(t>1?1:t);
+        var px = x0+t*dx, py = y0+t*dy;
+        var ddx = x-px, ddy = y-py, d = Math.sqrt(ddx*ddx+ddy*ddy);
+        var falloff = 1 - d/width;
+        if(falloff<=0) continue;
+        var taper = reverseTaper ? (1-0.65*t) : (0.35+0.65*t);
+        var amt = falloff*intensity*taper; if(amt>1) amt=1;
+        var idx = (y*COVER_GRID+x)*3;
+        coverGridBuf[idx]   += (color[0]-coverGridBuf[idx])*amt;
+        coverGridBuf[idx+1] += (color[1]-coverGridBuf[idx+1])*amt;
+        coverGridBuf[idx+2] += (color[2]-coverGridBuf[idx+2])*amt;
+      }
+    }
+  }
+
+  // --- Drifting cloud background: a small deterministic value-noise field
+  // (lattice + bilinear interpolation — no library, nothing in 0004 to
+  // reuse here since its background is a static two-colour gradient with
+  // no noise texture) sampled at a slowly shifting offset each frame for
+  // ambient drift, layered over a fixed night-sky gradient running the
+  // same bottom-right -> top-left axis as the jet trails themselves. ---
+  function coverMulberry32(seed){
+    return function(){
+      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  function makeCoverValueNoise(size, seed){
+    var rng = coverMulberry32(seed);
+    var lattice = new Float32Array(size*size);
+    for(var i=0;i<lattice.length;i++) lattice[i] = rng();
+    return function(x, y){
+      x = ((x % size) + size) % size;
+      y = ((y % size) + size) % size;
+      var x0 = Math.floor(x), y0 = Math.floor(y);
+      var x1 = (x0+1)%size, y1 = (y0+1)%size;
+      var fx = x-x0, fy = y-y0;
+      var v00=lattice[y0*size+x0], v10=lattice[y0*size+x1];
+      var v01=lattice[y1*size+x0], v11=lattice[y1*size+x1];
+      var a = v00+(v10-v00)*fx, b = v01+(v11-v01)*fx;
+      return a+(b-a)*fy;
+    };
+  }
+  // Sampled at a low frequency (x*0.11 etc — one lattice cell spans a
+  // large fraction of the 32-wide grid) so each cloud reads as a soft,
+  // sizeable blob rather than fine mottled texture; a first version
+  // sampled ~3x faster and, combined with the ordered-dither pattern
+  // below, read as noisy checkerboard rather than clouds.
+  var coverNoiseA = makeCoverValueNoise(8, 1337); // coarse cloud shapes
+  var coverNoiseB = makeCoverValueNoise(5, 4242); // subtle texture on top
+  // Night sky, gradiented along the jets' own bottom-left->top-right axis:
+  // warmer near the horizon where jets originate, cooler/deeper up where
+  // they're headed.
+  var COVER_SKY_NEAR = [26,16,36], COVER_SKY_FAR = [6,7,15];
+  var COVER_CLOUD = [58,62,84]; // kept close in brightness to the sky tones — a bigger jump dithers harshly at this resolution
+  var coverDriftT = 0; // wall-clock seconds, advances every frame regardless of playback state
+  function drawCoverBackground(){
+    for(var y=0;y<COVER_GRID;y++){
+      for(var x=0;x<COVER_GRID;x++){
+        // t=0 at bottom-left (near, hazy horizon), t=1 at top-right (far,
+        // deep sky) — same corner-to-corner axis the jets themselves fly.
+        var t = (x + (COVER_GRID-1-y)) / (2*(COVER_GRID-1));
+        var idx = (y*COVER_GRID+x)*3;
+        var r = COVER_SKY_NEAR[0] + (COVER_SKY_FAR[0]-COVER_SKY_NEAR[0])*t;
+        var gg = COVER_SKY_NEAR[1] + (COVER_SKY_FAR[1]-COVER_SKY_NEAR[1])*t;
+        var b = COVER_SKY_NEAR[2] + (COVER_SKY_FAR[2]-COVER_SKY_NEAR[2])*t;
+        var n = coverNoiseA(x*0.11+coverDriftT*0.2, y*0.11-coverDriftT*0.12)*0.8
+              + coverNoiseB(x*0.3-coverDriftT*0.3, y*0.3+coverDriftT*0.17)*0.2;
+        // Smoothstep rather than a hard-ish linear ramp — a gentler
+        // sky->cloud transition means fewer pixels sit exactly on a
+        // dither-level boundary, which is what was reading as noise.
+        var cloud = Math.max(0, Math.min(1, (n-0.38)/0.3));
+        cloud = cloud*cloud*(3-2*cloud);
+        coverGridBuf[idx]   = r + (COVER_CLOUD[0]-r)*cloud;
+        coverGridBuf[idx+1] = gg + (COVER_CLOUD[1]-gg)*cloud;
+        coverGridBuf[idx+2] = b + (COVER_CLOUD[2]-b)*cloud;
+      }
+    }
+  }
+
+  // --- Jets: one per note trigger. Head travels a fixed bottom-left ->
+  // top-right diagonal at a constant speed; drawn each frame as a tapered
+  // trail behind the head, with a quick fade-in then a longer fade-out
+  // timed to land near the far corner. Colour = the triggering note's
+  // active instrument colour (same colour used everywhere else on this
+  // page); length/width/lifetime scale with that note's volume. Each
+  // channel gets its own lane (a fixed perpendicular offset, plus a little
+  // random jitter so repeated notes on one channel don't all launch from
+  // the exact same point) so simultaneous notes across channels don't
+  // stack directly on top of each other, and the lanes are spread wide
+  // enough that trails fill most of the canvas rather than a narrow band
+  // down the middle. ---
+  var JET_DIR = { x: Math.SQRT1_2, y: -Math.SQRT1_2 };
+  var JET_PERP = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
+  var JET_SPEED = 22; // grid units/sec
+  var JET_LANES = [-9, -3, 3, 9]; // one per channel (0-3), spread wide across the diagonal's width
+  // How far a jet arcs off its straight-line path at the peak of its
+  // flight, in grid units. sin(t*PI) rather than a monotonic bank: it's
+  // 0 at both spawn and fade-out, so the arc bulges out mid-flight and
+  // back in, rather than the whole stream ending up visibly offset from
+  // where the lane system placed it.
+  var JET_CURVE_AMOUNT = 5;
+  // Normalizes the current sway to roughly [-1,1] — continuous, unlike a
+  // sign flip, so a jet spawned right as the sway crosses centre arcs
+  // only slightly (curveScale near 0) rather than snapping straight from
+  // one full bank to the other. Shared by jets (captured once at spawn,
+  // see spawnJet) and the wing air-lines (read live every frame) so both
+  // always agree on "which way and how much" the aircraft is banking.
+  function currentJetCurveScale(){
+    return currentJetSourceOffset() / JET_SOURCE_WOBBLE_AMP;
+  }
+  // Shared by both the head (current position) and the tail (position a
+  // bit earlier in the same flight) so the short exhaust-burst segment
+  // drawn each frame follows the curve's actual local tangent instead of
+  // cutting straight across it. Reads the CURRENT live sway/curve, not a
+  // value captured once at spawn — a jet is still physically attached to
+  // the aircraft (same as the wing air-lines below), so as the aircraft
+  // sways and banks, every jet already in flight has to move and bend
+  // right along with it, not keep replaying whatever the aircraft was
+  // doing at the instant it fired. j.spread0 is the one thing genuinely
+  // fixed at spawn: which lane (engine) this jet came out of.
+  function jetPositionAt(j, age){
+    var t = age/j.maxAge;
+    var dist = JET_SPEED*age;
+    var spread = j.spread0 + currentJetSourceOffset();
+    var curve = JET_CURVE_AMOUNT * Math.sin(t*Math.PI) * currentJetCurveScale();
+    return {
+      x: WING_BASE_X + JET_PERP.x*spread + JET_DIR.x*dist + JET_PERP.x*curve,
+      y: WING_BASE_Y + JET_PERP.y*spread + JET_DIR.y*dist + JET_PERP.y*curve
+    };
+  }
+  // The whole engine cluster sways slowly side to side (perpendicular to
+  // the flight direction) over time — every jet's spawn point and the
+  // wing air-lines' own anchor all read this same offset each frame, so
+  // the streams and the wings rotate together as one aircraft rather than
+  // each independently. Driven by coverDriftT (already ticking every
+  // frame regardless of playback state) rather than its own clock.
+  var JET_SOURCE_WOBBLE_AMP = 2.2; // grid units of side-to-side sway
+  var JET_SOURCE_WOBBLE_HZ = 1/7; // one full sway cycle roughly every 7s — slow and subtle
+  function currentJetSourceOffset(){
+    return Math.sin(coverDriftT * JET_SOURCE_WOBBLE_HZ * 2*Math.PI) * JET_SOURCE_WOBBLE_AMP;
+  }
+  var jets = [], cloudPuffs = [];
+  // The whole bundle of coloured engine streams (one per instrument/
+  // channel) is one aircraft, not four — so there's exactly one pair of
+  // wing air-lines, not one per stream. They sit just outside the
+  // widest jet lanes (one to either side of the whole bunch), always at
+  // least faintly present, white, and their brightness tracks overall
+  // volume across every channel rather than any single instrument's.
+  // coverOverallVol is a simple envelope-follower: jumps up on any new
+  // note trigger, decays smoothly when nothing's firing.
+  var coverOverallVol = 0;
+  var COVER_OVERALL_DECAY = 0.7; // per second
+  function spawnJet(channel, colorHex, volFrac){
+    volFrac = Math.max(0.15, Math.min(1, volFrac));
+    coverOverallVol = Math.max(coverOverallVol, volFrac);
+    var lane = JET_LANES[channel] || 0;
+    var jitter = (Math.random()*2.4-1.2);
+    jets.push({
+      // Which lane (engine) this jet fired from — the one thing that's
+      // actually fixed at spawn. Position and curve are both read live
+      // every frame in jetPositionAt instead of being captured here, so
+      // an already-flying jet keeps tracking the aircraft's current sway
+      // and bank exactly like the wing air-lines do, rather than each
+      // jet replaying a frozen snapshot of "what the aircraft was doing
+      // the instant it fired" — which is what made them visibly drift
+      // apart from the wings over a jet's ~2s life.
+      spread0: lane + jitter,
+      age: 0, maxAge: 1.6 + volFrac*0.5, // tuned so head*speed covers close to the full diagonal (~38 units) by the time it fades
+      color: coverHexToRgb(colorHex),
+      length: 4 + volFrac*7, width: 0.7 + volFrac*0.9
+    });
+  }
+  // Drawn once per frame regardless of how many (if any) individual jets
+  // are currently in flight — these represent fixed aircraft geometry,
+  // not a per-note event, so unlike the jets above they never spawn or
+  // age out. Span almost the full diagonal (well past where any
+  // individual jet actually reaches) since a plane's own wings are there
+  // the whole time, not just while an engine happens to be firing.
+  var WING_LANE = 13; // just outside the widest individual engine lane (9)
+  var WING_BASE_X = 3, WING_BASE_Y = COVER_GRID-4; // same base origin spawnJet uses
+  var WING_ARC_SEGMENTS = 14; // short straight pieces approximating the same curve the jets fly
+  function drawWingAirLines(){
+    var wobble = currentJetSourceOffset();
+    var baseX = WING_BASE_X + JET_PERP.x*wobble, baseY = WING_BASE_Y + JET_PERP.y*wobble;
+    // Read live every frame (not captured once like a jet's own
+    // curveScale) so the wings always reflect the aircraft's current
+    // bank — which also means they stay consistent with any jet in
+    // flight, since that jet captured this same value only moments ago.
+    var curveScale = currentJetCurveScale();
+    var intensity = 0.1 + coverOverallVol*0.45; // faint floor even at zero volume, brightens with the overall mix
+    [1,-1].forEach(function(side){
+      var laneOx = JET_PERP.x*WING_LANE*side, laneOy = JET_PERP.y*WING_LANE*side;
+      var prevX = null, prevY = null;
+      for(var i=0;i<=WING_ARC_SEGMENTS;i++){
+        var s = i/WING_ARC_SEGMENTS; // 0 at the engines, 1 at the far end — same convention as a jet's own t
+        var dist = 44*s;
+        var curve = JET_CURVE_AMOUNT * Math.sin(s*Math.PI) * curveScale; // same shape as jetPositionAt's curve
+        var px = baseX + JET_DIR.x*dist + JET_PERP.x*curve + laneOx;
+        var py = baseY + JET_DIR.y*dist + JET_PERP.y*curve + laneOy;
+        if(prevX!==null){
+          // Width 0.6, not thinner: at exactly 45 degrees (JET_DIR/JET_PERP
+          // are both unit diagonals) on a 32px grid, a narrower line's
+          // worst-case gap to the nearest pixel centre exceeds its own
+          // width, so most of it simply never lands on a pixel — it needs
+          // to stay reliably above that gap to render as a continuous
+          // line rather than a dashed one. reverseTaper=true: brightest
+          // near the engines rather than the far end, per earlier feedback.
+          coverAddTrail(prevX, prevY, px, py, 0.6, [255,255,255], intensity, true);
+        }
+        prevX = px; prevY = py;
+      }
+    });
+  }
+  // A note's effective volume — GB channel volume defaults to max (15)
+  // when never explicitly lowered by a row, so an unset cell.vol reads as
+  // full volume rather than silence.
+  function noteVolumeAt(c, orderPos, row){
+    var ch = song.channels[c];
+    var pat = ch.patterns[ch.orderList[orderPos]];
+    var raw = pat ? pat.rows[row] : null;
+    return (raw && raw.vol!==undefined) ? raw.vol : 15;
+  }
+  function spawnJetForCell(c, orderPos, row){
+    var ch = song.channels[c];
+    if(ch.noteTimeline[orderPos][row]===null) return; // nothing held here — don't fire a trail for silence
+    var insIdx = ch.insTimeline[orderPos][row];
+    var color = (insIdx!==null && song.instruments[insIdx]) ? song.instruments[insIdx].color : '#c9973a';
+    spawnJet(c, color, noteVolumeAt(c, orderPos, row)/15);
+  }
+  function drawCoverArtFrame(dt){
+    coverDriftT += dt;
+    coverOverallVol = Math.max(0, coverOverallVol - dt*COVER_OVERALL_DECAY);
+    drawCoverBackground();
+    drawWingAirLines();
+
+    for(var i=jets.length-1;i>=0;i--){
+      var j = jets[i];
+      j.age += dt;
+      if(j.age >= j.maxAge){ jets.splice(i,1); continue; }
+      var t = j.age/j.maxAge;
+      var head = jetPositionAt(j, j.age);
+      var tail = jetPositionAt(j, Math.max(0, j.age - j.length/JET_SPEED));
+      var headX = head.x, headY = head.y, tailX = tail.x, tailY = tail.y;
+      var envelope = t<0.12 ? t/0.12 : 1-(t-0.12)/(1-0.12);
+      coverAddTrail(tailX, tailY, headX, headY, j.width, j.color, envelope*1.4);
+      // Occasional cloud puff left behind the head — ties the "jet trail"
+      // and "clouds" halves of the brief together visually. Probability
+      // is dt-scaled so puff density doesn't depend on frame rate.
+      if(t<0.6 && Math.random() < dt*5){
+        cloudPuffs.push({ gx: tailX, gy: tailY, age:0, maxAge: 0.7+Math.random()*0.4, color: j.color });
+      }
+    }
+    for(i=cloudPuffs.length-1;i>=0;i--){
+      var p = cloudPuffs[i];
+      p.age += dt;
+      if(p.age >= p.maxAge){ cloudPuffs.splice(i,1); continue; }
+      var pt = p.age/p.maxAge;
+      coverAddRing(p.gx, p.gy, pt*2.5, 1.2, p.color, (1-pt)*0.6);
+    }
+
+    var data = coverGridImg.data;
+    for(var y=0;y<COVER_GRID;y++){
+      for(var x=0;x<COVER_GRID;x++){
+        var idx = (y*COVER_GRID+x)*3, o = (y*COVER_GRID+x)*4;
+        data[o]   = coverDitherChannel(coverGridBuf[idx],   x, y);
+        data[o+1] = coverDitherChannel(coverGridBuf[idx+1], x, y);
+        data[o+2] = coverDitherChannel(coverGridBuf[idx+2], x, y);
+        data[o+3] = 255;
+      }
+    }
+    coverGctx.putImageData(coverGridImg, 0, 0);
+    coverVctx.imageSmoothingEnabled = false;
+    coverVctx.clearRect(0,0,240,240);
+    coverVctx.drawImage(coverGridCanvas, 0, 0, 240, 240);
+  }
+  drawCoverArtFrame(0); // paint the sky immediately at load, before anything's ever triggered
+
+  // Click-to-save: upscales from coverGridCanvas (the native 32x32 buffer)
+  // rather than the visible 240x240 canvas — 1600/32 = 50 exactly, an
+  // integer scale with imageSmoothingEnabled off, so pixel edges stay
+  // crisp. Scaling from the already-240px canvas instead would be a
+  // non-integer 6.667x and risk soft/uneven edges. Same Blob + temporary
+  // <a download> + revokeObjectURL pattern as exportMidi() below.
+  function exportCoverArtPng(){
+    var exportCanvas = document.createElement('canvas');
+    exportCanvas.width = 1600; exportCanvas.height = 1600;
+    var ectx = exportCanvas.getContext('2d');
+    ectx.imageSmoothingEnabled = false;
+    ectx.drawImage(coverGridCanvas, 0, 0, 1600, 1600);
+    exportCanvas.toBlob(function(blob){
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = (song.meta.name || 'flight_school') + '-cover.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    }, 'image/png');
+  }
+  document.getElementById('coverArt').addEventListener('click', exportCoverArtPng);
+
+  function flashInstrumentRow(i){
+    var el = document.querySelector('tr[data-ins-row="'+i+'"]');
+    if(!el) return;
+    el.classList.add('firing');
+    setTimeout(function(){ el.classList.remove('firing'); }, 80);
+  }
+  function flashInstrumentsForRow(orderPos, row){
+    for(var c=0;c<4;c++){
+      var ch = song.channels[c];
+      var pat = ch.patterns[ch.orderList[orderPos]];
+      var raw = pat ? pat.rows[row] : null;
+      if(raw && raw.note!==undefined && raw.note!==NOTE_OFF){
+        var insIdx = ch.insTimeline[orderPos][row];
+        if(insIdx!==null) flashInstrumentRow(insIdx);
+        spawnJetForCell(c, orderPos, row); // cover art — every channel fires a trail, including Noise
+      }
+    }
+  }
+
+  // --- Piano Roll rendering: a full redraw on every update (base keys +
+  // whatever's currently lit), same "just rebuild it" discipline as
+  // renderPatternTable — the canvas is small and updates are infrequent
+  // (once per row change, or on a preview click), so there's no need for
+  // incremental redraw bookkeeping. Two independent sources of "lit" keys
+  // are merged each draw: pianoRollActiveNotes (sustained — tracks real
+  // playback position, cleared on Stop, frozen on Pause) and
+  // pianoRollFlashes (transient — a preview click, self-clearing via its
+  // own setTimeout regardless of transport state). Both declared earlier,
+  // next to pianoKeyGeo — see the comment there. ---
+  var PIANO_FLASH_MS = 300;
+  function drawPianoRollBase(ctx){
+    var geo = pianoKeyGeo.keys;
+    Object.keys(geo).forEach(function(nStr){
+      var k = geo[nStr];
+      if(!k.white) return;
+      ctx.fillStyle = '#eae6dc';
+      ctx.fillRect(k.x, 0, k.w-1, k.h);
+      ctx.strokeStyle = '#3a3a3a';
+      ctx.strokeRect(k.x+0.5, 0.5, k.w-2, k.h-1);
+    });
+    Object.keys(geo).forEach(function(nStr){
+      var k = geo[nStr];
+      if(k.white) return;
+      ctx.fillStyle = '#151515';
+      ctx.fillRect(k.x, 0, k.w, k.h);
+    });
+  }
+  function drawPianoRoll(){
+    var canvas = document.getElementById('pianoRollCanvas');
+    if(!canvas) return;
+    canvas.width = pianoKeyGeo.totalWidth+1;
+    canvas.height = PIANO_WHITE_KEY_H;
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    drawPianoRollBase(ctx);
+    var geo = pianoKeyGeo.keys;
+    var lit = {};
+    Object.keys(pianoRollActiveNotes).forEach(function(n){ lit[n] = pianoRollActiveNotes[n]; });
+    Object.keys(pianoRollFlashes).forEach(function(n){ lit[n] = pianoRollFlashes[n]; }); // flashes drawn last, win over a sustained note at the same key
+    Object.keys(lit).forEach(function(nStr){
+      var k = geo[nStr];
+      if(!k) return; // note outside the computed range (padding is generous, but stay safe)
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = lit[nStr];
+      ctx.fillRect(k.x, k.white ? k.h*0.55 : 0, k.w, k.white ? k.h*0.45 : k.h);
+      ctx.globalAlpha = 1;
+    });
+  }
+  // Transient highlight for a preview click — independent of playback
+  // state, self-clearing, same "add now, setTimeout to remove" idiom as
+  // flashInstrumentRow above.
+  function flashPianoKey(note, color){
+    if(note===null || note===undefined || note===NOTE_OFF) return;
+    pianoRollFlashes[note] = color;
+    drawPianoRoll();
+    clearTimeout(pianoRollFlashTimers[note]);
+    pianoRollFlashTimers[note] = setTimeout(function(){
+      delete pianoRollFlashes[note];
+      drawPianoRoll();
+    }, PIANO_FLASH_MS);
+  }
+  // Looks up each given channel's held note/instrument at (orderPos,row)
+  // via noteTimeline/insTimeline and flashes it — the shared lookup used
+  // by all 3 preview-click sites below (row-index, per-cell, and the
+  // Instruments panel's preview button). Channel 3 (Noise) is routed to
+  // the noise box instead of a lit key — see flashNoise.
+  function flashPianoForChannelsAt(channels, orderPos, row){
+    channels.forEach(function(c){
+      if(c===3){ flashNoise(orderPos, row); return; }
+      var ch = song.channels[c];
+      var note = ch.noteTimeline[orderPos][row];
+      if(note===null) return;
+      var insIdx = ch.insTimeline[orderPos][row];
+      var color = (insIdx!==null && song.instruments[insIdx]) ? song.instruments[insIdx].color : '#c9973a';
+      flashPianoKey(note, color);
+    });
+  }
+  // Sustained keys — mirrors flashInstrumentsForRow's per-row scan, but
+  // reads noteTimeline (actual pitch) rather than just detecting a
+  // trigger, and replaces the whole active set each call (a channel that
+  // fell silent this row needs its old key to go dark, not just skip
+  // adding a new one). Only channels 0-2 (the tonal ones) light a key —
+  // channel 3 (Noise) is handled separately by setNoiseActive below.
+  function updatePianoRollActive(orderPos, row){
+    pianoRollActiveNotes = {};
+    for(var c=0;c<3;c++){
+      var ch = song.channels[c];
+      var note = ch.noteTimeline[orderPos][row];
+      if(note===null) continue;
+      var insIdx = ch.insTimeline[orderPos][row];
+      pianoRollActiveNotes[note] = (insIdx!==null && song.instruments[insIdx]) ? song.instruments[insIdx].color : '#c9973a';
+    }
+    setNoiseActive(orderPos, row);
+    drawPianoRoll();
+  }
+  // --- Noise box: not tonal, so instead of a lit key it's a small text
+  // readout of the current note + instrument colour/name. Same
+  // sustained (setNoiseActive, tracks playback) vs. transient (flashNoise,
+  // preview clicks) split as the piano keys, merged the same way (flash
+  // wins) in updateNoiseDisplay. ---
+  var NOISE_FLASH_MS = 300;
+  function updateNoiseDisplay(){
+    var noteEl = document.getElementById('noiseBoxNote');
+    var insEl = document.getElementById('noiseBoxIns');
+    if(!noteEl || !insEl) return;
+    var state = noiseFlash || noiseActive;
+    if(!state){
+      noteEl.textContent = '—';
+      noteEl.style.color = 'var(--dim)';
+      insEl.textContent = '';
+      return;
+    }
+    noteEl.textContent = noteToName(state.note);
+    noteEl.style.color = state.color;
+    insEl.textContent = state.name || '';
+  }
+  function noiseStateAt(orderPos, row){
+    var ch = song.channels[3];
+    var note = ch.noteTimeline[orderPos][row];
+    if(note===null) return null;
+    var insIdx = ch.insTimeline[orderPos][row];
+    var ins = insIdx!==null ? song.instruments[insIdx] : null;
+    return { note: note, color: ins ? ins.color : '#c9973a', name: ins ? ins.name : '' };
+  }
+  function setNoiseActive(orderPos, row){
+    noiseActive = noiseStateAt(orderPos, row);
+    updateNoiseDisplay();
+  }
+  function flashNoise(orderPos, row){
+    var state = noiseStateAt(orderPos, row);
+    if(!state) return;
+    noiseFlash = state;
+    updateNoiseDisplay();
+    clearTimeout(noiseFlashTimer);
+    noiseFlashTimer = setTimeout(function(){
+      noiseFlash = null;
+      updateNoiseDisplay();
+    }, NOISE_FLASH_MS);
+  }
+
+  var lastShownOrderPos = null, lastShownRow = null;
+  var coverLastFrameSec = null;
+  function playbackRAF(now){
+    if(songStarted && ac && ac.state==='running'){
+      // The track loops indefinitely (see armLoopContinuation) — no
+      // stop-at-end branch needed here, currentSongTime() already wraps.
+      var pos = songPositionAt(currentSongTime());
+      if(pos.orderPos !== lastShownOrderPos){
+        lastShownOrderPos = pos.orderPos;
+        document.getElementById('orderSelect').value = pos.orderPos;
+        renderPatternTable(); // must happen before setPlayheadRow below, which queries the fresh DOM it produces
+      }
+      if(pos.row !== lastShownRow){
+        lastShownRow = pos.row;
+        setPlayheadRow(pos.row);
+        flashInstrumentsForRow(pos.orderPos, pos.row);
+        updatePianoRollActive(pos.orderPos, pos.row);
+      }
+    }
+    // Cover art redraws every frame regardless of transport state — the
+    // ambient cloud drift and any in-flight jet trail/puff need to keep
+    // animating whether or not the song is actually playing (a preview
+    // click can fire a jet with nothing playing at all).
+    var nowSec = now/1000;
+    if(coverLastFrameSec===null) coverLastFrameSec = nowSec;
+    var coverDt = Math.min(0.1, nowSec-coverLastFrameSec); // clamp guards against a huge dt after e.g. a background-tab throttle
+    coverLastFrameSec = nowSec;
+    drawCoverArtFrame(coverDt);
+    requestAnimationFrame(playbackRAF);
+  }
+  requestAnimationFrame(playbackRAF);
+
+  // --- instrument preview: no separate sample files — this plays a 1s
+  // slice straight out of the real stem, starting at that instrument's
+  // first actual note-trigger anywhere in the song. `.start(when, offset,
+  // duration)` plays a sub-range of a buffer directly, so no manual
+  // extraction/copy is needed — just point it at the right stem and spot. ---
+  function findInstrumentPreviewSpot(insIndex){
+    for(var op=0; op<song.meta.orderLength; op++){
+      for(var r=0; r<song.meta.patternLength; r++){
+        for(var c=0;c<4;c++){
+          var ch = song.channels[c];
+          var pat = ch.patterns[ch.orderList[op]];
+          var raw = pat ? pat.rows[r] : null;
+          if(raw && raw.note!==undefined && raw.note!==NOTE_OFF && ch.insTimeline[op][r]===insIndex){
+            return { channel: c, time: (op*song.meta.patternLength+r) * rowDurationSec(), orderPos: op, row: r };
+          }
+        }
+      }
+    }
+    return null; // instrument never actually triggers anywhere in this song
+  }
+  var instrumentPreviewSpots = song.instruments.map(function(ins, i){ return findInstrumentPreviewSpot(i); });
+  var PREVIEW_DUR_CELLS = 2; // in rows, not seconds — scales with this song's own speed/BPM via rowDurationSec()
+  // A second, independent AudioContext dedicated to previews. Resuming
+  // the MAIN context (ac) to make a preview audible would also un-freeze
+  // every stem source already scheduled on it — i.e. clicking preview
+  // while paused would silently resume the whole track. AudioBuffer
+  // objects aren't tied to the context that decoded them (only AudioNodes
+  // are), so stemBuffers can be reused here directly with no re-decoding.
+  var previewAc = null;
+  // Shared preview primitive: plays a PREVIEW_DUR_CELLS-long slice starting
+  // at `time` (song-time seconds) from each stem in `channels`, all
+  // started together so a multi-channel preview (row-index click) stays
+  // in sync the same way real playback does. Used by the instrument
+  // preview buttons, per-cell pattern clicks, and row-index clicks alike.
+  function previewAtTime(channels, time){
+    ensureAudioContext(); // still needed: stemBuffers are decoded via the main context
+    if(!previewAc) previewAc = new (window.AudioContext||window.webkitAudioContext)();
+    if(previewAc.state!=='running') previewAc.resume();
+    var startAt = previewAc.currentTime;
+    var dur = PREVIEW_DUR_CELLS * rowDurationSec();
+    channels.forEach(function(c){
+      if(!stemBuffers[c]) return;
+      var src = previewAc.createBufferSource();
+      src.buffer = stemBuffers[c];
+      src.connect(previewAc.destination);
+      src.start(startAt, time, dur);
+    });
+  }
+  function previewInstrument(insIndex){
+    var spot = instrumentPreviewSpots[insIndex];
+    if(!spot) return;
+    previewAtTime([spot.channel], spot.time);
+    flashPianoForChannelsAt([spot.channel], spot.orderPos, spot.row);
+    spawnJetForCell(spot.channel, spot.orderPos, spot.row);
+  }
+  document.getElementById('legend').addEventListener('click', function(e){
+    var previewBtn = e.target.closest('[data-preview-ins]');
+    if(previewBtn) previewInstrument(parseInt(previewBtn.getAttribute('data-preview-ins'), 10));
+  });
+
+  // ============================================================
+  // "Export MIDI" — a minimal from-scratch Standard MIDI File (format 1)
+  // writer, built directly from the already-parsed SongModel. No library:
+  // the format is a small, well-specified set of chunks/VLQ-delta events.
+  // ============================================================
+  function midiVLQ(value){
+    var bytes = [value & 0x7F];
+    value = Math.floor(value / 128);
+    while(value > 0){
+      bytes.unshift((value & 0x7F) | 0x80);
+      value = Math.floor(value / 128);
+    }
+    return bytes;
+  }
+  // Standard MIDI File text meta-events are conventionally ASCII — masking
+  // a char code with &0xFF (rather than substituting) silently corrupts
+  // anything above U+00FF into a garbage byte, e.g. an em dash (U+2014)
+  // truncates to 0x14, a control character. Substitute instead of masking.
+  function midiStr(s){
+    var bytes = [];
+    for(var i=0;i<s.length;i++){
+      var code = s.charCodeAt(i);
+      bytes.push((code>=32 && code<=126) ? code : 0x3F); // 0x3F = '?'
+    }
+    return bytes;
+  }
+  function midiUint32(v){ return [(v>>>24)&0xFF, (v>>>16)&0xFF, (v>>>8)&0xFF, v&0xFF]; }
+  function midiUint16(v){ return [(v>>>8)&0xFF, v&0xFF]; }
+  function midiMetaEvent(type, dataBytes){ return [0xFF, type].concat(midiVLQ(dataBytes.length), dataBytes); }
+  function midiTrackChunk(events){
+    // events: [{deltaTicks, bytes}], in ascending absolute-time order
+    var body = [];
+    events.forEach(function(ev){ body = body.concat(midiVLQ(ev.deltaTicks), ev.bytes); });
+    body = body.concat(midiVLQ(0), [0xFF,0x2F,0x00]); // end of track
+    return midiStr('MTrk').concat(midiUint32(body.length), body);
+  }
+  // 4 MIDI ticks per audio tick, always — audio ticks are speeds[0] per
+  // row, so this is guaranteed exact regardless of this song's own speed
+  // value (not just coincidentally exact for flight_school's speeds[0]=6).
+  var MIDI_TICKS_PER_AUDIO_TICK = 4;
+  var MIDI_TICKS_PER_ROW = MIDI_TICKS_PER_AUDIO_TICK * song.meta.speeds[0];
+
+  // Same approximation constants used for this shrine's old (since
+  // removed) live-synthesis pitch effects — Furnace's own docs don't give
+  // an exact numeric conversion for these, so this is a judgment call
+  // carried over for consistency, not a spec value. Vibrato depth's ±1
+  // semitone max at y=15 IS documented, so that unit is exact.
+  var PITCH_SLIDE_UNIT = 1/128;   // semitones per audio tick, per effect-value unit
+  var VIBRATO_DEPTH_UNIT = 1/15;  // semitone at full (y=15) depth
+  var VIBRATO_SPEED_UNIT = 4;     // phase units (of a 64-step cycle) advanced per audio tick, per speed nibble
+  // GM's default pitch-bend range is only ±2 semitones — too narrow for a
+  // sustained Furnace pitch-slide, which can accumulate well past that.
+  // Declared per-track via RPN 0 below; most DAWs/synths honor it on
+  // import. The bend curve is also clamped to this range as a safety net
+  // for the rare player that doesn't.
+  var MIDI_BEND_RANGE_SEMITONES = 12;
+
+  // Our internal note numbers and standard MIDI note numbers are both
+  // semitone-linear against A4: A_REF_NOTE(129) is our A4, MIDI's A4 is 69,
+  // so the conversion is one exact constant offset. This exact kind of
+  // off-by-octave slip is what caused most of this shrine's old synthesis
+  // debugging — being explicit about it here on purpose.
+  function ourNoteToMidiNote(n){ return n - (A_REF_NOTE - 69); }
+  function midiBendValueFor(semitoneOffset){
+    var clamped = Math.max(-MIDI_BEND_RANGE_SEMITONES, Math.min(MIDI_BEND_RANGE_SEMITONES, semitoneOffset));
+    return Math.max(0, Math.min(16383, Math.round(8192 + (clamped/MIDI_BEND_RANGE_SEMITONES)*8191)));
+  }
+
+  // Walks one GB channel's own note/effect data (this is where that data
+  // actually lives) and produces a flat, tick-stamped event stream —
+  // note-on/off plus pitch-bend steps for active 01/02 (slide) and 04
+  // (vibrato) effects — each event tagged with whichever INSTRUMENT was
+  // active at that moment. These get regrouped by instrument afterward
+  // (see buildMidiBytes) rather than becoming this channel's own track,
+  // since a channel is just "whatever instrument happens to be plugged
+  // into this GB voice right now," not a musically meaningful part on
+  // its own the way the instrument is.
+  function walkChannelEvents(c){
+    var ch = song.channels[c];
+    var events = [];
+    var sounding = null, soundingIns = null;
+    var pitchSlideRate = 0, vibratoSpeed = 0, vibratoDepth = 0, vibratoPhase = 0, accumPitch = 0;
+    var lastBendValue = 8192;
+    function resetPitchState(){ pitchSlideRate=0; vibratoSpeed=0; vibratoDepth=0; vibratoPhase=0; accumPitch=0; }
+    function emitBendReset(tick, insIdx){
+      if(lastBendValue!==8192){ events.push({tick:tick, insIndex:insIdx, type:'bend', bendValue:8192}); lastBendValue=8192; }
+    }
+    for(var op=0; op<song.meta.orderLength; op++){
+      var pat = ch.patterns[ch.orderList[op]];
+      for(var r=0; r<song.meta.patternLength; r++){
+        var raw = pat ? pat.rows[r] : null;
+        var rowTick = (op*song.meta.patternLength + r) * MIDI_TICKS_PER_ROW;
+        var insIdx = ch.insTimeline[op][r];
+
+        // Note event first (a fresh note/OFF resets pitch effects to a
+        // clean baseline — matches Furnace's own "cleared ... by a plain
+        // new note" behavior for 01/02), then this row's own effects,
+        // so a note and an effect landing on the same row both apply.
+        if(raw && raw.note!==undefined){
+          if(sounding!==null){ events.push({tick:rowTick, insIndex:soundingIns, type:'off', note:sounding}); sounding=null; soundingIns=null; }
+          resetPitchState();
+          emitBendReset(rowTick, insIdx);
+          if(raw.note!==NOTE_OFF){
+            var midiNote = ourNoteToMidiNote(raw.note);
+            events.push({tick:rowTick, insIndex:insIdx, type:'on', note:midiNote});
+            sounding = midiNote; soundingIns = insIdx;
+          }
+        }
+        if(raw && raw.effects){
+          raw.effects.forEach(function(e){
+            if(!e) return;
+            if(e.code===1) pitchSlideRate = e.value * PITCH_SLIDE_UNIT;
+            else if(e.code===2) pitchSlideRate = -e.value * PITCH_SLIDE_UNIT;
+            else if(e.code===4){ vibratoSpeed = (e.value>>4)*VIBRATO_SPEED_UNIT; vibratoDepth = (e.value&0xF)*VIBRATO_DEPTH_UNIT; }
+          });
+        }
+
+        // Step per audio tick (not just once per row) so the bend curve
+        // has the same resolution the effect itself actually updates at.
+        // Skipped when nothing's active — most rows, most of the time.
+        if(sounding!==null && (pitchSlideRate!==0 || vibratoDepth!==0)){
+          for(var at=0; at<song.meta.speeds[0]; at++){
+            accumPitch += pitchSlideRate;
+            var v = midiBendValueFor(accumPitch + vibratoDepth*Math.sin(2*Math.PI*vibratoPhase/64));
+            if(v!==lastBendValue){
+              events.push({tick: rowTick + at*MIDI_TICKS_PER_AUDIO_TICK, insIndex:insIdx, type:'bend', bendValue:v});
+              lastBendValue = v;
+            }
+            vibratoPhase = (vibratoPhase + vibratoSpeed) % 64;
+          }
+        }
+      }
+    }
+    var endTick = song.meta.orderLength * song.meta.patternLength * MIDI_TICKS_PER_ROW;
+    if(sounding!==null) events.push({tick:endTick, insIndex:soundingIns, type:'off', note:sounding});
+    emitBendReset(endTick, soundingIns);
+    return events;
+  }
+
+  // Collects one instrument's events (already tagged, possibly from
+  // several different GB channels if it was ever used on more than one)
+  // into a single delta-encoded MIDI event list for its own track.
+  function buildInstrumentTrackEvents(insIndex, allEvents){
+    var evts = allEvents.filter(function(e){ return e.insIndex===insIndex; })
+      .sort(function(a,b){ return a.tick-b.tick; });
+    var midiCh = insIndex % 16;
+    var out = [], lastTick = 0;
+    evts.forEach(function(e){
+      var bytes;
+      if(e.type==='on') bytes = [0x90|midiCh, e.note, 100];
+      else if(e.type==='off') bytes = [0x80|midiCh, e.note, 0];
+      else { var v=e.bendValue; bytes = [0xE0|midiCh, v&0x7F, (v>>7)&0x7F]; } // pitch bend: 14-bit value, LSB then MSB (7 bits each)
+      out.push({ deltaTicks: e.tick-lastTick, bytes: bytes });
+      lastTick = e.tick;
+    });
+    return out;
+  }
+
+  function buildMidiBytes(){
+    var beatSec = (song.meta.highlights[0]||4) * rowDurationSec();
+    var bpm = 60/beatSec;
+    var usPerQuarter = Math.round(60000000/bpm);
+    var ppq = MIDI_TICKS_PER_ROW * (song.meta.highlights[0]||4);
+
+    var tempoTrack = midiTrackChunk([
+      { deltaTicks:0, bytes: midiMetaEvent(0x51, [(usPerQuarter>>16)&0xFF,(usPerQuarter>>8)&0xFF,usPerQuarter&0xFF]) },
+      { deltaTicks:0, bytes: midiMetaEvent(0x03, midiStr((song.meta.name||'Lantern export')+' tempo')) }
+    ]);
+    var tracks = [tempoTrack];
+
+    var allEvents = [];
+    for(var c=0;c<4;c++) allEvents = allEvents.concat(walkChannelEvents(c));
+
+    song.instruments.forEach(function(ins, i){
+      var evts = buildInstrumentTrackEvents(i, allEvents);
+      if(evts.length===0) return; // this instrument is never actually triggered anywhere — no point in an empty track
+      var midiCh = i % 16;
+      var header = [
+        { deltaTicks:0, bytes: midiMetaEvent(0x03, midiStr(ins.name || ('Instrument '+i))) },
+        // RPN 0 (Pitch Bend Sensitivity): MSB=0,LSB=0 selects it, Data
+        // Entry MSB sets the range in semitones, then MSB=127/LSB=127
+        // deselects the RPN so nothing else gets misread as more range data.
+        { deltaTicks:0, bytes: [0xB0|midiCh, 0x65, 0x00] },
+        { deltaTicks:0, bytes: [0xB0|midiCh, 0x64, 0x00] },
+        { deltaTicks:0, bytes: [0xB0|midiCh, 0x06, MIDI_BEND_RANGE_SEMITONES] },
+        { deltaTicks:0, bytes: [0xB0|midiCh, 0x64, 0x7F] },
+        { deltaTicks:0, bytes: [0xB0|midiCh, 0x65, 0x7F] }
+      ];
+      tracks.push(midiTrackChunk(header.concat(evts)));
+    });
+
+    var out = midiStr('MThd').concat(midiUint32(6), midiUint16(1), midiUint16(tracks.length), midiUint16(ppq));
+    tracks.forEach(function(tc){ out = out.concat(tc); });
+    return new Uint8Array(out);
+  }
+
+  function exportMidi(){
+    var bytes = buildMidiBytes();
+    var blob = new Blob([bytes], { type: 'audio/midi' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = (song.meta.name || 'flight_school') + '.mid';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  }
+  document.getElementById('exportMidiBtn').addEventListener('click', exportMidi);
+
+  // Static-asset downloads (the source .fur module and the full mixed
+  // .wav) — same temporary-<a> pattern as exportMidi()/exportCoverArtPng()
+  // above, but pointing at a real file in ASSETS/ instead of a Blob. Uses
+  // the build's trackname (matches the actual ASSETS/ filenames on disk),
+  // not song.meta.name — that's the human song title from the Furnace
+  // project, which can differ from the filename and would 404.
+  function downloadAsset(filename){
+    var a = document.createElement('a');
+    a.href = 'ASSETS/' + filename;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  document.getElementById('downloadFurBtn').addEventListener('click', function(){
+    downloadAsset('flight_school_night_shift.fur');
+  });
+  document.getElementById('downloadWavBtn').addEventListener('click', function(){
+    downloadAsset('flight_school_night_shift.wav');
+  });
+
+
+
+
+
+
+  // Test-only hook (harmless in normal use) so this scheduling/playback
+  // code can be exercised/inspected without duplicating it.
+  window.__debugLantern = {
+    song: song,
+    songPositionAt: songPositionAt,
+    buildMidiBytes: buildMidiBytes,
+    getState: function(){ return { ac: ac, songStarted: songStarted, isPlaying: isPlaying(), songDuration: songDuration, currentSongTime: currentSongTime() }; },
+    stemBuffers: function(){ return stemBuffers; },
+    instrumentPreviewSpots: instrumentPreviewSpots,
+    mutedChannels: mutedChannels,
+    pianoRoll: function(){ return { active: pianoRollActiveNotes, flashes: pianoRollFlashes, range: pianoRollRange }; },
+    noiseBox: function(){ return { active: noiseActive, flash: noiseFlash }; },
+    coverArt: function(){ return { jets: jets.map(function(j){ return {spread0:j.spread0,age:j.age,maxAge:j.maxAge,width:j.width,length:j.length}; }), cloudPuffs: cloudPuffs.length, driftT: coverDriftT, overallVol: coverOverallVol, sourceWobble: currentJetSourceOffset(), curveScale: currentJetCurveScale() }; },
+    coverBufAt: function(x,y){ var idx=(Math.round(y)*COVER_GRID+Math.round(x))*3; return [coverGridBuf[idx],coverGridBuf[idx+1],coverGridBuf[idx+2]]; },
+    spawnJetForCell: spawnJetForCell
+  };
+
+})();
+</script>
+</body>
+</html>
