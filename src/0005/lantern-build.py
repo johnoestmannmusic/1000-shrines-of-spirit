@@ -32,6 +32,7 @@ from html import escape as html_escape
 GITHUB_REPO_URL = "https://github.com/johnoestmannmusic/1000-shrines-of-spirit"
 FURNACE_URL = "https://github.com/tildearrow/furnace"
 COMPOSER_SITE_URL = "https://johnoestmannmusic.com"
+WAV_PEAK_NORMALIZE_DB = -0.1
 
 SHRINE_DIR = os.path.dirname(os.path.abspath(__file__))
 INGEST_DIR = os.path.join(SHRINE_DIR, "INGEST")
@@ -425,7 +426,51 @@ def build_midi_bytes(data):
     return bytes(out)
 
 
-# --- Stage 3: convert stems, copy .fur/.wav, write the .mid ---------------
+# --- Stage 3: convert stems, copy .fur, peak-normalize + copy .wav, write
+# the .mid --------------------------------------------------------------
+
+def wav_stream_params(path):
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0",
+         "-show_entries", "stream=codec_name,sample_rate,channels",
+         "-of", "json", path],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        fail("ERROR: ffprobe failed reading %s:\n%s" % (path, result.stderr))
+    info = json.loads(result.stdout)["streams"][0]
+    return info["codec_name"], info["sample_rate"], info["channels"]
+
+
+def peak_normalize_wav(src, dst, target_db):
+    # Two-pass: ffmpeg has no single-pass "normalize to peak X dB" filter,
+    # so first measure the current true peak via volumedetect (a null-output
+    # pass, nothing written), then apply the exact flat gain needed to land
+    # it on target_db with a second real pass. Re-encodes with the same
+    # codec/rate/channels as the source so this doesn't also silently
+    # change the shipped file's format.
+    detect = subprocess.run(
+        ["ffmpeg", "-i", src, "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    m = re.search(r"max_volume:\s*(-?\d+(?:\.\d+)?) dB", detect.stderr)
+    if not m:
+        fail("ERROR: could not read peak volume (volumedetect) for %s:\n%s" % (src, detect.stderr))
+    current_peak_db = float(m.group(1))
+    gain_db = target_db - current_peak_db
+
+    codec, sample_rate, channels = wav_stream_params(src)
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", src,
+         "-af", "volume=%.4fdB" % gain_db,
+         "-c:a", codec, "-ar", str(sample_rate), "-ac", str(channels), dst],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        fail("ERROR: ffmpeg failed peak-normalizing %s:\n%s" % (src, result.stderr))
+    print("peak-normalized %s -> %s (%.1fdB -> %.1fdB, gain %+.2fdB)" % (
+        os.path.relpath(src, SHRINE_DIR), os.path.relpath(dst, SHRINE_DIR), current_peak_db, target_db, gain_db))
+
 
 def convert_assets(trackname, data):
     os.makedirs(ASSETS_DIR, exist_ok=True)
@@ -441,11 +486,14 @@ def convert_assets(trackname, data):
         if result.returncode != 0:
             fail("ERROR: ffmpeg failed encoding %s:\n%s" % (src, result.stderr))
 
-    for ext in (".fur", ".wav"):
-        src = os.path.join(INGEST_DIR, trackname + ext)
-        dst = os.path.join(ASSETS_DIR, trackname + ext)
-        shutil.copyfile(src, dst)
-        print("copied %s -> %s" % (os.path.relpath(src, SHRINE_DIR), os.path.relpath(dst, SHRINE_DIR)))
+    fur_src = os.path.join(INGEST_DIR, trackname + ".fur")
+    fur_dst = os.path.join(ASSETS_DIR, trackname + ".fur")
+    shutil.copyfile(fur_src, fur_dst)
+    print("copied %s -> %s" % (os.path.relpath(fur_src, SHRINE_DIR), os.path.relpath(fur_dst, SHRINE_DIR)))
+
+    wav_src = os.path.join(INGEST_DIR, trackname + ".wav")
+    wav_dst = os.path.join(ASSETS_DIR, trackname + ".wav")
+    peak_normalize_wav(wav_src, wav_dst, WAV_PEAK_NORMALIZE_DB)
 
     mid_path = os.path.join(ASSETS_DIR, trackname + ".mid")
     with open(mid_path, "wb") as f:
