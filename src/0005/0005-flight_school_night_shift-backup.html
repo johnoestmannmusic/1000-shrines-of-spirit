@@ -209,7 +209,7 @@
 <body>
 
 <h1>1000 - shrines - /of/ - SPIRIT · <b>flight_school - Night Shift</b></h1>
-<div class="subtitle">Lantern Music Player, build 260830, track composed in <a href="https://github.com/tildearrow/furnace" target="_blank" rel="noreferrer noopener">Furnace</a>.</div>
+<div class="subtitle">Lantern Music Player - build 260830, track composed in <a href="https://github.com/tildearrow/furnace" target="_blank" rel="noreferrer noopener">Furnace</a>.</div>
 
 <div class="shrine">
   <div class="controls">
@@ -556,13 +556,19 @@
   }
   function timingFieldHTML(){
     var m = song.meta;
+    // Furnace doesn't store a BPM field directly — it's derived the same
+    // way the (now build-time-only) MIDI tempo track used to compute it:
+    // one "beat" is highlights[0] rows, so beat length in seconds is
+    // highlights[0] * rowDurationSec(), and BPM is 60 over that.
+    var bpm = 60 / ((m.highlights[0]||4) * rowDurationSec());
     return '<div class="field collapsed" id="field-timing">'+
       '<div class="field-header" data-toggle="timing" data-explain="timing">'+
         '<span class="flabel">Timing</span>'+
-        '<span class="field-summary">'+m.tickRate.toFixed(1)+'Hz · speed '+m.speeds.join('/')+'</span>'+
+        '<span class="field-summary">'+bpm.toFixed(1)+' BPM · '+m.tickRate.toFixed(1)+'Hz · speed '+m.speeds.join('/')+'</span>'+
         '<span class="collapse-arrow">▸</span>'+
       '</div>'+
       '<div class="field-body"><div class="kv">'+
+        '<div class="k">base tempo</div><div class="v">'+bpm.toFixed(2)+' BPM</div>'+
         '<div class="k">tick rate</div><div class="v">'+m.tickRate.toFixed(3)+'Hz</div>'+
         '<div class="k">speed(s)</div><div class="v">'+m.speeds.join(', ')+'</div>'+
         '<div class="k">virtual tempo</div><div class="v">'+m.virtualTempo.join(' / ')+'</div>'+
@@ -1805,7 +1811,9 @@
   // integer scale with imageSmoothingEnabled off, so pixel edges stay
   // crisp. Scaling from the already-240px canvas instead would be a
   // non-integer 6.667x and risk soft/uneven edges. Same Blob + temporary
-  // <a download> + revokeObjectURL pattern as exportMidi() below.
+  // <a download> + revokeObjectURL pattern as the "Static-asset downloads"
+  // handlers use below (those download real ASSETS/ files instead of a
+  // freshly-built Blob, but the download mechanics are identical).
   function exportCoverArtPng(){
     var exportCanvas = document.createElement('canvas');
     exportCanvas.width = 1600; exportCanvas.height = 1600;
@@ -1824,6 +1832,34 @@
     }, 'image/png');
   }
   document.getElementById('coverArt').addEventListener('click', exportCoverArtPng);
+
+  // Static-asset downloads (the source .fur module, the full mixed .wav,
+  // and the MIDI export) — same temporary-<a> pattern as
+  // exportCoverArtPng() above, but pointing at a real file in ASSETS/
+  // instead of a Blob. MIDI generation itself now happens once at build
+  // time (build.py's build_midi_bytes(), a port of the buildMidiBytes()
+  // this used to run in-browser) rather than on every click. Uses the
+  // build's trackname (matches the actual ASSETS/ filenames on disk), not
+  // song.meta.name — that's the human song title from the Furnace
+  // project, which can differ from the filename and would 404.
+  function downloadAsset(filename){
+    var a = document.createElement('a');
+    a.href = 'ASSETS/' + filename;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+  document.getElementById('downloadFurBtn').addEventListener('click', function(){
+    downloadAsset('flight_school_night_shift.fur');
+  });
+  document.getElementById('downloadWavBtn').addEventListener('click', function(){
+    downloadAsset('flight_school_night_shift.wav');
+  });
+  document.getElementById('exportMidiBtn').addEventListener('click', function(){
+    downloadAsset('flight_school_night_shift.mid');
+  });
+
 
   function flashInstrumentRow(i){
     var el = document.querySelector('tr[data-ins-row="'+i+'"]');
@@ -2077,236 +2113,7 @@
     if(previewBtn) previewInstrument(parseInt(previewBtn.getAttribute('data-preview-ins'), 10));
   });
 
-  // ============================================================
-  // "Export MIDI" — a minimal from-scratch Standard MIDI File (format 1)
-  // writer, built directly from the already-parsed SongModel. No library:
-  // the format is a small, well-specified set of chunks/VLQ-delta events.
-  // ============================================================
-  function midiVLQ(value){
-    var bytes = [value & 0x7F];
-    value = Math.floor(value / 128);
-    while(value > 0){
-      bytes.unshift((value & 0x7F) | 0x80);
-      value = Math.floor(value / 128);
-    }
-    return bytes;
-  }
-  // Standard MIDI File text meta-events are conventionally ASCII — masking
-  // a char code with &0xFF (rather than substituting) silently corrupts
-  // anything above U+00FF into a garbage byte, e.g. an em dash (U+2014)
-  // truncates to 0x14, a control character. Substitute instead of masking.
-  function midiStr(s){
-    var bytes = [];
-    for(var i=0;i<s.length;i++){
-      var code = s.charCodeAt(i);
-      bytes.push((code>=32 && code<=126) ? code : 0x3F); // 0x3F = '?'
-    }
-    return bytes;
-  }
-  function midiUint32(v){ return [(v>>>24)&0xFF, (v>>>16)&0xFF, (v>>>8)&0xFF, v&0xFF]; }
-  function midiUint16(v){ return [(v>>>8)&0xFF, v&0xFF]; }
-  function midiMetaEvent(type, dataBytes){ return [0xFF, type].concat(midiVLQ(dataBytes.length), dataBytes); }
-  function midiTrackChunk(events){
-    // events: [{deltaTicks, bytes}], in ascending absolute-time order
-    var body = [];
-    events.forEach(function(ev){ body = body.concat(midiVLQ(ev.deltaTicks), ev.bytes); });
-    body = body.concat(midiVLQ(0), [0xFF,0x2F,0x00]); // end of track
-    return midiStr('MTrk').concat(midiUint32(body.length), body);
-  }
-  // 4 MIDI ticks per audio tick, always — audio ticks are speeds[0] per
-  // row, so this is guaranteed exact regardless of this song's own speed
-  // value (not just coincidentally exact for flight_school's speeds[0]=6).
-  var MIDI_TICKS_PER_AUDIO_TICK = 4;
-  var MIDI_TICKS_PER_ROW = MIDI_TICKS_PER_AUDIO_TICK * song.meta.speeds[0];
 
-  // Same approximation constants used for this shrine's old (since
-  // removed) live-synthesis pitch effects — Furnace's own docs don't give
-  // an exact numeric conversion for these, so this is a judgment call
-  // carried over for consistency, not a spec value. Vibrato depth's ±1
-  // semitone max at y=15 IS documented, so that unit is exact.
-  var PITCH_SLIDE_UNIT = 1/128;   // semitones per audio tick, per effect-value unit
-  var VIBRATO_DEPTH_UNIT = 1/15;  // semitone at full (y=15) depth
-  var VIBRATO_SPEED_UNIT = 4;     // phase units (of a 64-step cycle) advanced per audio tick, per speed nibble
-  // GM's default pitch-bend range is only ±2 semitones — too narrow for a
-  // sustained Furnace pitch-slide, which can accumulate well past that.
-  // Declared per-track via RPN 0 below; most DAWs/synths honor it on
-  // import. The bend curve is also clamped to this range as a safety net
-  // for the rare player that doesn't.
-  var MIDI_BEND_RANGE_SEMITONES = 12;
-
-  // Our internal note numbers and standard MIDI note numbers are both
-  // semitone-linear against A4: A_REF_NOTE(129) is our A4, MIDI's A4 is 69,
-  // so the conversion is one exact constant offset. This exact kind of
-  // off-by-octave slip is what caused most of this shrine's old synthesis
-  // debugging — being explicit about it here on purpose.
-  function ourNoteToMidiNote(n){ return n - (A_REF_NOTE - 69); }
-  function midiBendValueFor(semitoneOffset){
-    var clamped = Math.max(-MIDI_BEND_RANGE_SEMITONES, Math.min(MIDI_BEND_RANGE_SEMITONES, semitoneOffset));
-    return Math.max(0, Math.min(16383, Math.round(8192 + (clamped/MIDI_BEND_RANGE_SEMITONES)*8191)));
-  }
-
-  // Walks one GB channel's own note/effect data (this is where that data
-  // actually lives) and produces a flat, tick-stamped event stream —
-  // note-on/off plus pitch-bend steps for active 01/02 (slide) and 04
-  // (vibrato) effects — each event tagged with whichever INSTRUMENT was
-  // active at that moment. These get regrouped by instrument afterward
-  // (see buildMidiBytes) rather than becoming this channel's own track,
-  // since a channel is just "whatever instrument happens to be plugged
-  // into this GB voice right now," not a musically meaningful part on
-  // its own the way the instrument is.
-  function walkChannelEvents(c){
-    var ch = song.channels[c];
-    var events = [];
-    var sounding = null, soundingIns = null;
-    var pitchSlideRate = 0, vibratoSpeed = 0, vibratoDepth = 0, vibratoPhase = 0, accumPitch = 0;
-    var lastBendValue = 8192;
-    function resetPitchState(){ pitchSlideRate=0; vibratoSpeed=0; vibratoDepth=0; vibratoPhase=0; accumPitch=0; }
-    function emitBendReset(tick, insIdx){
-      if(lastBendValue!==8192){ events.push({tick:tick, insIndex:insIdx, type:'bend', bendValue:8192}); lastBendValue=8192; }
-    }
-    for(var op=0; op<song.meta.orderLength; op++){
-      var pat = ch.patterns[ch.orderList[op]];
-      for(var r=0; r<song.meta.patternLength; r++){
-        var raw = pat ? pat.rows[r] : null;
-        var rowTick = (op*song.meta.patternLength + r) * MIDI_TICKS_PER_ROW;
-        var insIdx = ch.insTimeline[op][r];
-
-        // Note event first (a fresh note/OFF resets pitch effects to a
-        // clean baseline — matches Furnace's own "cleared ... by a plain
-        // new note" behavior for 01/02), then this row's own effects,
-        // so a note and an effect landing on the same row both apply.
-        if(raw && raw.note!==undefined){
-          if(sounding!==null){ events.push({tick:rowTick, insIndex:soundingIns, type:'off', note:sounding}); sounding=null; soundingIns=null; }
-          resetPitchState();
-          emitBendReset(rowTick, insIdx);
-          if(raw.note!==NOTE_OFF){
-            var midiNote = ourNoteToMidiNote(raw.note);
-            events.push({tick:rowTick, insIndex:insIdx, type:'on', note:midiNote});
-            sounding = midiNote; soundingIns = insIdx;
-          }
-        }
-        if(raw && raw.effects){
-          raw.effects.forEach(function(e){
-            if(!e) return;
-            if(e.code===1) pitchSlideRate = e.value * PITCH_SLIDE_UNIT;
-            else if(e.code===2) pitchSlideRate = -e.value * PITCH_SLIDE_UNIT;
-            else if(e.code===4){ vibratoSpeed = (e.value>>4)*VIBRATO_SPEED_UNIT; vibratoDepth = (e.value&0xF)*VIBRATO_DEPTH_UNIT; }
-          });
-        }
-
-        // Step per audio tick (not just once per row) so the bend curve
-        // has the same resolution the effect itself actually updates at.
-        // Skipped when nothing's active — most rows, most of the time.
-        if(sounding!==null && (pitchSlideRate!==0 || vibratoDepth!==0)){
-          for(var at=0; at<song.meta.speeds[0]; at++){
-            accumPitch += pitchSlideRate;
-            var v = midiBendValueFor(accumPitch + vibratoDepth*Math.sin(2*Math.PI*vibratoPhase/64));
-            if(v!==lastBendValue){
-              events.push({tick: rowTick + at*MIDI_TICKS_PER_AUDIO_TICK, insIndex:insIdx, type:'bend', bendValue:v});
-              lastBendValue = v;
-            }
-            vibratoPhase = (vibratoPhase + vibratoSpeed) % 64;
-          }
-        }
-      }
-    }
-    var endTick = song.meta.orderLength * song.meta.patternLength * MIDI_TICKS_PER_ROW;
-    if(sounding!==null) events.push({tick:endTick, insIndex:soundingIns, type:'off', note:sounding});
-    emitBendReset(endTick, soundingIns);
-    return events;
-  }
-
-  // Collects one instrument's events (already tagged, possibly from
-  // several different GB channels if it was ever used on more than one)
-  // into a single delta-encoded MIDI event list for its own track.
-  function buildInstrumentTrackEvents(insIndex, allEvents){
-    var evts = allEvents.filter(function(e){ return e.insIndex===insIndex; })
-      .sort(function(a,b){ return a.tick-b.tick; });
-    var midiCh = insIndex % 16;
-    var out = [], lastTick = 0;
-    evts.forEach(function(e){
-      var bytes;
-      if(e.type==='on') bytes = [0x90|midiCh, e.note, 100];
-      else if(e.type==='off') bytes = [0x80|midiCh, e.note, 0];
-      else { var v=e.bendValue; bytes = [0xE0|midiCh, v&0x7F, (v>>7)&0x7F]; } // pitch bend: 14-bit value, LSB then MSB (7 bits each)
-      out.push({ deltaTicks: e.tick-lastTick, bytes: bytes });
-      lastTick = e.tick;
-    });
-    return out;
-  }
-
-  function buildMidiBytes(){
-    var beatSec = (song.meta.highlights[0]||4) * rowDurationSec();
-    var bpm = 60/beatSec;
-    var usPerQuarter = Math.round(60000000/bpm);
-    var ppq = MIDI_TICKS_PER_ROW * (song.meta.highlights[0]||4);
-
-    var tempoTrack = midiTrackChunk([
-      { deltaTicks:0, bytes: midiMetaEvent(0x51, [(usPerQuarter>>16)&0xFF,(usPerQuarter>>8)&0xFF,usPerQuarter&0xFF]) },
-      { deltaTicks:0, bytes: midiMetaEvent(0x03, midiStr((song.meta.name||'Lantern export')+' tempo')) }
-    ]);
-    var tracks = [tempoTrack];
-
-    var allEvents = [];
-    for(var c=0;c<4;c++) allEvents = allEvents.concat(walkChannelEvents(c));
-
-    song.instruments.forEach(function(ins, i){
-      var evts = buildInstrumentTrackEvents(i, allEvents);
-      if(evts.length===0) return; // this instrument is never actually triggered anywhere — no point in an empty track
-      var midiCh = i % 16;
-      var header = [
-        { deltaTicks:0, bytes: midiMetaEvent(0x03, midiStr(ins.name || ('Instrument '+i))) },
-        // RPN 0 (Pitch Bend Sensitivity): MSB=0,LSB=0 selects it, Data
-        // Entry MSB sets the range in semitones, then MSB=127/LSB=127
-        // deselects the RPN so nothing else gets misread as more range data.
-        { deltaTicks:0, bytes: [0xB0|midiCh, 0x65, 0x00] },
-        { deltaTicks:0, bytes: [0xB0|midiCh, 0x64, 0x00] },
-        { deltaTicks:0, bytes: [0xB0|midiCh, 0x06, MIDI_BEND_RANGE_SEMITONES] },
-        { deltaTicks:0, bytes: [0xB0|midiCh, 0x64, 0x7F] },
-        { deltaTicks:0, bytes: [0xB0|midiCh, 0x65, 0x7F] }
-      ];
-      tracks.push(midiTrackChunk(header.concat(evts)));
-    });
-
-    var out = midiStr('MThd').concat(midiUint32(6), midiUint16(1), midiUint16(tracks.length), midiUint16(ppq));
-    tracks.forEach(function(tc){ out = out.concat(tc); });
-    return new Uint8Array(out);
-  }
-
-  function exportMidi(){
-    var bytes = buildMidiBytes();
-    var blob = new Blob([bytes], { type: 'audio/midi' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = (song.meta.name || 'flight_school') + '.mid';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
-  }
-  document.getElementById('exportMidiBtn').addEventListener('click', exportMidi);
-
-  // Static-asset downloads (the source .fur module and the full mixed
-  // .wav) — same temporary-<a> pattern as exportMidi()/exportCoverArtPng()
-  // above, but pointing at a real file in ASSETS/ instead of a Blob. Uses
-  // the build's trackname (matches the actual ASSETS/ filenames on disk),
-  // not song.meta.name — that's the human song title from the Furnace
-  // project, which can differ from the filename and would 404.
-  function downloadAsset(filename){
-    var a = document.createElement('a');
-    a.href = 'ASSETS/' + filename;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
-  document.getElementById('downloadFurBtn').addEventListener('click', function(){
-    downloadAsset('flight_school_night_shift.fur');
-  });
-  document.getElementById('downloadWavBtn').addEventListener('click', function(){
-    downloadAsset('flight_school_night_shift.wav');
-  });
 
 
 
@@ -2317,7 +2124,6 @@
   window.__debugLantern = {
     song: song,
     songPositionAt: songPositionAt,
-    buildMidiBytes: buildMidiBytes,
     getState: function(){ return { ac: ac, songStarted: songStarted, isPlaying: isPlaying(), songDuration: songDuration, currentSongTime: currentSongTime() }; },
     stemBuffers: function(){ return stemBuffers; },
     instrumentPreviewSpots: instrumentPreviewSpots,

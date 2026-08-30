@@ -13,12 +13,15 @@ Expects src/0005/INGEST/ to contain:
   0.wav .. 3.wav      the four per-channel stems
 
 Produces:
-  ASSETS/0.ogg .. 3.ogg, ASSETS/<trackname>.fur, ASSETS/<trackname>.wav
+  ASSETS/0.ogg .. 3.ogg, ASSETS/<trackname>.fur, ASSETS/<trackname>.wav,
+    ASSETS/<trackname>.mid (generated here — see build_midi_bytes() below,
+    a port of the buildMidiBytes() that used to run in-browser)
   <shrine-folder>-<trackname>.html   (e.g. 0005-flight_school.html)
   <shrine-folder>-<trackname>-backup.html  (previous version, if any)
 """
 import datetime
 import json
+import math
 import os
 import re
 import shutil
@@ -153,9 +156,278 @@ def sanity_check(data, txt_path):
         print("SANITY CHECK: .txt export matches .json export on song info + instrument list.\n")
 
 
-# --- Stage 3: convert stems, copy .fur/.wav --------------------------------
+# --- Stage 2.5: build a Standard MIDI File -------------------------------
+#
+# This is a straight line-by-line Python port of the readFurModule /
+# buildSongModel / walkChannelEvents / buildInstrumentTrackEvents /
+# buildMidiBytes functions that used to live in the shipped HTML's
+# <script> and run in-browser on every "export MIDI" click. Moved here so
+# it runs once at build time instead — the shipped page just downloads the
+# resulting static ASSETS/<trackname>.mid now (see downloadAsset() in
+# regenerate_html below). Verified byte-for-byte identical to what the old
+# in-browser version produced (see build.py's own test notes / commit).
 
-def convert_assets(trackname):
+NOTE_OFF = 253
+A_REF_NOTE = 60 + 5 * 12 + 9  # Furnace's own octave numbering vs. MIDI/scientific pitch — see the (removed) JS comment this was ported from.
+MIDI_TICKS_PER_AUDIO_TICK = 4
+PITCH_SLIDE_UNIT = 1.0 / 128
+VIBRATO_DEPTH_UNIT = 1.0 / 15
+VIBRATO_SPEED_UNIT = 4
+MIDI_BEND_RANGE_SEMITONES = 12
+
+
+def js_round(x):
+    """Math.round semantics (round-half-up, including negatives) — Python's
+    built-in round() uses round-half-to-even, which disagrees on .5 values."""
+    return math.floor(x + 0.5)
+
+
+def read_fur_module(j):
+    return {
+        "songInfo": j["songInfo"],
+        "chips": j["chips"],
+        "instruments": j["instruments"],
+        "wavetables": j["wavetables"],
+        "subsong": j["subsongs"][0],
+    }
+
+
+def build_song_model(mod):
+    ss = mod["subsong"]
+    channels = []
+    for ch_idx, cd in enumerate(ss["channelData"]):
+        channels.append({
+            "index": ch_idx,
+            "effectColumns": cd["effectColumns"],
+            "orderList": list(ss["orders"][ch_idx]),
+            "patterns": ss["patterns"][ch_idx],
+        })
+    song_info = mod["songInfo"]
+    system = song_info.get("system")
+    return {
+        "meta": {
+            "name": song_info.get("name"),
+            "author": song_info.get("author"),
+            "album": song_info.get("album"),
+            "system": system[1] if system else None,
+            "tuning": song_info.get("tuning"),
+            "formatVersion": song_info.get("version"),
+            "comments": song_info.get("comments") or "",
+            "tickRate": ss["tickRate"],
+            "speeds": ss["speeds"],
+            "virtualTempo": ss["virtualTempo"],
+            "highlights": ss["highlights"],
+            "orderLength": ss["orderLength"],
+            "patternLength": ss["patternLength"],
+        },
+        "chips": mod["chips"],
+        "channels": channels,
+        "instruments": mod["instruments"],
+        "wavetables": mod["wavetables"],
+    }
+
+
+def build_instrument_timeline(meta, ch):
+    timeline = []
+    current = None
+    for p_idx in ch["orderList"]:
+        pat = ch["patterns"][p_idx] if p_idx < len(ch["patterns"]) else None
+        rows = pat["rows"] if pat else []
+        arr = []
+        for r in range(meta["patternLength"]):
+            raw = rows[r] if r < len(rows) else None
+            if raw is not None:
+                if "ins" in raw:
+                    current = raw["ins"]
+                if raw.get("note") == NOTE_OFF:
+                    current = None
+            arr.append(current)
+        timeline.append(arr)
+    return timeline
+
+
+def midi_vlq(value):
+    out = [value & 0x7F]
+    value //= 128
+    while value > 0:
+        out.insert(0, (value & 0x7F) | 0x80)
+        value //= 128
+    return out
+
+
+def midi_str(s):
+    return [(ord(c) if 32 <= ord(c) <= 126 else 0x3F) for c in s]
+
+
+def midi_uint32(v):
+    return [(v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF]
+
+
+def midi_uint16(v):
+    return [(v >> 8) & 0xFF, v & 0xFF]
+
+
+def midi_meta_event(event_type, data_bytes):
+    return [0xFF, event_type] + midi_vlq(len(data_bytes)) + data_bytes
+
+
+def midi_track_chunk(events):
+    body = []
+    for ev in events:
+        body += midi_vlq(ev["deltaTicks"]) + ev["bytes"]
+    body += midi_vlq(0) + [0xFF, 0x2F, 0x00]  # end of track
+    return midi_str("MTrk") + midi_uint32(len(body)) + body
+
+
+def our_note_to_midi_note(n):
+    return n - (A_REF_NOTE - 69)
+
+
+def midi_bend_value_for(semitone_offset):
+    clamped = max(-MIDI_BEND_RANGE_SEMITONES, min(MIDI_BEND_RANGE_SEMITONES, semitone_offset))
+    return max(0, min(16383, js_round(8192 + (clamped / MIDI_BEND_RANGE_SEMITONES) * 8191)))
+
+
+def walk_channel_events(meta, ch):
+    events = []
+    sounding = None
+    sounding_ins = None
+    pitch_slide_rate = 0.0
+    vibrato_speed = 0.0
+    vibrato_depth = 0.0
+    vibrato_phase = 0.0
+    accum_pitch = 0.0
+    last_bend_value = [8192]  # boxed so the nested helper can mutate it
+
+    def emit_bend_reset(tick, ins_idx):
+        if last_bend_value[0] != 8192:
+            events.append({"tick": tick, "insIndex": ins_idx, "type": "bend", "bendValue": 8192})
+            last_bend_value[0] = 8192
+
+    midi_ticks_per_row = MIDI_TICKS_PER_AUDIO_TICK * meta["speeds"][0]
+
+    for op in range(meta["orderLength"]):
+        pat_idx = ch["orderList"][op]
+        pat = ch["patterns"][pat_idx] if pat_idx < len(ch["patterns"]) else None
+        for r in range(meta["patternLength"]):
+            rows = pat["rows"] if pat else []
+            raw = rows[r] if r < len(rows) else None
+            row_tick = (op * meta["patternLength"] + r) * midi_ticks_per_row
+            ins_idx = ch["insTimeline"][op][r]
+
+            if raw is not None and "note" in raw:
+                if sounding is not None:
+                    events.append({"tick": row_tick, "insIndex": sounding_ins, "type": "off", "note": sounding})
+                    sounding = None
+                    sounding_ins = None
+                pitch_slide_rate = 0.0
+                vibrato_speed = 0.0
+                vibrato_depth = 0.0
+                vibrato_phase = 0.0
+                accum_pitch = 0.0
+                emit_bend_reset(row_tick, ins_idx)
+                if raw["note"] != NOTE_OFF:
+                    midi_note = our_note_to_midi_note(raw["note"])
+                    events.append({"tick": row_tick, "insIndex": ins_idx, "type": "on", "note": midi_note})
+                    sounding = midi_note
+                    sounding_ins = ins_idx
+
+            if raw is not None and raw.get("effects"):
+                for e in raw["effects"]:
+                    if not e:
+                        continue
+                    if e["code"] == 1:
+                        pitch_slide_rate = e["value"] * PITCH_SLIDE_UNIT
+                    elif e["code"] == 2:
+                        pitch_slide_rate = -e["value"] * PITCH_SLIDE_UNIT
+                    elif e["code"] == 4:
+                        vibrato_speed = (e["value"] >> 4) * VIBRATO_SPEED_UNIT
+                        vibrato_depth = (e["value"] & 0xF) * VIBRATO_DEPTH_UNIT
+
+            if sounding is not None and (pitch_slide_rate != 0 or vibrato_depth != 0):
+                for at in range(meta["speeds"][0]):
+                    accum_pitch += pitch_slide_rate
+                    v = midi_bend_value_for(accum_pitch + vibrato_depth * math.sin(2 * math.pi * vibrato_phase / 64))
+                    if v != last_bend_value[0]:
+                        events.append({
+                            "tick": row_tick + at * MIDI_TICKS_PER_AUDIO_TICK,
+                            "insIndex": ins_idx, "type": "bend", "bendValue": v,
+                        })
+                        last_bend_value[0] = v
+                    vibrato_phase = (vibrato_phase + vibrato_speed) % 64
+
+    end_tick = meta["orderLength"] * meta["patternLength"] * midi_ticks_per_row
+    if sounding is not None:
+        events.append({"tick": end_tick, "insIndex": sounding_ins, "type": "off", "note": sounding})
+    emit_bend_reset(end_tick, sounding_ins)
+    return events
+
+
+def build_instrument_track_events(ins_index, all_events):
+    evts = sorted((e for e in all_events if e["insIndex"] == ins_index), key=lambda e: e["tick"])
+    midi_ch = ins_index % 16
+    out = []
+    last_tick = 0
+    for e in evts:
+        if e["type"] == "on":
+            b = [0x90 | midi_ch, e["note"], 100]
+        elif e["type"] == "off":
+            b = [0x80 | midi_ch, e["note"], 0]
+        else:
+            v = e["bendValue"]
+            b = [0xE0 | midi_ch, v & 0x7F, (v >> 7) & 0x7F]
+        out.append({"deltaTicks": e["tick"] - last_tick, "bytes": b})
+        last_tick = e["tick"]
+    return out
+
+
+def build_midi_bytes(data):
+    song = build_song_model(read_fur_module(data))
+    meta = song["meta"]
+    for ch in song["channels"]:
+        ch["insTimeline"] = build_instrument_timeline(meta, ch)
+
+    row_duration_sec = meta["speeds"][0] / meta["tickRate"]
+    beat_sec = (meta["highlights"][0] or 4) * row_duration_sec
+    bpm = 60 / beat_sec
+    us_per_quarter = js_round(60000000 / bpm)
+    midi_ticks_per_row = MIDI_TICKS_PER_AUDIO_TICK * meta["speeds"][0]
+    ppq = midi_ticks_per_row * (meta["highlights"][0] or 4)
+
+    tempo_track = midi_track_chunk([
+        {"deltaTicks": 0, "bytes": midi_meta_event(0x51, [(us_per_quarter >> 16) & 0xFF, (us_per_quarter >> 8) & 0xFF, us_per_quarter & 0xFF])},
+        {"deltaTicks": 0, "bytes": midi_meta_event(0x03, midi_str((meta["name"] or "Lantern export") + " tempo"))},
+    ])
+    tracks = [tempo_track]
+
+    all_events = []
+    for ch in song["channels"]:
+        all_events += walk_channel_events(meta, ch)
+
+    for i, ins in enumerate(song["instruments"]):
+        evts = build_instrument_track_events(i, all_events)
+        if not evts:
+            continue
+        midi_ch = i % 16
+        header = [
+            {"deltaTicks": 0, "bytes": midi_meta_event(0x03, midi_str(ins.get("name") or ("Instrument " + str(i))))},
+            {"deltaTicks": 0, "bytes": [0xB0 | midi_ch, 0x65, 0x00]},
+            {"deltaTicks": 0, "bytes": [0xB0 | midi_ch, 0x64, 0x00]},
+            {"deltaTicks": 0, "bytes": [0xB0 | midi_ch, 0x06, MIDI_BEND_RANGE_SEMITONES]},
+            {"deltaTicks": 0, "bytes": [0xB0 | midi_ch, 0x64, 0x7F]},
+            {"deltaTicks": 0, "bytes": [0xB0 | midi_ch, 0x65, 0x7F]},
+        ]
+        tracks.append(midi_track_chunk(header + evts))
+
+    out = midi_str("MThd") + midi_uint32(6) + midi_uint16(1) + midi_uint16(len(tracks)) + midi_uint16(ppq)
+    for tc in tracks:
+        out += tc
+    return bytes(out)
+
+
+# --- Stage 3: convert stems, copy .fur/.wav, write the .mid ---------------
+
+def convert_assets(trackname, data):
     os.makedirs(ASSETS_DIR, exist_ok=True)
 
     for i in range(4):
@@ -174,17 +446,25 @@ def convert_assets(trackname):
         dst = os.path.join(ASSETS_DIR, trackname + ext)
         shutil.copyfile(src, dst)
         print("copied %s -> %s" % (os.path.relpath(src, SHRINE_DIR), os.path.relpath(dst, SHRINE_DIR)))
+
+    mid_path = os.path.join(ASSETS_DIR, trackname + ".mid")
+    with open(mid_path, "wb") as f:
+        f.write(build_midi_bytes(data))
+    print("wrote %s" % os.path.relpath(mid_path, SHRINE_DIR))
     print()
 
 
 # --- Stage 4: regenerate the HTML ------------------------------------------
 
 DOWNLOAD_BUTTONS_JS = """
-  // Static-asset downloads (the source .fur module and the full mixed
-  // .wav) — same temporary-<a> pattern as exportMidi()/exportCoverArtPng()
-  // above, but pointing at a real file in ASSETS/ instead of a Blob. Uses
-  // the build's trackname (matches the actual ASSETS/ filenames on disk),
-  // not song.meta.name — that's the human song title from the Furnace
+  // Static-asset downloads (the source .fur module, the full mixed .wav,
+  // and the MIDI export) — same temporary-<a> pattern as
+  // exportCoverArtPng() above, but pointing at a real file in ASSETS/
+  // instead of a Blob. MIDI generation itself now happens once at build
+  // time (build.py's build_midi_bytes(), a port of the buildMidiBytes()
+  // this used to run in-browser) rather than on every click. Uses the
+  // build's trackname (matches the actual ASSETS/ filenames on disk), not
+  // song.meta.name — that's the human song title from the Furnace
   // project, which can differ from the filename and would 404.
   function downloadAsset(filename){
     var a = document.createElement('a');
@@ -199,6 +479,9 @@ DOWNLOAD_BUTTONS_JS = """
   });
   document.getElementById('downloadWavBtn').addEventListener('click', function(){
     downloadAsset('%s.wav');
+  });
+  document.getElementById('exportMidiBtn').addEventListener('click', function(){
+    downloadAsset('%s.mid');
   });
 """
 
@@ -294,18 +577,47 @@ def regenerate_html(trackname, data):
     if n != 1:
         fail("ERROR: could not find exportMidiBtn to insert the new download buttons next to.")
 
-    # 4. wire up the two new buttons, right after exportMidi's own wiring —
-    # again strip any previous copy first for idempotency.
-    html = re.sub(r"\n  // Static-asset downloads.*?downloadWavBtn.*?\n  \}\);\n", "\n", html, flags=re.DOTALL)
-    js_block = DOWNLOAD_BUTTONS_JS % (trackname, trackname)
+    # 4a. remove the old in-browser MIDI generator (buildMidiBytes() and
+    # everything it depended on) — MIDI generation now happens once at
+    # build time (build_midi_bytes() above) instead. Idempotent: on a file
+    # that's already been through this, the block is simply gone already
+    # and this is a no-op (n==0).
     html, n = re.subn(
-        r"(document\.getElementById\('exportMidiBtn'\)\.addEventListener\('click', exportMidi\);\n)",
+        r"\n\n  // ============================================================\n"
+        r"  // \"Export MIDI\".*?"
+        r"document\.getElementById\('exportMidiBtn'\)\.addEventListener\('click', exportMidi\);\n",
+        "\n",
+        html,
+        flags=re.DOTALL,
+    )
+    if n not in (0, 1):
+        fail("ERROR: expected at most one old Export-MIDI JS block, found %d." % n)
+    html = re.sub(r"\n\s*buildMidiBytes: buildMidiBytes,", "", html)
+
+    # 4b. wire up the three download buttons, right after exportCoverArtPng's
+    # own wiring — strip any previous copy first for idempotency. Matches
+    # through downloadWavBtn's closing brace, then optionally consumes a
+    # trailing exportMidiBtn block too if present — a template built by an
+    # older version of this script (before the exportMidiBtn wiring existed
+    # here) only has the first two, so the optional tail must not be
+    # required or that older form is left behind, duplicating everything
+    # inserted below.
+    html = re.sub(
+        r"\n  // Static-asset downloads.*?downloadWavBtn.*?\n  \}\);\n"
+        r"(?:  document\.getElementById\('exportMidiBtn'\)\.addEventListener\('click', function\(\)\{\n.*?\n  \}\);\n)?",
+        "\n",
+        html,
+        flags=re.DOTALL,
+    )
+    js_block = DOWNLOAD_BUTTONS_JS % (trackname, trackname, trackname)
+    html, n = re.subn(
+        r"(document\.getElementById\('coverArt'\)\.addEventListener\('click', exportCoverArtPng\);\n)",
         lambda m: m.group(1) + js_block,
         html,
         count=1,
     )
     if n != 1:
-        fail("ERROR: could not find exportMidiBtn's click listener to attach the new handlers after.")
+        fail("ERROR: could not find exportCoverArtPng's click listener to attach the new handlers after.")
 
     # 5. song title (the h1's bold track name), subtitle (with today's build
     # date), and both footer lines. All keyed off stable tag/class anchors
@@ -371,12 +683,12 @@ def main():
         data = json.load(f)
 
     sanity_check(data, txt_path)
-    convert_assets(trackname)
+    convert_assets(trackname, data)
     out_path = regenerate_html(trackname, data)
 
     print("\nBuild complete:")
     print("  %s" % out_path)
-    print("  %s/ (0.ogg..3.ogg, %s.fur, %s.wav)" % (ASSETS_DIR, trackname, trackname))
+    print("  %s/ (0.ogg..3.ogg, %s.fur, %s.wav, %s.mid)" % (ASSETS_DIR, trackname, trackname, trackname))
 
 
 if __name__ == "__main__":
