@@ -312,11 +312,11 @@
   // Patterns panel's explainer only. The real audio comes from Furnace's
   // own recorded stems (this page doesn't synthesize anything), so these
   // descriptions exist purely to explain what each effect *did* to produce
-  // what you're hearing, confirmed against Furnace's own effect docs. Only
-  // 01/02 (pitch slide) and 04 (vibrato) actually appear in flight_school
-  // itself; the rest are documented for other songs that might reuse this
-  // page. Codes outside this set still parse fine — normalizeCell keeps
-  // every effect — they just don't have a friendly name yet.
+  // what you're hearing, confirmed against Furnace's own effect docs. This
+  // shrine's own tracks so far only ever use 01/02 (pitch slide) and 04
+  // (vibrato); the rest are documented for other songs that might reuse
+  // this page. Codes outside this set still parse fine — normalizeCell
+  // keeps every effect — they just don't have a friendly name yet.
   var CORE_EFFECTS = {
     0: 'Arpeggio — cycles rapidly between this note and two offsets (nibbles below) each tick, faking a chord on one channel.',
     1: 'Pitch Up — slides pitch upward continuously by the given amount each tick, until cleared with value 00 or a plain new note.',
@@ -1411,8 +1411,9 @@
 
   // --- time -> row/order mapping, driving the visual playhead + instrument
   // flash. Assumes strict sequential order playback with no jump/break
-  // effects — true for flight_school (never uses 0Bxx/0Dxx), but worth
-  // knowing if this file is ever adapted for a song that does use them. ---
+  // effects (0Bxx/0Dxx) — true of every track built for this shrine so
+  // far, but not checked automatically; a future track that actually uses
+  // one would need this function extended to handle it. ---
   function songPositionAt(t){
     // Clamp to 0: startStemsAt schedules sources ~50ms into the future
     // (T = ac.currentTime+0.05), so for that brief pre-roll window
@@ -1824,7 +1825,7 @@
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
-      a.download = (song.meta.name || 'flight_school') + '-cover.png';
+      a.download = (song.meta.name || 'lantern-export') + '-cover.png';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1859,6 +1860,7 @@
   document.getElementById('exportMidiBtn').addEventListener('click', function(){
     downloadAsset('flight_school_night_shift.mid');
   });
+
 
 
 
