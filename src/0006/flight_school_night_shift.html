@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>0005 — shrines of SPIRIT</title>
+<title>1000 - shrines - /of/ - SPIRIT</title>
 <link rel="icon" href="data:,">
 <style>
   @font-face{
@@ -152,7 +152,7 @@
      Sampler Mode is choosing what plays instead. Toggled via a class on
      <body> (see syncModeVisibility) rather than re-rendering the table on
      every Sampler Mode flip. */
-  body.chip-mode .ins-col-transpose, body.chip-mode .ins-col-sampler, body.chip-mode #field-source-samples{display:none;}
+  body.chip-mode .ins-col-transpose, body.chip-mode .ins-col-volume, body.chip-mode .ins-col-sampler, body.chip-mode #field-source-samples{display:none;}
   body.sampler-mode .ins-col-wave{display:none;}
   input.ins-color-input{width:22px;height:16px;padding:0;border:1px solid var(--edge);background:none;cursor:pointer;}
   /* Flash an instrument row the instant it's actually triggered during
@@ -291,6 +291,10 @@
      inert rather than just visually dim, so there's no temptation to tweak
      settings that won't do anything (or trigger a render) until it's on. */
   .sampler-fusion-body.fusion-off{opacity:.4;pointer-events:none;}
+  /* Sample B is irrelevant for the single-input algorithms (Freq Shift,
+     Freeze, Smear) — same dimming treatment as the whole body's off state,
+     scoped to just this block so the rest of the tab stays interactive. */
+  .sampler-fusion-io.fusion-io-inactive{opacity:.4;pointer-events:none;}
   /* Fusion's own pill starts grey, not SAMPLER MODE's sky blue — off here
      just means "not in use" (no second real engine the way CHIP MODE is),
      so it shouldn't visually compete with that other switch's blue. */
@@ -454,7 +458,7 @@
         </div>
         <div class="field-body">
           <div class="cover-art-wrap">
-            <canvas id="coverArt" width="240" height="240" title="jet trails fire whenever a note triggers — during playback or a preview click — coloured and sized by that note's instrument and volume. Click to save the current frame as a 1600×1600 PNG."></canvas>
+            <canvas id="coverArt" width="240" height="240" title="a spinning CD-ROM over a field of flashing Matrix-style code — every note trigger fires a coloured scan-flash around the disc's rim, sized by that note's instrument and volume. Click to save the current frame as a 1600×1600 PNG."></canvas>
           </div>
         </div>
       </div>
@@ -519,6 +523,7 @@
       <label>Source <select id="samplerSourceSelect" title="which Source Sample this instrument plays"></select></label>
       <label>Transpose <input type="number" id="samplerTranspose" step="1" min="-24" max="24" style="width:64px" title="pitch-shift the sample by this many semitones (decimals = cents, e.g. 3.50 = 3 semitones + 50 cents up) — the up/down arrows step by a full semitone; type a decimal for cents. For correcting a sample that isn't naturally at this song's reference pitch">st</label>
       <label class="tint-toggle"><input type="checkbox" id="samplerLoopToggle" title="loop the trimmed region while the note is held"> Loop</label>
+      <label class="tint-toggle"><input type="checkbox" id="samplerPingPongToggle" title="only matters while Loop is on — bounces forward/backward instead of restarting at Start each cycle"> Ping-pong</label>
     </div>
     <canvas id="samplerADSRCanvas" class="sampler-adsr-canvas" width="600" height="100" title="attack/decay/sustain/release shape — drag the amber points to adjust (sustain segment shown at a fixed nominal width — actual hold time depends on the note)"></canvas>
     <div class="sampler-row sampler-adsr">
@@ -526,6 +531,10 @@
       <label>Decay <input type="range" id="samplerDecay" min="0" max="1" step="0.005"><span class="sampler-val" id="samplerDecayVal"></span></label>
       <label>Sustain <input type="range" id="samplerSustain" min="0" max="1" step="0.01"><span class="sampler-val" id="samplerSustainVal"></span></label>
       <label>Release <input type="range" id="samplerRelease" min="0" max="2" step="0.01"><span class="sampler-val" id="samplerReleaseVal"></span></label>
+    </div>
+    <div class="sampler-row">
+      <label>Volume <input type="range" id="samplerVolume" min="0" max="1.5" step="0.01" style="width:100px"><input type="text" id="samplerVolumeDb" class="mixer-db" inputmode="decimal" title="per-instrument level in dB — editable, same value as the slider, on top of the pattern's own volume column"><span class="mixer-db-unit">dB</span></label>
+      <label>Random Pan <input type="range" id="samplerPanRange" min="0" max="100" step="1" style="width:100px" title="each note picks a fresh random pan position within +/- this % of full width from centre — 0 = always centred"><span class="sampler-val" id="samplerPanRangeVal"></span></label>
     </div>
     <div class="sampler-row">
       <label class="tint-toggle"><input type="checkbox" id="samplerPolyToggle" title="ON: rapid retriggers layer new voices, each cleaned up after it finishes. OFF: each retrigger kills the previous voice on this channel."> Polyphonic</label>
@@ -546,7 +555,7 @@
             <label>Sample A (from Sampler tab)</label>
             <canvas id="samplerFusionWaveA" class="sampler-wave-canvas fusion-wave-sm" width="420" height="56"></canvas>
           </div>
-          <div class="sampler-fusion-io">
+          <div class="sampler-fusion-io" id="samplerFusionWaveBBlock">
             <label>Sample B <select id="samplerFusionSourceSelect" title="the second Source Sample to morph in — re-renders automatically once picked"></select></label>
             <canvas id="samplerFusionWaveB" class="sampler-wave-canvas fusion-wave-sm" width="420" height="56"></canvas>
           </div>
@@ -560,11 +569,15 @@
         </div>
         <div class="sampler-fusion-algos">
           <div class="fusion-algo-list" id="samplerFusionAlgoList" data-explain="fusion-algorithm">
-            <button type="button" class="fusion-algo-item" data-algo="spectral-blend" title="Crossfades Sample B's frequency content onto Sample A's own phase/timing — a true spectral cross-synthesis, not a plain crossfade.">Spectral Blend</button>
-            <button type="button" class="fusion-algo-item" data-algo="convolve" title="Runs Sample A through Sample B as an impulse response (native Web Audio convolution) — a smeared, textural cross-synthesis.">Convolve</button>
-            <button type="button" class="fusion-algo-item" data-algo="ring-mod" title="Multiplies Sample A and Sample B together, sample-by-sample — metallic, robotic tones.">Ring Modulate</button>
+            <button type="button" class="fusion-algo-item" data-algo="freeze" title="Freezes one moment of Sample A's spectrum and sustains it into a shimmering pad/drone. Ignores Sample B.">Freeze</button>
+            <button type="button" class="fusion-algo-item" data-algo="spectral-blend" title="Imposes Sample B's spectral envelope (its timbre/formants) onto Sample A's own fine harmonic structure — real cross-synthesis, the 'talking synth' effect. Goes past 100% for exaggerated results.">Cross-Synth</button>
+            <button type="button" class="fusion-algo-item" data-algo="convolve" title="Runs Sample A through a spectrally-whitened Sample B as an impulse response (native Web Audio convolution) — a resonant, textural cross-synthesis.">Convolve</button>
+            <button type="button" class="fusion-algo-item" data-algo="ring-mod" title="Multiplies Sample A and Sample B together, sample-by-sample — metallic, robotic harmonic tones.">Ring Modulate</button>
+            <button type="button" class="fusion-algo-item" data-algo="freq-shift" title="Shifts every partial of Sample A by the same Hz amount (not the same ratio) — inharmonic, alien results. Ignores Sample B.">Freq Shift</button>
+            <button type="button" class="fusion-algo-item" data-algo="smear" title="Randomizes Sample A's phase per frame, washing out its attack/transients into a diffuse cloud. Ignores Sample B.">Smear</button>
           </div>
           <label id="samplerFusionAmountLabel" class="sampler-fusion-amount">Blend Amount <input type="range" id="samplerFusionAmount" min="0" max="100" step="1"><span class="sampler-val" id="samplerFusionAmountVal"></span></label>
+          <label class="sampler-fusion-amount" title="Shifts the fused result's spectral envelope (timbre/formants) up or down independent of pitch — stacks on top of whichever algorithm is selected above. 0 = off.">Formant Shift <input type="range" id="samplerFusionFormantShift" min="-12" max="12" step="0.5"><span class="sampler-val" id="samplerFusionFormantShiftVal"></span></label>
         </div>
       </div>
     </div>
@@ -792,6 +805,9 @@
       startSec: 0, endSec: 0,  // set to full buffer length when a source is first assigned
       transpose: 0,            // semitones (decimals = cents) to pitch-shift the raw sample by; editable via the Sampler modal
       loop: false,
+      pingPong: false,         // only meaningful while loop is on — bounces forward/backward instead of restarting at loopStart each cycle
+      volume: 1,               // 0-1.5 linear, applied on top of the per-cell volume column — same range/dB-field convention as the Mixer's own channel/master faders
+      panRandomRange: 0,       // 0-1 — each trigger picks a fresh random pan in [-range, +range]; 0 = always centred (default, no behaviour change)
       attack: 0.005, decay: 0.08, sustain: 0.7, release: 0.15,
       polyphonic: false, voiceCap: 8,
       // Spectral Fusion: morphs this sample (A) with a second Source Sample
@@ -803,8 +819,9 @@
       spectralFusion: {
         enabled: false,
         sourceIndex2: null,           // secondary sample slot, or null
-        algorithm: 'spectral-blend',  // 'spectral-blend' | 'convolve' | 'ring-mod'
-        amount: 50,                   // 0-100, meaning depends on algorithm
+        algorithm: 'spectral-blend',  // key into FUSION_ALGORITHMS — 'spectral-blend' (Cross-Synth) | 'convolve' | 'ring-mod' | 'freq-shift' | 'freeze' | 'smear'
+        amount: 50,                   // meaning + range depends on algorithm, see FUSION_ALGORITHMS
+        formantShift: 0,              // semitones, -12..12 — always-on post-process regardless of algorithm, 0 = skip
         savedStartSec: 0, savedEndSec: 0 // plain-sample trim, stashed while enabled, restored on disable
       }
     };
@@ -1042,6 +1059,7 @@
           '<span class="ins-transpose-val" id="insTransposeVal'+i+'">'+formatTranspose(ins.sampler.transpose)+'</span>'+
           '<button type="button" class="ins-transpose-btn" data-transpose-ins="'+i+'" data-transpose-dir="1" title="transpose up 1 semitone (also previews)">+</button>'+
         '</div>';
+      var volumeCell = '<input type="text" class="ins-volume-db" data-ins="'+i+'" inputmode="decimal" style="width:40px" value="'+formatDb(linearToDb(ins.sampler.volume))+'" title="per-instrument volume, in dB — same value as this instrument\'s Sampler modal">';
       return '<tr data-explain="ins-'+i+'" data-ins-row="'+i+'"'+(mutedInstruments[i]?' class="ins-muted"':'')+'>'+
         '<td>'+previewBtn+'</td>'+
         '<td><input type="checkbox" class="ins-mute-toggle" data-ins-mute="'+i+'"'+(mutedInstruments[i]?' checked':'')+' title="mute this instrument — silences it for real in Sampler Mode; in stem playback (Sampler Mode off) a whole channel\'s audio can\'t be selectively unmixed, so this only marks its cells below"></td>'+
@@ -1049,6 +1067,7 @@
         '<td>'+i+'</td><td class="ins-name">'+esc(ins.name||'(unnamed)')+'</td>'+
         '<td class="ins-col-wave">'+waveCell+'</td>'+
         '<td class="ins-col-transpose">'+transposeCell+'</td>'+
+        '<td class="ins-col-volume">'+volumeCell+'</td>'+
         '<td class="ins-col-sampler">'+samplerButtonHTML(i)+'</td>'+
       '</tr>';
     }).join('');
@@ -1058,7 +1077,7 @@
         '<span class="field-summary">'+song.instruments.length+'</span>'+
         '<span class="collapse-arrow">▾</span>'+
       '</div>'+
-      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th title="mute this instrument">Mute</th><th>Color</th><th>#</th><th>Name</th><th class="ins-col-wave" data-explain="wavetables" title="which wavetable this instrument\'s Wave channel points at, if any">Wave</th><th class="ins-col-transpose" data-explain="ins-transpose" title="pitch-shift this instrument\'s Sampler-mode sample by semitones — same value as its Sampler modal">Transpose</th><th class="ins-col-sampler" data-explain="sampler-col" title="assign/edit this instrument\'s Sampler settings for Sampler Mode">Sampler</th></tr></thead>'+
+      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th title="mute this instrument">Mute</th><th>Color</th><th>#</th><th>Name</th><th class="ins-col-wave" data-explain="wavetables" title="which wavetable this instrument\'s Wave channel points at, if any">Wave</th><th class="ins-col-transpose" data-explain="ins-transpose" title="pitch-shift this instrument\'s Sampler-mode sample by semitones — same value as its Sampler modal">Transpose</th><th class="ins-col-volume" data-explain="ins-volume" title="per-instrument volume in dB, on top of the pattern\'s own volume column — same value as its Sampler modal">Vol</th><th class="ins-col-sampler" data-explain="sampler-col" title="assign/edit this instrument\'s Sampler settings for Sampler Mode">Sampler</th></tr></thead>'+
       '<tbody>'+rows+'</tbody></table></div></div>'+
     '</div>';
   }
@@ -1091,6 +1110,15 @@
       var spectralBtn = document.querySelector('.spectral-btn[data-spectral-ins="'+i+'"]');
       if(spectralBtn) spectralBtn.classList.toggle('fusion-on', ins.sampler.spectralFusion.enabled);
     });
+  }
+  // Pushes the Sampler modal's own Volume field back to this instrument's
+  // row in the Instruments table — the mirror of the modal's own sync-on-
+  // open, so editing Volume from either place never leaves the other stale
+  // while both happen to be visible. syncMixerDbField is defined further
+  // down but hoisted, same as other forward references in this file.
+  function syncInstrumentVolumeField(insIndex){
+    var inp = document.querySelector('.ins-volume-db[data-ins="'+insIndex+'"]');
+    if(inp) syncMixerDbField(inp, song.instruments[insIndex].sampler.volume);
   }
   function sourceSamplesFieldHTML(){
     var slots = sourceSamples.map(function(s, i){
@@ -1242,6 +1270,27 @@
       sp.transpose = Math.max(-24, Math.min(24, sp.transpose + dir));
       document.getElementById('insTransposeVal'+i).textContent = formatTranspose(sp.transpose);
       triggerSamplerPreviewWithRefTone(i);
+    });
+  });
+
+  // Instruments table's own Volume field — same dB-text convention as the
+  // Mixer strips (parseDbText/dbToLinear/syncMixerDbField, all defined
+  // further down but hoisted), just reachable without opening the Sampler
+  // modal first. 'change' (not 'input') so it commits once typing is done
+  // rather than on every keystroke.
+  document.querySelectorAll('.ins-volume-db').forEach(function(inp){
+    inp.addEventListener('change', function(){
+      var i = parseInt(inp.getAttribute('data-ins'), 10);
+      var sp = song.instruments[i].sampler;
+      var db = parseDbText(inp.value);
+      if(db===null){ syncMixerDbField(inp, sp.volume); return; } // unparseable — revert rather than guess
+      var v = Math.max(0, Math.min(1.5, dbToLinear(db)));
+      sp.volume = v;
+      syncMixerDbField(inp, v); // reformats to the actual (possibly clamped) value
+      if(samplerModalInsIndex===i){
+        document.getElementById('samplerVolume').value = v;
+        syncMixerDbField(document.getElementById('samplerVolumeDb'), v);
+      }
     });
   });
 
@@ -1714,6 +1763,10 @@
         html: P('−/+ step one semitone at a time and preview immediately, same value as the Transpose field in this instrument\'s own Sampler modal.') +
           P('No source sample assigned yet? Still adjustable, just silent until one is.') };
     },
+    'ins-volume': function(){
+      return { title:'Volume — per-instrument level',
+        html: P('Sits on top of the pattern\'s own volume column, in dB — same field as this instrument\'s Sampler modal, editable from either place.') };
+    },
     'sample-preview-play': function(){
       return { title:'Preview — hear the raw Source Sample',
         html: P('Plays this clip in full at its original pitch/speed, independent of any instrument\'s settings. Click again ('+KW('■')+') to stop early.') };
@@ -1729,12 +1782,13 @@
     },
     'spectral-fusion-tab': function(){
       return { title:'Spectral Fusion — morph two samples into one',
-        html: P('Pick Sample B and an algorithm, then '+KW('Render')+' — this instrument then plays the fused result everywhere (tracker, preview, export) instead of its plain sample.') +
+        html: P('Pick an algorithm (and Sample B, if it needs one) — this instrument then plays the fused result everywhere (tracker, preview, export) instead of its plain sample. Re-renders automatically whenever you let go of a parameter.') +
           P('Start/End resets to the fused sample; turning this off restores your old trim.') };
     },
     'fusion-algorithm': function(){
-      return { title:'Morphing algorithm',
-        html: P(KW('Spectral Blend')+' crossfades B\'s frequency content onto A\'s phase/timing. '+KW('Convolve')+' runs A through B as an impulse response. '+KW('Ring Modulate')+' multiplies them sample-by-sample.') };
+      return { title:'Morphing algorithms',
+        html: P(KW('Cross-Synth')+' imposes B\'s timbre onto A\'s own pitch/rhythm — the \'talking synth\' effect, pushable past 100% for exaggerated results. '+KW('Convolve')+' resonates A through a spectrally-whitened B. '+KW('Ring Modulate')+' multiplies them for metallic tones.') +
+          P(KW('Freq Shift')+', '+KW('Freeze')+' and '+KW('Smear')+' reshape A alone (B ignored): inharmonic frequency shift, a frozen sustained pad, and a washed-out phase-smear. '+KW('Formant Shift')+' below stacks a pitch-independent timbre shift on top of any of them.') };
     },
     'project-json': function(){
       return { title:'Project JSON — save and restore the whole Sampler setup',
@@ -1758,8 +1812,8 @@
     },
     'cover-art': function(){
       return { title:'Cover Art — animated, driven by the same triggers as everything else',
-        html: P('240×240 canvas, dithered from a 32×32 buffer with a 4×4 Bayer matrix, same technique as shrine 0004.') +
-          P('Every note trigger fires a jet trail, coloured/sized by its instrument and volume — all 4 channels, including Noise. Click to save a 1600×1600 PNG.') };
+        html: P('240×240 canvas, dithered from a 32×32 buffer with a 4×4 Bayer matrix, same technique as shrine 0004. A CD-ROM spins over flashing Matrix-style code.') +
+          P('Every note trigger fires a scan-flash around the disc\'s rim, coloured/sized by its instrument and volume — all 4 channels, including Noise. Click to save a 1600×1600 PNG.') };
     },
     'wavetables': function(){
       return { title:'Wavetables — custom waveforms for the GB Wave channel',
@@ -2213,19 +2267,28 @@
     }
 
     var node = ac.createBufferSource();
-    node.buffer = srcSample.buffer;
     node.playbackRate.value = samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose);
     var gainNode = ac.createGain();
     var vol = (volCell!==null && volCell!==undefined) ? volCell/15 : 1; // matches the existing default-to-15 convention elsewhere in this file
+    vol *= sp.volume;
     var sustainLevel = vol*sp.sustain;
     gainNode.gain.setValueAtTime(0, whenCtx);
     gainNode.gain.linearRampToValueAtTime(vol, whenCtx+Math.max(sp.attack,0.003)); // floor avoids a 0-length ramp click
     gainNode.gain.linearRampToValueAtTime(sustainLevel, whenCtx+sp.attack+sp.decay);
-    node.connect(gainNode); gainNode.connect(channelGain[ch]);
+    var pannerNode = ac.createStereoPanner();
+    pannerNode.pan.value = pickRandomPan(sp);
+    node.connect(gainNode); gainNode.connect(pannerNode); pannerNode.connect(channelGain[ch]);
 
     var dur = sp.endSec - sp.startSec;
-    if(sp.loop){ node.loop=true; node.loopStart=sp.startSec; node.loopEnd=sp.endSec; node.start(whenCtx, sp.startSec); }
-    else node.start(whenCtx, sp.startSec, dur); // one-shot ends naturally; sustain/release above only matter if cut short first
+    if(sp.loop){
+      var loopBuf = getLoopReadyBuffer(insIndex); // isolated, declicked, pingPong-doubled if applicable — see its own comment
+      node.buffer = loopBuf;
+      node.loop = true; node.loopStart = 0; node.loopEnd = loopBuf.duration;
+      node.start(whenCtx, 0);
+    } else {
+      node.buffer = srcSample.buffer;
+      node.start(whenCtx, sp.startSec, dur); // one-shot ends naturally; sustain/release above only matter if cut short first
+    }
 
     var voice = { channel:ch, insIndex:insIndex, source:node, gainNode:gainNode, sustainLevel:sustainLevel, releaseSec:sp.release, startCtxTime:whenCtx, finished:false };
     node.onended = function(){
@@ -2236,7 +2299,7 @@
         if(idx!==-1) p.splice(idx,1);
       }
       if(samplerLastVoiceByChannel[ch]===voice) samplerLastVoiceByChannel[ch]=null;
-      node.disconnect(); gainNode.disconnect();
+      node.disconnect(); gainNode.disconnect(); pannerNode.disconnect();
     };
     if(sp.polyphonic) samplerVoicesByIns[insIndex].push(voice);
     samplerLastVoiceByChannel[ch] = voice;
@@ -2547,10 +2610,11 @@
   // src/0004/0004-rune_d.html's own cover art (composite at native 32x32
   // into a float RGB buffer, ordered-dither down to a handful of levels
   // per channel, blit up to the visible 240x240 canvas with smoothing
-  // off). A night sky with drifting noise-cloud texture sits behind a
-  // bright diagonal jet trail (bottom-right -> top-left) fired for every
-  // note trigger — real playback or a preview click alike — coloured by
-  // that note's instrument and sized/brightened by its volume. ---
+  // off). A spinning CD-ROM sits over a Matrix-style field of slowly
+  // flashing blue "code" cells; every note trigger fires a brief coloured
+  // scan-flash around the disc's rim — like a read head sweeping past —
+  // coloured by that note's instrument and sized/brightened by its
+  // volume. ---
   var COVER_GRID = 32;
   var coverVctx = document.getElementById('coverArt').getContext('2d');
   var coverGridCanvas = document.createElement('canvas');
@@ -2577,7 +2641,7 @@
     return flat;
   }
   var COVER_BAYER4 = coverBayer4();
-  var COVER_DITHER_LEVELS = 9; // higher than 0004's 6 — the noise-cloud background has more going on locally than a flat gradient, and more levels keeps the halftone pattern from reading as noise
+  var COVER_DITHER_LEVELS = 9; // higher than 0004's 6 — the Matrix flicker + disc sweep both have more going on locally than a flat gradient, and more levels keeps the halftone pattern from reading as noise
   function coverDitherChannel(v, x, y){
     v = v<0?0:(v>255?255:v);
     var step = 255/(COVER_DITHER_LEVELS-1);
@@ -2590,16 +2654,16 @@
   }
   function coverHexToRgb(hex){ var n = parseInt(hex.slice(1),16); return [(n>>16)&255, (n>>8)&255, n&255]; }
 
-  // Ring stamp for cloud puffs — same bounding-box-optimized technique as
-  // 0004's own addRing, but blends by lerping each pixel TOWARD the given
-  // colour (amt clamped to [0,1]) rather than 0004's pure additive
-  // accumulation. Additive worked there because it draws over a near-black
-  // background — adding a saturated colour to near-zero reads as that
-  // colour. This canvas's background is a bright daytime sky; adding
-  // colour on top of already-bright values just blows every channel
-  // toward 255, washing everything out to pale white instead of showing
-  // the intended colour. Lerping toward the target holds up on any
-  // background brightness, dark or light.
+  // Ring stamp — same bounding-box-optimized technique as 0004's own
+  // addRing, but blends by lerping each pixel TOWARD the given colour
+  // (amt clamped to [0,1]) rather than 0004's pure additive accumulation.
+  // Additive worked there because it draws over a near-black background —
+  // adding a saturated colour to near-zero reads as that colour. This
+  // canvas's background/disc sit at a wide range of brightness levels;
+  // adding colour on top of already-bright values just blows every
+  // channel toward 255, washing everything out to pale white instead of
+  // showing the intended colour. Lerping toward the target holds up on
+  // any background brightness, dark or light.
   function coverAddRing(cx, cy, radius, ringWidth, color, intensity){
     if(intensity <= 0) return;
     var rOuter = radius + ringWidth;
@@ -2618,33 +2682,31 @@
       }
     }
   }
-  // Line-segment stamp for jet trails — nothing to reuse from 0004 here
-  // (its addRing only does circles). Same bounding-box-optimized shape and
-  // lerp-toward-colour blending as coverAddRing above, but falloff is
-  // distance-to-segment rather than distance-to-centre, and brightness
-  // tapers along the segment so it reads as a directional streak, not a
-  // blob — dim (x0,y0) -> bright (x1,y1) by default (an individual jet's
-  // own exhaust, brightest at its moving head), or reversed with
-  // `reverseTaper` (the wing air-lines, meant to read brightest near the
-  // engines at the near/bottom-left end rather than the far end).
-  function coverAddTrail(x0,y0,x1,y1,width,color,intensity,reverseTaper){
+  // Angle wrapped to (-PI, PI] — shared by the disc's rotating highlight
+  // and the scan-pulse arcs below, both of which need "shortest angular
+  // distance" rather than a raw subtraction that can be off by 2*PI.
+  function wrapAngle(a){ a = a % (Math.PI*2); if(a>Math.PI) a -= Math.PI*2; if(a<-Math.PI) a += Math.PI*2; return a; }
+  // Arc stamp for scan pulses — same bounding-box-optimized shape and
+  // lerp-toward-colour blending as coverAddRing above, but the covered
+  // region is a short wedge along a fixed radius (falls off with both
+  // radial AND angular distance from the arc's centre) rather than a full
+  // ring, so it reads as a brief flash at one point around the rim rather
+  // than the whole circumference lighting up.
+  function coverAddArc(cx, cy, radius, angleCenter, angleWidth, thickness, color, intensity){
     if(intensity <= 0) return;
-    var minX = Math.max(0, Math.floor(Math.min(x0,x1)-width));
-    var maxX = Math.min(COVER_GRID-1, Math.ceil(Math.max(x0,x1)+width));
-    var minY = Math.max(0, Math.floor(Math.min(y0,y1)-width));
-    var maxY = Math.min(COVER_GRID-1, Math.ceil(Math.max(y0,y1)+width));
-    var dx = x1-x0, dy = y1-y0;
-    var lenSq = dx*dx+dy*dy || 1;
-    for(var y=minY;y<=maxY;y++){
-      for(var x=minX;x<=maxX;x++){
-        var t = ((x-x0)*dx+(y-y0)*dy)/lenSq;
-        t = t<0?0:(t>1?1:t);
-        var px = x0+t*dx, py = y0+t*dy;
-        var ddx = x-px, ddy = y-py, d = Math.sqrt(ddx*ddx+ddy*ddy);
-        var falloff = 1 - d/width;
-        if(falloff<=0) continue;
-        var taper = reverseTaper ? (1-0.65*t) : (0.35+0.65*t);
-        var amt = falloff*intensity*taper; if(amt>1) amt=1;
+    var rOuter = radius+thickness;
+    var x0 = Math.max(0, Math.floor(cx-rOuter)), x1 = Math.min(COVER_GRID-1, Math.ceil(cx+rOuter));
+    var y0 = Math.max(0, Math.floor(cy-rOuter)), y1 = Math.min(COVER_GRID-1, Math.ceil(cy+rOuter));
+    var halfWidth = angleWidth/2;
+    for(var y=y0;y<=y1;y++){
+      for(var x=x0;x<=x1;x++){
+        var dx=x+0.5-cx, dy=y+0.5-cy, d=Math.sqrt(dx*dx+dy*dy);
+        var radialFalloff = 1 - Math.abs(d-radius)/thickness;
+        if(radialFalloff<=0) continue;
+        var ad = Math.abs(wrapAngle(Math.atan2(dy,dx)-angleCenter));
+        if(ad > halfWidth) continue;
+        var angularFalloff = 1 - ad/halfWidth;
+        var amt = radialFalloff*angularFalloff*intensity; if(amt>1) amt=1;
         var idx = (y*COVER_GRID+x)*3;
         coverGridBuf[idx]   += (color[0]-coverGridBuf[idx])*amt;
         coverGridBuf[idx+1] += (color[1]-coverGridBuf[idx+1])*amt;
@@ -2653,12 +2715,17 @@
     }
   }
 
-  // --- Drifting cloud background: a small deterministic value-noise field
-  // (lattice + bilinear interpolation — no library, nothing in 0004 to
-  // reuse here since its background is a static two-colour gradient with
-  // no noise texture) sampled at a slowly shifting offset each frame for
-  // ambient drift, layered over a fixed night-sky gradient running the
-  // same bottom-right -> top-left axis as the jet trails themselves. ---
+  // --- Matrix-style background: the grid is divided into small
+  // "character" cells, each with its own fixed random phase/speed, whose
+  // brightness breathes up through an occasional bright "activation"
+  // flash and back down — stands in for individual code glyphs quietly
+  // lighting up, without literally drawing 2px-tall characters (32x32 is
+  // too coarse for that to read as text, the same reason the rest of this
+  // canvas uses broad colour shapes rather than fine detail). Deliberately
+  // slow and semi-random per cell rather than the classic fast vertical
+  // "rain" — the brief asked for "slowly flashing", not scrolling. No
+  // library (nothing in 0004 to reuse — its background is a flat
+  // two-colour gradient with no per-cell texture at all). ---
   function coverMulberry32(seed){
     return function(){
       seed |= 0; seed = seed + 0x6D2B79F5 | 0;
@@ -2667,191 +2734,120 @@
       return ((t ^ t >>> 14) >>> 0) / 4294967296;
     };
   }
-  function makeCoverValueNoise(size, seed){
-    var rng = coverMulberry32(seed);
-    var lattice = new Float32Array(size*size);
-    for(var i=0;i<lattice.length;i++) lattice[i] = rng();
-    return function(x, y){
-      x = ((x % size) + size) % size;
-      y = ((y % size) + size) % size;
-      var x0 = Math.floor(x), y0 = Math.floor(y);
-      var x1 = (x0+1)%size, y1 = (y0+1)%size;
-      var fx = x-x0, fy = y-y0;
-      var v00=lattice[y0*size+x0], v10=lattice[y0*size+x1];
-      var v01=lattice[y1*size+x0], v11=lattice[y1*size+x1];
-      var a = v00+(v10-v00)*fx, b = v01+(v11-v01)*fx;
-      return a+(b-a)*fy;
-    };
-  }
-  // Sampled at a low frequency (x*0.11 etc — one lattice cell spans a
-  // large fraction of the 32-wide grid) so each cloud reads as a soft,
-  // sizeable blob rather than fine mottled texture; a first version
-  // sampled ~3x faster and, combined with the ordered-dither pattern
-  // below, read as noisy checkerboard rather than clouds.
-  var coverNoiseA = makeCoverValueNoise(8, 1337); // coarse cloud shapes
-  var coverNoiseB = makeCoverValueNoise(5, 4242); // subtle texture on top
-  // Night sky, gradiented along the jets' own bottom-left->top-right axis:
-  // warmer near the horizon where jets originate, cooler/deeper up where
-  // they're headed.
-  var COVER_SKY_NEAR = [26,16,36], COVER_SKY_FAR = [6,7,15];
-  var COVER_CLOUD = [58,62,84]; // kept close in brightness to the sky tones — a bigger jump dithers harshly at this resolution
+  var MATRIX_COLS = 16, MATRIX_ROWS = 16; // 2x2 grid units per "character" cell
+  var MATRIX_CELL_W = COVER_GRID/MATRIX_COLS, MATRIX_CELL_H = COVER_GRID/MATRIX_ROWS;
+  var MATRIX_PHASE = new Float32Array(MATRIX_COLS*MATRIX_ROWS);
+  var MATRIX_SPEED = new Float32Array(MATRIX_COLS*MATRIX_ROWS);
+  (function(){
+    var rng = coverMulberry32(9001);
+    for(var i=0;i<MATRIX_PHASE.length;i++){
+      MATRIX_PHASE[i] = rng()*Math.PI*2;
+      MATRIX_SPEED[i] = 0.12 + rng()*0.3; // a full breath every ~3-8s, and not in lockstep cell-to-cell
+    }
+  })();
+  var MATRIX_DIM = [3,9,16], MATRIX_BRIGHT = [45,195,232]; // near-black navy -> glowing cyan-blue
   var coverDriftT = 0; // wall-clock seconds, advances every frame regardless of playback state
-  function drawCoverBackground(){
-    for(var y=0;y<COVER_GRID;y++){
-      for(var x=0;x<COVER_GRID;x++){
-        // t=0 at bottom-left (near, hazy horizon), t=1 at top-right (far,
-        // deep sky) — same corner-to-corner axis the jets themselves fly.
-        var t = (x + (COVER_GRID-1-y)) / (2*(COVER_GRID-1));
-        var idx = (y*COVER_GRID+x)*3;
-        var r = COVER_SKY_NEAR[0] + (COVER_SKY_FAR[0]-COVER_SKY_NEAR[0])*t;
-        var gg = COVER_SKY_NEAR[1] + (COVER_SKY_FAR[1]-COVER_SKY_NEAR[1])*t;
-        var b = COVER_SKY_NEAR[2] + (COVER_SKY_FAR[2]-COVER_SKY_NEAR[2])*t;
-        var n = coverNoiseA(x*0.11+coverDriftT*0.2, y*0.11-coverDriftT*0.12)*0.8
-              + coverNoiseB(x*0.3-coverDriftT*0.3, y*0.3+coverDriftT*0.17)*0.2;
-        // Smoothstep rather than a hard-ish linear ramp — a gentler
-        // sky->cloud transition means fewer pixels sit exactly on a
-        // dither-level boundary, which is what was reading as noise.
-        var cloud = Math.max(0, Math.min(1, (n-0.38)/0.3));
-        cloud = cloud*cloud*(3-2*cloud);
-        coverGridBuf[idx]   = r + (COVER_CLOUD[0]-r)*cloud;
-        coverGridBuf[idx+1] = gg + (COVER_CLOUD[1]-gg)*cloud;
-        coverGridBuf[idx+2] = b + (COVER_CLOUD[2]-b)*cloud;
+  function drawMatrixBackground(){
+    for(var cy=0; cy<MATRIX_ROWS; cy++){
+      for(var cx=0; cx<MATRIX_COLS; cx++){
+        var ci = cy*MATRIX_COLS+cx;
+        var wave = 0.5+0.5*Math.sin(coverDriftT*MATRIX_SPEED[ci]*Math.PI*2 + MATRIX_PHASE[ci]);
+        var spike = wave*wave*wave*wave; // biased toward dim, with occasional bright "activation" peaks — a plain sine reads as uniform pulsing, not activation
+        var r = MATRIX_DIM[0] + (MATRIX_BRIGHT[0]-MATRIX_DIM[0])*spike;
+        var g = MATRIX_DIM[1] + (MATRIX_BRIGHT[1]-MATRIX_DIM[1])*spike;
+        var b = MATRIX_DIM[2] + (MATRIX_BRIGHT[2]-MATRIX_DIM[2])*spike;
+        var x0 = Math.floor(cx*MATRIX_CELL_W), x1 = Math.floor((cx+1)*MATRIX_CELL_W);
+        var y0 = Math.floor(cy*MATRIX_CELL_H), y1 = Math.floor((cy+1)*MATRIX_CELL_H);
+        for(var y=y0;y<y1;y++){
+          for(var x=x0;x<x1;x++){
+            var idx=(y*COVER_GRID+x)*3;
+            coverGridBuf[idx]=r; coverGridBuf[idx+1]=g; coverGridBuf[idx+2]=b;
+          }
+        }
       }
     }
   }
 
-  // --- Jets: one per note trigger. Head travels a fixed bottom-left ->
-  // top-right diagonal at a constant speed; drawn each frame as a tapered
-  // trail behind the head, with a quick fade-in then a longer fade-out
-  // timed to land near the far corner. Colour = the triggering note's
-  // active instrument colour (same colour used everywhere else on this
-  // page); length/width/lifetime scale with that note's volume. Each
-  // channel gets its own lane (a fixed perpendicular offset, plus a little
-  // random jitter so repeated notes on one channel don't all launch from
-  // the exact same point) so simultaneous notes across channels don't
-  // stack directly on top of each other, and the lanes are spread wide
-  // enough that trails fill most of the canvas rather than a narrow band
-  // down the middle. ---
-  var JET_DIR = { x: Math.SQRT1_2, y: -Math.SQRT1_2 };
-  var JET_PERP = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
-  var JET_SPEED = 22; // grid units/sec
-  var JET_LANES = [-9, -3, 3, 9]; // one per channel (0-3), spread wide across the diagonal's width
-  // How far a jet arcs off its straight-line path at the peak of its
-  // flight, in grid units. sin(t*PI) rather than a monotonic bank: it's
-  // 0 at both spawn and fade-out, so the arc bulges out mid-flight and
-  // back in, rather than the whole stream ending up visibly offset from
-  // where the lane system placed it.
-  var JET_CURVE_AMOUNT = 5;
-  // Normalizes the current sway to roughly [-1,1] — continuous, unlike a
-  // sign flip, so a jet spawned right as the sway crosses centre arcs
-  // only slightly (curveScale near 0) rather than snapping straight from
-  // one full bank to the other. Shared by jets (captured once at spawn,
-  // see spawnJet) and the wing air-lines (read live every frame) so both
-  // always agree on "which way and how much" the aircraft is banking.
-  function currentJetCurveScale(){
-    return currentJetSourceOffset() / JET_SOURCE_WOBBLE_AMP;
+  // --- Disc: a CD-ROM, data-side up, spinning continuously in the centre
+  // of the frame — replaces the old "aircraft over clouds" concept but
+  // keeps the exact same buffer/dither/blit pipeline and the exact same
+  // lerp-toward-colour blending as the rest of this file. Rotation is
+  // sold by a soft specular highlight that sweeps around the disc face
+  // (plus a small bright index dot at the rim) rather than any texture
+  // tied to radius alone — concentric rings would be rotationally
+  // symmetric and look just as static spinning as not. ---
+  var DISC_CX = COVER_GRID/2, DISC_CY = COVER_GRID/2; // 16,16 — dead centre
+  var DISC_R = 13, DISC_HUB_R = 2.3, DISC_HUB_RING_R = 3.2;
+  var DISC_SPIN_HZ = 1/4; // one full rotation every 4s — reads clearly as spinning without strobing under the dither
+  var DISC_BASE = [138,150,172], DISC_RIM = [70,78,98]; // cool steel-blue, ties into the Matrix palette rather than neutral grey
+  var DISC_HIGHLIGHT = [230,240,255];
+  var DISC_HUB = [10,12,20], DISC_HUB_RING = [178,186,206];
+  function drawDisc(){
+    var spinAngle = coverDriftT * DISC_SPIN_HZ * Math.PI*2;
+    var highlightBoost = 0.85 + coverOverallVol*0.3; // sweep glints a little brighter while notes are actively firing
+    for(var y=0;y<COVER_GRID;y++){
+      for(var x=0;x<COVER_GRID;x++){
+        var dx = x+0.5-DISC_CX, dy = y+0.5-DISC_CY;
+        var dist = Math.sqrt(dx*dx+dy*dy);
+        if(dist > DISC_R+0.5) continue; // leave the Matrix background showing outside the disc
+        var edgeFade = dist>DISC_R-0.5 ? Math.max(0,DISC_R+0.5-dist) : 1; // soft 1px edge against the background
+        var idx = (y*COVER_GRID+x)*3;
+        var r,g,b;
+        if(dist <= DISC_HUB_R){
+          r=DISC_HUB[0]; g=DISC_HUB[1]; b=DISC_HUB[2];
+        } else if(dist <= DISC_HUB_RING_R){
+          r=DISC_HUB_RING[0]; g=DISC_HUB_RING[1]; b=DISC_HUB_RING[2];
+        } else {
+          r=DISC_BASE[0]; g=DISC_BASE[1]; b=DISC_BASE[2];
+          var angle = Math.atan2(dy,dx);
+          var ad = Math.abs(wrapAngle(angle-spinAngle));
+          var highlight = Math.exp(-(ad*ad)/(2*0.35*0.35)) * highlightBoost;
+          r += (DISC_HIGHLIGHT[0]-r)*highlight; g += (DISC_HIGHLIGHT[1]-g)*highlight; b += (DISC_HIGHLIGHT[2]-b)*highlight;
+          // fainter secondary glint opposite the main sweep — real discs
+          // show a duller glint on the far side, and it doubles as a
+          // clearer "is this actually turning" cue frame to frame.
+          var ad2 = Math.abs(wrapAngle(angle-spinAngle-Math.PI));
+          var highlight2 = Math.exp(-(ad2*ad2)/(2*0.28*0.28)) * 0.32 * highlightBoost;
+          r += (DISC_HIGHLIGHT[0]-r)*highlight2; g += (DISC_HIGHLIGHT[1]-g)*highlight2; b += (DISC_HIGHLIGHT[2]-b)*highlight2;
+          if(dist > DISC_R-1.2){ r += (DISC_RIM[0]-r)*0.4; g += (DISC_RIM[1]-g)*0.4; b += (DISC_RIM[2]-b)*0.4; }
+        }
+        coverGridBuf[idx]   += (r-coverGridBuf[idx])*edgeFade;
+        coverGridBuf[idx+1] += (g-coverGridBuf[idx+1])*edgeFade;
+        coverGridBuf[idx+2] += (b-coverGridBuf[idx+2])*edgeFade;
+      }
+    }
+    // Small bright index dot at the rim, rotating with the disc — an
+    // unambiguous single-point rotation reference, distinct from the
+    // broader specular sweep (which alone can be ambiguous about
+    // direction at a glance).
+    var dotX = DISC_CX + Math.cos(spinAngle)*(DISC_R-1.5), dotY = DISC_CY + Math.sin(spinAngle)*(DISC_R-1.5);
+    coverAddRing(dotX, dotY, 0, 0.9, [255,255,255], 1);
   }
-  // Shared by both the head (current position) and the tail (position a
-  // bit earlier in the same flight) so the short exhaust-burst segment
-  // drawn each frame follows the curve's actual local tangent instead of
-  // cutting straight across it. Reads the CURRENT live sway/curve, not a
-  // value captured once at spawn — a jet is still physically attached to
-  // the aircraft (same as the wing air-lines below), so as the aircraft
-  // sways and banks, every jet already in flight has to move and bend
-  // right along with it, not keep replaying whatever the aircraft was
-  // doing at the instant it fired. j.spread0 is the one thing genuinely
-  // fixed at spawn: which lane (engine) this jet came out of.
-  function jetPositionAt(j, age){
-    var t = age/j.maxAge;
-    var dist = JET_SPEED*age;
-    var spread = j.spread0 + currentJetSourceOffset();
-    var curve = JET_CURVE_AMOUNT * Math.sin(t*Math.PI) * currentJetCurveScale();
-    return {
-      x: WING_BASE_X + JET_PERP.x*spread + JET_DIR.x*dist + JET_PERP.x*curve,
-      y: WING_BASE_Y + JET_PERP.y*spread + JET_DIR.y*dist + JET_PERP.y*curve
-    };
-  }
-  // The whole engine cluster sways slowly side to side (perpendicular to
-  // the flight direction) over time — every jet's spawn point and the
-  // wing air-lines' own anchor all read this same offset each frame, so
-  // the streams and the wings rotate together as one aircraft rather than
-  // each independently. Driven by coverDriftT (already ticking every
-  // frame regardless of playback state) rather than its own clock.
-  var JET_SOURCE_WOBBLE_AMP = 2.2; // grid units of side-to-side sway
-  var JET_SOURCE_WOBBLE_HZ = 1/7; // one full sway cycle roughly every 7s — slow and subtle
-  function currentJetSourceOffset(){
-    return Math.sin(coverDriftT * JET_SOURCE_WOBBLE_HZ * 2*Math.PI) * JET_SOURCE_WOBBLE_AMP;
-  }
-  var jets = [], cloudPuffs = [];
-  // The whole bundle of coloured engine streams (one per instrument/
-  // channel) is one aircraft, not four — so there's exactly one pair of
-  // wing air-lines, not one per stream. They sit just outside the
-  // widest jet lanes (one to either side of the whole bunch), always at
-  // least faintly present, white, and their brightness tracks overall
-  // volume across every channel rather than any single instrument's.
+
+  // --- Scan pulses: one per note trigger, replacing the old jet trails.
+  // A short coloured arc flashes at the disc's rim — like a read head or
+  // barcode-scanner sensor sweeping past — positioned by channel (a fixed
+  // angle around the rim, like a ring of sensors) and coloured by that
+  // note's active instrument, quick fade-in then fade-out. Volume scales
+  // width/brightness/lifetime, same envelope shape the old jets used, just
+  // flashing in place at the rim instead of flying off across the frame. ---
+  var SCAN_CHANNEL_ANGLE = [-Math.PI/2, 0, Math.PI/2, Math.PI]; // one per channel (0-3): top, right, bottom, left
+  var scanPulses = [];
   // coverOverallVol is a simple envelope-follower: jumps up on any new
-  // note trigger, decays smoothly when nothing's firing.
+  // note trigger, decays smoothly when nothing's firing — brightens the
+  // disc's own highlight sweep slightly while the mix is active.
   var coverOverallVol = 0;
   var COVER_OVERALL_DECAY = 0.7; // per second
-  function spawnJet(channel, colorHex, volFrac){
+  function spawnScanPulse(channel, colorHex, volFrac){
     volFrac = Math.max(0.15, Math.min(1, volFrac));
     coverOverallVol = Math.max(coverOverallVol, volFrac);
-    var lane = JET_LANES[channel] || 0;
-    var jitter = (Math.random()*2.4-1.2);
-    jets.push({
-      // Which lane (engine) this jet fired from — the one thing that's
-      // actually fixed at spawn. Position and curve are both read live
-      // every frame in jetPositionAt instead of being captured here, so
-      // an already-flying jet keeps tracking the aircraft's current sway
-      // and bank exactly like the wing air-lines do, rather than each
-      // jet replaying a frozen snapshot of "what the aircraft was doing
-      // the instant it fired" — which is what made them visibly drift
-      // apart from the wings over a jet's ~2s life.
-      spread0: lane + jitter,
-      age: 0, maxAge: 1.6 + volFrac*0.5, // tuned so head*speed covers close to the full diagonal (~38 units) by the time it fades
+    var baseAngle = SCAN_CHANNEL_ANGLE[channel] || 0;
+    var jitter = (Math.random()*2-1) * 0.3; // radians — keeps repeated same-channel notes from stacking at the exact same spot
+    scanPulses.push({
+      angle: baseAngle + jitter,
+      age: 0, maxAge: 0.32 + volFrac*0.28, // a brief flash, not a multi-second flight
       color: coverHexToRgb(colorHex),
-      length: 4 + volFrac*7, width: 0.7 + volFrac*0.9
-    });
-  }
-  // Drawn once per frame regardless of how many (if any) individual jets
-  // are currently in flight — these represent fixed aircraft geometry,
-  // not a per-note event, so unlike the jets above they never spawn or
-  // age out. Span almost the full diagonal (well past where any
-  // individual jet actually reaches) since a plane's own wings are there
-  // the whole time, not just while an engine happens to be firing.
-  var WING_LANE = 13; // just outside the widest individual engine lane (9)
-  var WING_BASE_X = 3, WING_BASE_Y = COVER_GRID-4; // same base origin spawnJet uses
-  var WING_ARC_SEGMENTS = 14; // short straight pieces approximating the same curve the jets fly
-  function drawWingAirLines(){
-    var wobble = currentJetSourceOffset();
-    var baseX = WING_BASE_X + JET_PERP.x*wobble, baseY = WING_BASE_Y + JET_PERP.y*wobble;
-    // Read live every frame (not captured once like a jet's own
-    // curveScale) so the wings always reflect the aircraft's current
-    // bank — which also means they stay consistent with any jet in
-    // flight, since that jet captured this same value only moments ago.
-    var curveScale = currentJetCurveScale();
-    var intensity = 0.1 + coverOverallVol*0.45; // faint floor even at zero volume, brightens with the overall mix
-    [1,-1].forEach(function(side){
-      var laneOx = JET_PERP.x*WING_LANE*side, laneOy = JET_PERP.y*WING_LANE*side;
-      var prevX = null, prevY = null;
-      for(var i=0;i<=WING_ARC_SEGMENTS;i++){
-        var s = i/WING_ARC_SEGMENTS; // 0 at the engines, 1 at the far end — same convention as a jet's own t
-        var dist = 44*s;
-        var curve = JET_CURVE_AMOUNT * Math.sin(s*Math.PI) * curveScale; // same shape as jetPositionAt's curve
-        var px = baseX + JET_DIR.x*dist + JET_PERP.x*curve + laneOx;
-        var py = baseY + JET_DIR.y*dist + JET_PERP.y*curve + laneOy;
-        if(prevX!==null){
-          // Width 0.6, not thinner: at exactly 45 degrees (JET_DIR/JET_PERP
-          // are both unit diagonals) on a 32px grid, a narrower line's
-          // worst-case gap to the nearest pixel centre exceeds its own
-          // width, so most of it simply never lands on a pixel — it needs
-          // to stay reliably above that gap to render as a continuous
-          // line rather than a dashed one. reverseTaper=true: brightest
-          // near the engines rather than the far end, per earlier feedback.
-          coverAddTrail(prevX, prevY, px, py, 0.6, [255,255,255], intensity, true);
-        }
-        prevX = px; prevY = py;
-      }
+      arcWidth: 0.55 + volFrac*0.55 // radians
     });
   }
   // A note's effective volume — GB channel volume defaults to max (15)
@@ -2865,40 +2861,24 @@
   }
   function spawnJetForCell(c, orderPos, row){
     var ch = song.channels[c];
-    if(ch.noteTimeline[orderPos][row]===null) return; // nothing held here — don't fire a trail for silence
+    if(ch.noteTimeline[orderPos][row]===null) return; // nothing held here — don't fire a scan pulse for silence
     var insIdx = ch.insTimeline[orderPos][row];
     var color = (insIdx!==null && song.instruments[insIdx]) ? song.instruments[insIdx].color : '#c9973a';
-    spawnJet(c, color, noteVolumeAt(c, orderPos, row)/15);
+    spawnScanPulse(c, color, noteVolumeAt(c, orderPos, row)/15);
   }
   function drawCoverArtFrame(dt){
     coverDriftT += dt;
     coverOverallVol = Math.max(0, coverOverallVol - dt*COVER_OVERALL_DECAY);
-    drawCoverBackground();
-    drawWingAirLines();
+    drawMatrixBackground();
+    drawDisc();
 
-    for(var i=jets.length-1;i>=0;i--){
-      var j = jets[i];
-      j.age += dt;
-      if(j.age >= j.maxAge){ jets.splice(i,1); continue; }
-      var t = j.age/j.maxAge;
-      var head = jetPositionAt(j, j.age);
-      var tail = jetPositionAt(j, Math.max(0, j.age - j.length/JET_SPEED));
-      var headX = head.x, headY = head.y, tailX = tail.x, tailY = tail.y;
-      var envelope = t<0.12 ? t/0.12 : 1-(t-0.12)/(1-0.12);
-      coverAddTrail(tailX, tailY, headX, headY, j.width, j.color, envelope*1.4);
-      // Occasional cloud puff left behind the head — ties the "jet trail"
-      // and "clouds" halves of the brief together visually. Probability
-      // is dt-scaled so puff density doesn't depend on frame rate.
-      if(t<0.6 && Math.random() < dt*5){
-        cloudPuffs.push({ gx: tailX, gy: tailY, age:0, maxAge: 0.7+Math.random()*0.4, color: j.color });
-      }
-    }
-    for(i=cloudPuffs.length-1;i>=0;i--){
-      var p = cloudPuffs[i];
-      p.age += dt;
-      if(p.age >= p.maxAge){ cloudPuffs.splice(i,1); continue; }
-      var pt = p.age/p.maxAge;
-      coverAddRing(p.gx, p.gy, pt*2.5, 1.2, p.color, (1-pt)*0.6);
+    for(var i=scanPulses.length-1;i>=0;i--){
+      var sp = scanPulses[i];
+      sp.age += dt;
+      if(sp.age >= sp.maxAge){ scanPulses.splice(i,1); continue; }
+      var t = sp.age/sp.maxAge;
+      var envelope = t<0.2 ? t/0.2 : 1-(t-0.2)/(1-0.2);
+      coverAddArc(DISC_CX, DISC_CY, DISC_R+1.3, sp.angle, sp.arcWidth, 1.6, sp.color, envelope*1.5);
     }
 
     var data = coverGridImg.data;
@@ -2916,7 +2896,7 @@
     coverVctx.clearRect(0,0,240,240);
     coverVctx.drawImage(coverGridCanvas, 0, 0, 240, 240);
   }
-  drawCoverArtFrame(0); // paint the sky immediately at load, before anything's ever triggered
+  drawCoverArtFrame(0); // paint the disc immediately at load, before anything's ever triggered
 
   // Click-to-save: upscales from coverGridCanvas (the native 32x32 buffer)
   // rather than the visible 240x240 canvas — 1600/32 = 50 exactly, an
@@ -3219,59 +3199,345 @@
     return buf.getChannelData(Math.min(ch, buf.numberOfChannels-1));
   }
 
-  // The flagship algorithm: STFT magnitude of A is blended toward B's
-  // (Amount 0-100%) while A's phase is kept throughout — a cross-synthesis
-  // where B's spectral colour rides A's own timing/pitch, rather than a
-  // plain time-domain crossfade. Operates on the FULL buffers (not the
-  // instrument's trim range — trim is applied afterward, on the fused
-  // result, same as any other sample).
-  function renderSpectralBlend(bufA, bufB, amount){
+  function nextPow2(n){ var p=1; while(p<n) p*=2; return p; }
+
+  // Windows one already-inverse-FFT'd time-domain frame with the sine
+  // synthesis window and adds it into accum at pos — the low-level OLA
+  // primitive stftOlaProcess (below) is built on, and that Freeze's own
+  // seed-once/synthesize-many loop calls directly (it doesn't read a fresh
+  // analysis frame in lockstep with each output frame, so it can't go
+  // through the full driver).
+  function olaAccumulateFrame(accum, pos, timeData){
+    for(var k=0;k<FUSION_FFT_SIZE;k++) accum[pos+k] += timeData[k]*FUSION_SINE_WINDOW[k];
+  }
+  // Shared STFT/OLA driver for one channel: reads a fresh windowed+forward-
+  // FFT'd frame from dataA (and dataB, if given — null for single-input
+  // algorithms) at every hop, hands both to frameFn to produce the desired
+  // OUTPUT spectrum in binsA (mutated in place), inverse-FFTs it, and OLAs
+  // it into the result. Every algorithm below that needs "read a frame,
+  // reshape its spectrum, write a frame" goes through this once instead of
+  // five copies of the same frame-loop/window/OLA bookkeeping.
+  function stftOlaProcess(dataA, dataB, len, frameFn){
+    var accum = new Float32Array(len + FUSION_FFT_SIZE); // padded past len so the last frame can't overrun
+    for(var pos=0; pos<len; pos+=FUSION_HOP){
+      var reA=new Float64Array(FUSION_FFT_SIZE), imA=new Float64Array(FUSION_FFT_SIZE);
+      for(var k=0;k<FUSION_FFT_SIZE;k++){
+        var idx=pos+k;
+        var sa = idx<len ? dataA[idx] : 0;
+        reA[k] = sa*FUSION_SINE_WINDOW[k];
+      }
+      fftRadix2(reA, imA, false);
+      var binsB = null;
+      if(dataB){
+        var reB=new Float64Array(FUSION_FFT_SIZE), imB=new Float64Array(FUSION_FFT_SIZE);
+        for(var k2=0;k2<FUSION_FFT_SIZE;k2++){
+          var idx2=pos+k2;
+          var sb = idx2<len ? dataB[idx2] : 0;
+          reB[k2] = sb*FUSION_SINE_WINDOW[k2];
+        }
+        fftRadix2(reB, imB, false);
+        binsB = { re:reB, im:imB };
+      }
+      var binsA = { re:reA, im:imA };
+      frameFn(binsA, binsB, pos/FUSION_HOP);
+      fftRadix2(binsA.re, binsA.im, true);
+      olaAccumulateFrame(accum, pos, binsA.re);
+    }
+    return accum.subarray(0, len);
+  }
+
+  // Homomorphic (cepstral) spectral envelope: the smooth "timbre/formant
+  // shape" curve underneath a spectrum's harmonic fine structure. Used by
+  // both Cross-Synth (imposes one sample's envelope onto another's fine
+  // structure) and Formant Shift (moves the envelope in frequency without
+  // touching the fine structure). log-magnitude -> inverse FFT gives the
+  // real cepstrum -> zeroing everything but the low-quefrency bins on both
+  // ends (a "lifter") discards the fast harmonic ripple -> forward FFT and
+  // exp gives back a smoothed log-magnitude, i.e. the envelope alone.
+  // CUTOFF=50 at N=2048 keeps ~1.1ms of quefrency, below the pitch period
+  // of anything under ~885Hz — fine for typical instrument samples, same
+  // "fixed internal constant" treatment as FUSION_FFT_SIZE itself (not
+  // exposed as a control).
+  var FUSION_LIFTER_CUTOFF = 50;
+  function computeSpectralEnvelope(mag){
+    var n = mag.length;
+    var re = new Float64Array(n), im = new Float64Array(n);
+    for(var i=0;i<n;i++) re[i] = Math.log(Math.max(mag[i], 1e-6));
+    fftRadix2(re, im, true); // -> real cepstrum
+    for(var i=FUSION_LIFTER_CUTOFF;i<n-FUSION_LIFTER_CUTOFF;i++){ re[i]=0; im[i]=0; } // lifter
+    fftRadix2(re, im, false); // -> smoothed log-magnitude
+    var env = new Float64Array(n);
+    for(var i=0;i<n;i++) env[i] = Math.exp(re[i]);
+    return env;
+  }
+
+  // Cross-Synth: B's spectral envelope (its timbre/formants) is imposed
+  // onto A's own fine harmonic structure — real cross-synthesis, not a
+  // linear magnitude blend, so it actually sounds like one sample "talking
+  // through" another's pitch/rhythm rather than a soft crossfade. Amount
+  // goes to 150% (t up to 1.5): past 100%, envB's exponent keeps rising
+  // while envA's goes negative, deliberately exaggerating/inverting the
+  // envelope transfer for a more extreme result — the epsilon floors below
+  // guard the division, and the final peak-referenced rescale (same idiom
+  // renderRingModulate already uses) keeps that exaggeration from clipping
+  // instead of capping the exponent and losing the effect.
+  function renderCrossSynth(bufA, bufB, amount){
     ensureAudioContext();
     var len = Math.min(bufA.length, bufB.length);
     var out = ac.createBuffer(bufA.numberOfChannels, len, bufA.sampleRate);
     var t = amount/100;
     for(var ch=0; ch<bufA.numberOfChannels; ch++){
       var dataA = bufA.getChannelData(ch), dataB = fusionChannelData(bufB, ch);
-      var accum = new Float32Array(len + FUSION_FFT_SIZE); // padded past len so the last frame can't overrun
-      for(var pos=0; pos<len; pos+=FUSION_HOP){
-        var reA=new Float64Array(FUSION_FFT_SIZE), imA=new Float64Array(FUSION_FFT_SIZE);
-        var reB=new Float64Array(FUSION_FFT_SIZE), imB=new Float64Array(FUSION_FFT_SIZE);
-        for(var k=0;k<FUSION_FFT_SIZE;k++){
-          var idx = pos+k;
-          var sa = idx<len ? dataA[idx] : 0, sb = idx<len ? dataB[idx] : 0;
-          reA[k] = sa*FUSION_SINE_WINDOW[k];
-          reB[k] = sb*FUSION_SINE_WINDOW[k];
+      var res = stftOlaProcess(dataA, dataB, len, function(binsA, binsB){
+        var n = FUSION_FFT_SIZE;
+        var magA = new Float64Array(n), magB = new Float64Array(n), phaseA = new Float64Array(n);
+        for(var b=0;b<n;b++){
+          magA[b] = Math.hypot(binsA.re[b], binsA.im[b]);
+          magB[b] = Math.hypot(binsB.re[b], binsB.im[b]);
+          phaseA[b] = Math.atan2(binsA.im[b], binsA.re[b]);
         }
-        fftRadix2(reA, imA, false);
-        fftRadix2(reB, imB, false);
-        for(var b=0;b<FUSION_FFT_SIZE;b++){
-          var magA = Math.hypot(reA[b], imA[b]);
-          var magB = Math.hypot(reB[b], imB[b]);
-          var phaseA = Math.atan2(imA[b], reA[b]);
-          var magOut = magA + (magB-magA)*t;
-          reA[b] = magOut*Math.cos(phaseA);
-          imA[b] = magOut*Math.sin(phaseA);
+        var envA = computeSpectralEnvelope(magA), envB = computeSpectralEnvelope(magB);
+        for(var b2=0;b2<n;b2++){
+          var eA = Math.max(envA[b2], 1e-9), eB = Math.max(envB[b2], 1e-9);
+          var fine = magA[b2]/eA;
+          var magOut = fine * Math.pow(eB, t) * Math.pow(eA, 1-t);
+          binsA.re[b2] = magOut*Math.cos(phaseA[b2]);
+          binsA.im[b2] = magOut*Math.sin(phaseA[b2]);
         }
-        fftRadix2(reA, imA, true);
-        for(var k2=0;k2<FUSION_FFT_SIZE;k2++) accum[pos+k2] += reA[k2]*FUSION_SINE_WINDOW[k2];
-      }
-      out.getChannelData(ch).set(accum.subarray(0, len));
+      });
+      var peakA=0, peakOut=0;
+      for(var i=0;i<len;i++){ peakA=Math.max(peakA, Math.abs(dataA[i])); peakOut=Math.max(peakOut, Math.abs(res[i])); }
+      var scale = (peakOut>1e-9 && peakOut>peakA) ? peakA/peakOut : 1;
+      var outData = out.getChannelData(ch);
+      for(var i2=0;i2<len;i2++) outData[i2] = res[i2]*scale;
     }
     return Promise.resolve(out);
   }
 
-  // Uses B as an impulse response convolved onto A (native ConvolverNode,
-  // no hand-rolled FFT needed) — a smeared/textural cross-synthesis, mixed
-  // dry/wet by Amount. Length capped at 20s so an unusually long B can't
-  // blow up the offline render.
+  // Frequency shifter (single-sideband, via Hilbert transform) — shifts
+  // every partial by the same Hz amount rather than the same ratio, so
+  // harmonic content becomes inharmonic: genuinely alien in a way pitch-
+  // shifting or Ring Mod's harmonic sum/difference tones aren't. A single
+  // input — B is ignored entirely. Done as ONE whole-buffer pass (zero-pad
+  // to a power of 2, one FFT, one IFFT) rather than framed/OLA'd: framing
+  // this would need the shift oscillator's phase to stay continuous across
+  // hop boundaries, which a per-frame restart doesn't give you; doing the
+  // whole buffer at once sidesteps that question rather than patching it,
+  // and is actually cheaper than the framed alternative.
+  function renderFreqShift(bufA, bufB, amount){
+    ensureAudioContext();
+    var len = bufA.length, sr = bufA.sampleRate;
+    var shiftHz = (amount/100 - 0.5) * 2000; // 0%=-1000Hz, 50%=0Hz (no-op), 100%=+1000Hz
+    var out = ac.createBuffer(bufA.numberOfChannels, len, sr);
+    var n = nextPow2(len);
+    for(var ch=0; ch<bufA.numberOfChannels; ch++){
+      var dataA = bufA.getChannelData(ch);
+      var re = new Float64Array(n), im = new Float64Array(n);
+      for(var i=0;i<len;i++) re[i] = dataA[i];
+      fftRadix2(re, im, false);
+      // one-sided spectrum -> analytic signal: DC and Nyquist untouched,
+      // positive frequencies doubled, negative frequencies zeroed.
+      var half = n/2;
+      for(var k=1;k<half;k++){ re[k]*=2; im[k]*=2; }
+      for(var k2=half+1;k2<n;k2++){ re[k2]=0; im[k2]=0; }
+      fftRadix2(re, im, true);
+      var outData = out.getChannelData(ch);
+      for(var i2=0;i2<len;i2++){
+        var theta = 2*Math.PI*shiftHz*i2/sr; // true absolute sample index — exact, no wraparound needed even for very long buffers
+        outData[i2] = re[i2]*Math.cos(theta) - im[i2]*Math.sin(theta);
+      }
+    }
+    return Promise.resolve(out);
+  }
+
+  function principalValue(x){
+    x = x % (2*Math.PI);
+    if(x > Math.PI) x -= 2*Math.PI;
+    if(x < -Math.PI) x += 2*Math.PI;
+    return x;
+  }
+  function fusionFramePhaseAndMag(data, pos, len){
+    var re=new Float64Array(FUSION_FFT_SIZE), im=new Float64Array(FUSION_FFT_SIZE);
+    for(var k=0;k<FUSION_FFT_SIZE;k++){
+      var idx=pos+k;
+      var s = (idx>=0 && idx<len) ? data[idx] : 0;
+      re[k]=s*FUSION_SINE_WINDOW[k];
+    }
+    fftRadix2(re, im, false);
+    var mag=new Float64Array(FUSION_FFT_SIZE), phase=new Float64Array(FUSION_FFT_SIZE);
+    for(var b=0;b<FUSION_FFT_SIZE;b++){ mag[b]=Math.hypot(re[b],im[b]); phase[b]=Math.atan2(im[b],re[b]); }
+    return { mag:mag, phase:phase };
+  }
+  // Freezes ONE analysis frame of A (position chosen by Amount, 0-100%
+  // along A's own duration) and sustains it into a proper pad/drone rather
+  // than a short one-shot. Magnitude is frozen outright; phase keeps
+  // advancing per-bin so the result shimmers instead of buzzing. The
+  // per-bin advance rate is the MEASURED true instantaneous phase change
+  // between the seed frame and the next one (a standard phase-vocoder
+  // derivation), not the naive theoretical bin-center rate
+  // (2*pi*k*HOP/N) — with this file's fixed 50%-hop, that naive rate
+  // reduces to exactly pi*k for every bin, which is periodic with period 2
+  // hops regardless of source material, i.e. an audible ~21.5Hz buzz
+  // instead of a shimmering freeze. Measuring the real advance from actual
+  // signal content sidesteps that degenerate case for any real audio
+  // (which essentially never has energy sitting exactly on a bin center).
+  function renderFreeze(bufA, bufB, amount){
+    ensureAudioContext();
+    var n = FUSION_FFT_SIZE, len = bufA.length, sr = bufA.sampleRate;
+    var maxPos = Math.max(0, len-n);
+    var pos0 = Math.max(0, Math.min(maxPos, Math.round((amount/100)*maxPos)));
+    var pos1 = Math.min(pos0+FUSION_HOP, maxPos);
+    var outLenSec = Math.min(Math.max(len/sr, 4), 8);
+    var outLen = Math.round(outLenSec*sr);
+    var out = ac.createBuffer(bufA.numberOfChannels, outLen, sr);
+    for(var ch=0; ch<bufA.numberOfChannels; ch++){
+      var dataA = bufA.getChannelData(ch);
+      var f0 = fusionFramePhaseAndMag(dataA, pos0, len), f1 = fusionFramePhaseAndMag(dataA, pos1, len);
+      var advance = new Float64Array(n);
+      for(var k=0;k<n;k++){
+        var nominal = 2*Math.PI*k*FUSION_HOP/n;
+        advance[k] = nominal + principalValue(f1.phase[k]-f0.phase[k]-nominal);
+      }
+      var accum = new Float32Array(outLen+n);
+      var phase = f0.phase.slice();
+      var reOut=new Float64Array(n), imOut=new Float64Array(n);
+      for(var pos=0; pos<outLen; pos+=FUSION_HOP){
+        for(var b=0;b<n;b++){
+          reOut[b]=f0.mag[b]*Math.cos(phase[b]);
+          imOut[b]=f0.mag[b]*Math.sin(phase[b]);
+          phase[b]+=advance[b];
+        }
+        fftRadix2(reOut, imOut, true);
+        olaAccumulateFrame(accum, pos, reOut);
+      }
+      out.getChannelData(ch).set(accum.subarray(0, outLen));
+    }
+    return Promise.resolve(out);
+  }
+
+  // Spectral Smear: magnitude untouched, phase randomized per bin per
+  // frame by up to +-Amount*180 degrees. t=0 is an exact no-op; t=1 fully
+  // randomizes phase every frame, producing a diffuse, washed-out cloud
+  // with none of A's original transient/attack character left — COLA
+  // guarantees stable OLA energy regardless of what's inside each frame,
+  // so this can't blow up; it's deliberately abandoning reconstruction; not
+  // a defect.
+  function renderSmear(bufA, bufB, amount){
+    ensureAudioContext();
+    var len = bufA.length;
+    var t = amount/100;
+    var out = ac.createBuffer(bufA.numberOfChannels, len, bufA.sampleRate);
+    for(var ch=0; ch<bufA.numberOfChannels; ch++){
+      var dataA = bufA.getChannelData(ch);
+      var res = stftOlaProcess(dataA, null, len, function(binsA){
+        for(var b=0;b<FUSION_FFT_SIZE;b++){
+          var mag = Math.hypot(binsA.re[b], binsA.im[b]);
+          var phase = Math.atan2(binsA.im[b], binsA.re[b]);
+          var phaseOut = phase + (Math.random()*2-1)*Math.PI*t;
+          binsA.re[b]=mag*Math.cos(phaseOut);
+          binsA.im[b]=mag*Math.sin(phaseOut);
+        }
+      });
+      out.getChannelData(ch).set(res);
+    }
+    return Promise.resolve(out);
+  }
+
+  // Resamples an envelope curve along the frequency axis by shiftRatio
+  // (>1 = formants move up, <1 = down) — env[k] is sourced from
+  // env[k/shiftRatio], linearly interpolated between neighbouring bins.
+  // Source index clamped to [0, N/2] so a shift-down request past Nyquist
+  // holds/flattens the top of the spectrum rather than reading garbage;
+  // the same clamp is a no-op for shift-up (k/shiftRatio < k always then).
+  // Only bins up to Nyquist are computed directly — the upper half is
+  // mirrored to preserve the conjugate symmetry a real-valued IFFT needs.
+  function computeShiftedEnvelope(env, shiftRatio){
+    var n = env.length, half = n/2;
+    var shifted = new Float64Array(n);
+    for(var k=0;k<=half;k++){
+      var srcIdx = Math.max(0, Math.min(half, k/shiftRatio));
+      var i0 = Math.floor(srcIdx), i1 = Math.min(half, i0+1);
+      var frac = srcIdx - i0;
+      shifted[k] = env[i0]*(1-frac) + env[i1]*frac;
+    }
+    for(var k2=1;k2<half;k2++) shifted[n-k2] = shifted[k2];
+    return shifted;
+  }
+  // Formant Shift: not a .fusion-algo-item — an always-available second
+  // control (spectralFusion.formantShift, semitones) that post-processes
+  // whichever algorithm above just ran, moving its spectral envelope
+  // (timbre/formants) up or down independent of pitch, via the same
+  // cepstral envelope extraction as Cross-Synth. 0 = skip entirely.
+  function applyFormantShift(buf, semitones){
+    ensureAudioContext();
+    var ratio = Math.pow(2, semitones/12);
+    var out = ac.createBuffer(buf.numberOfChannels, buf.length, buf.sampleRate);
+    for(var ch=0; ch<buf.numberOfChannels; ch++){
+      var data = buf.getChannelData(ch);
+      var res = stftOlaProcess(data, null, buf.length, function(binsA){
+        var n = FUSION_FFT_SIZE;
+        var mag=new Float64Array(n), phase=new Float64Array(n);
+        for(var b=0;b<n;b++){ mag[b]=Math.hypot(binsA.re[b],binsA.im[b]); phase[b]=Math.atan2(binsA.im[b],binsA.re[b]); }
+        var env = computeSpectralEnvelope(mag);
+        var shiftedEnv = computeShiftedEnvelope(env, ratio);
+        for(var b2=0;b2<n;b2++){
+          var e = Math.max(env[b2], 1e-9);
+          var magOut = (mag[b2]/e)*shiftedEnv[b2];
+          binsA.re[b2]=magOut*Math.cos(phase[b2]);
+          binsA.im[b2]=magOut*Math.sin(phase[b2]);
+        }
+      });
+      out.getChannelData(ch).set(res);
+    }
+    return out;
+  }
+
+  // Pre-flattens B's spectral tilt before it becomes Convolve's impulse
+  // response, so the convolution transfers A's own timbral character more
+  // distinctly instead of reading mostly as "A with a B-shaped reverb
+  // smear." Partial flattening (ALPHA<1) rather than full (which would
+  // turn B into a noise burst and destroy the resonance worth keeping).
+  // Internal constant, not exposed — Mix keeps its existing dry/wet
+  // meaning in the UI.
+  var FUSION_WHITEN_ALPHA = 0.4;
+  function whitenBuffer(buf){
+    var out = ac.createBuffer(buf.numberOfChannels, buf.length, buf.sampleRate);
+    var n = nextPow2(buf.length);
+    for(var ch=0; ch<buf.numberOfChannels; ch++){
+      var data = buf.getChannelData(ch);
+      var re=new Float64Array(n), im=new Float64Array(n);
+      for(var i=0;i<buf.length;i++) re[i]=data[i];
+      fftRadix2(re, im, false);
+      for(var k=0;k<n;k++){
+        var mag=Math.hypot(re[k],im[k]), phase=Math.atan2(im[k],re[k]);
+        var magOut = Math.pow(Math.max(mag,1e-9), FUSION_WHITEN_ALPHA);
+        re[k]=magOut*Math.cos(phase); im[k]=magOut*Math.sin(phase);
+      }
+      fftRadix2(re, im, true);
+      var outData = out.getChannelData(ch);
+      var rmsOrig=0, rmsNew=0;
+      for(var i2=0;i2<buf.length;i2++) rmsOrig += data[i2]*data[i2];
+      for(var i3=0;i3<buf.length;i3++){ outData[i3]=re[i3]; rmsNew += re[i3]*re[i3]; }
+      rmsOrig = Math.sqrt(rmsOrig/buf.length); rmsNew = Math.sqrt(rmsNew/buf.length);
+      var scale = rmsNew>1e-9 ? rmsOrig/rmsNew : 1;
+      for(var i4=0;i4<buf.length;i4++) outData[i4] *= scale;
+    }
+    return out;
+  }
+
+  // Uses (whitened) B as an impulse response convolved onto A (native
+  // ConvolverNode, no hand-rolled FFT needed for the convolution itself) —
+  // a smeared/textural cross-synthesis, mixed dry/wet by Amount. Length
+  // capped at 20s so an unusually long B can't blow up the offline render.
   function renderConvolve(bufA, bufB, amount){
     ensureAudioContext();
+    var whitenedB = whitenBuffer(bufB);
     var sr = bufA.sampleRate;
     var len = Math.min(bufA.length + bufB.length - 1, Math.ceil(20*sr));
     var offlineCtx = new OfflineAudioContext(bufA.numberOfChannels, len, sr);
     var src = offlineCtx.createBufferSource(); src.buffer = bufA;
     var dry = offlineCtx.createGain(); dry.gain.value = 1 - amount/100;
-    var conv = offlineCtx.createConvolver(); conv.normalize = true; conv.buffer = bufB;
+    var conv = offlineCtx.createConvolver(); conv.normalize = true; conv.buffer = whitenedB;
     var wet = offlineCtx.createGain(); wet.gain.value = amount/100;
     src.connect(dry); dry.connect(offlineCtx.destination);
     src.connect(conv); conv.connect(wet); wet.connect(offlineCtx.destination);
@@ -3304,7 +3570,19 @@
     return Promise.resolve(out);
   }
 
-  var FUSION_ALGORITHMS = { 'spectral-blend':renderSpectralBlend, 'convolve':renderConvolve, 'ring-mod':renderRingModulate };
+  // Registry, not a bare function map: folds in what used to be a separate
+  // FUSION_AMOUNT_LABELS dict, plus needsB (which algorithms are a genuine
+  // A+B fusion vs. a single-input effect that ignores B entirely) and each
+  // algorithm's own sensible Amount range (Cross-Synth alone extends past
+  // 100% — see its own comment above).
+  var FUSION_ALGORITHMS = {
+    'spectral-blend': { fn: renderCrossSynth,   needsB: true,  amountLabel:'Morph Amount',  amountMin:0, amountMax:150 },
+    'convolve':       { fn: renderConvolve,     needsB: true,  amountLabel:'Mix',           amountMin:0, amountMax:100 },
+    'ring-mod':       { fn: renderRingModulate, needsB: true,  amountLabel:'Mix',           amountMin:0, amountMax:100 },
+    'freq-shift':     { fn: renderFreqShift,    needsB: false, amountLabel:'Shift Amount',  amountMin:0, amountMax:100 },
+    'freeze':         { fn: renderFreeze,       needsB: false, amountLabel:'Freeze Point',  amountMin:0, amountMax:100 },
+    'smear':          { fn: renderSmear,        needsB: false, amountLabel:'Smear Amount',  amountMin:0, amountMax:100 }
+  };
 
   function isFusionActive(insIndex){
     var sp = song.instruments[insIndex].sampler;
@@ -3323,20 +3601,108 @@
     var sp = song.instruments[insIndex].sampler;
     return sp.sourceIndex===null ? null : sourceSamples[sp.sourceIndex];
   }
+
+  // --- Loop-ready buffer: an isolated copy of the trimmed [startSec,endSec)
+  // region, with a short declick fade baked into both edges, and — for
+  // Ping-pong — the region appended with its own reverse so a single native
+  // AudioBufferSourceNode.loop can bounce forward/backward/forward/...
+  // seamlessly with no custom scheduling. Built once per (source buffer,
+  // trim, pingPong) combination and cached per instrument — cheap enough to
+  // rebuild synchronously on the rare occasions something actually changed,
+  // wasteful to rebuild on every single note trigger otherwise. ---
+  var LOOP_DECLICK_FADE_SEC = 0.005; // short enough to be inaudible as a level dip, long enough to kill the loop-seam click
+  function buildLoopReadyBuffer(srcBuffer, startSec, endSec, pingPong){
+    ensureAudioContext();
+    var sr = srcBuffer.sampleRate;
+    var s0 = Math.max(0, Math.floor(startSec*sr)), s1 = Math.min(srcBuffer.length, Math.ceil(endSec*sr));
+    var regionLen = Math.max(1, s1-s0);
+    var fadeLen = Math.min(Math.round(LOOP_DECLICK_FADE_SEC*sr), Math.floor(regionLen/2));
+    var outLen = pingPong ? regionLen*2 : regionLen;
+    var out = ac.createBuffer(srcBuffer.numberOfChannels, outLen, sr);
+    for(var ch=0; ch<srcBuffer.numberOfChannels; ch++){
+      var src = srcBuffer.getChannelData(ch);
+      var region = new Float32Array(regionLen);
+      for(var i=0;i<regionLen;i++) region[i] = src[s0+i];
+      // Fade both edges toward zero so the loop seam (end wrapping back to
+      // start) meets near-silence on both sides instead of an abrupt jump —
+      // the actual click source, since plain AudioBufferSourceNode.loop
+      // applies no crossfade of its own at the seam.
+      for(var f=0; f<fadeLen; f++){
+        var g = f/fadeLen;
+        region[f] *= g;
+        region[regionLen-1-f] *= g;
+      }
+      var outData = out.getChannelData(ch);
+      if(pingPong){
+        for(var i2=0;i2<regionLen;i2++){ outData[i2]=region[i2]; outData[outLen-1-i2]=region[i2]; }
+      } else {
+        outData.set(region);
+      }
+    }
+    return out;
+  }
+  var loopBufferCache = new Array(song.instruments.length).fill(null);
+  // loopBufferCache[i] = { sourceBuffer, startSec, endSec, pingPong, buffer } | null
+  // Re-derived lazily from a cheap fingerprint (object identity of the
+  // current effective source buffer, plus the trim/pingPong values) rather
+  // than hooked into every mutation site (trim drag, source change, Fusion
+  // re-render, etc.) — self-heals on the next trigger whenever any of those
+  // actually changed, with no separate invalidation wiring to keep correct.
+  function getLoopReadyBuffer(insIndex){
+    var sp = song.instruments[insIndex].sampler;
+    var eff = getEffectiveSource(insIndex);
+    if(!eff) return null;
+    var cached = loopBufferCache[insIndex];
+    if(cached && cached.sourceBuffer===eff.buffer && cached.startSec===sp.startSec && cached.endSec===sp.endSec && cached.pingPong===sp.pingPong){
+      return cached.buffer;
+    }
+    var built = buildLoopReadyBuffer(eff.buffer, sp.startSec, sp.endSec, sp.pingPong);
+    loopBufferCache[insIndex] = { sourceBuffer: eff.buffer, startSec: sp.startSec, endSec: sp.endSec, pingPong: sp.pingPong, buffer: built };
+    return built;
+  }
+  // Fresh random pan per trigger (not per-sample) — 0 range always returns
+  // exact centre, so an instrument with the default range behaves exactly
+  // as if no panner were there at all.
+  function pickRandomPan(sp){
+    var range = sp.panRandomRange || 0;
+    return range>0 ? (Math.random()*2-1)*range : 0;
+  }
   // Primary sample changing elsewhere (Instruments panel, Sampler tab)
   // while Fusion is on re-renders in place, same as any other Fusion
   // parameter — see autoRenderFusion (tab-switch wiring, hoisted same as
   // other forward references in this file).
-  function renderSpectralFusion(insIndex){
+  // preserveTrim: false/omitted (the default, used by every interactive
+  // parameter change — enabling Fusion, picking B, switching algorithm,
+  // Amount/Formant Shift release) snaps Start/End to the new buffer's full
+  // range, same "new sample" treatment as picking a new primary source.
+  // preserveTrim: true (used only by applyProjectState's post-import
+  // re-render — see its own comment) instead LEAVES Start/End exactly as
+  // just restored from the Project JSON, since this render is
+  // reconstructing a result the user already trimmed and saved, not
+  // presenting a fresh one — the previous unconditional reset here was
+  // silently discarding any such saved trim on every reload.
+  function renderSpectralFusion(insIndex, preserveTrim){
     var sp = song.instruments[insIndex].sampler, fusion = sp.spectralFusion;
-    var a = sourceSamples[sp.sourceIndex], b = sourceSamples[fusion.sourceIndex2];
-    if(!a || !b) return Promise.reject(new Error('Both a primary and secondary sample are required.'));
-    var renderFn = FUSION_ALGORITHMS[fusion.algorithm];
-    return renderFn(a.buffer, b.buffer, fusion.amount).then(function(buf){
-      spectralFusionCache[insIndex] = { buffer: buf, waveformCache: computeWaveformCache(buf) };
-      sp.startSec = 0; sp.endSec = buf.duration; // same "new sample, full trim" treatment as picking a new primary source
+    var meta = FUSION_ALGORITHMS[fusion.algorithm];
+    var a = sourceSamples[sp.sourceIndex];
+    var b = meta.needsB ? sourceSamples[fusion.sourceIndex2] : null;
+    if(!a) return Promise.reject(new Error('A primary sample is required.'));
+    if(meta.needsB && !b) return Promise.reject(new Error('This algorithm needs a Sample B.'));
+    return meta.fn(a.buffer, b ? b.buffer : null, fusion.amount).then(function(buf){
+      var finalBuf = fusion.formantShift ? applyFormantShift(buf, fusion.formantShift) : buf;
+      spectralFusionCache[insIndex] = { buffer: finalBuf, waveformCache: computeWaveformCache(finalBuf) };
+      if(preserveTrim){
+        // Defensive clamp only — the re-render is deterministic from the
+        // same saved inputs, so finalBuf.duration should already match
+        // what endSec was saved against; this just guards against ending
+        // up with an out-of-bounds trim if it somehow doesn't.
+        sp.endSec = Math.min(sp.endSec, finalBuf.duration);
+        if(sp.startSec >= sp.endSec) sp.startSec = 0;
+      } else {
+        sp.startSec = 0; sp.endSec = finalBuf.duration;
+      }
       if(samplerModalInsIndex===insIndex){ redrawSamplerModalWave(); refreshFusionTabUI(); }
-      return buf;
+      return finalBuf;
     });
   }
 
@@ -3387,23 +3753,28 @@
         if(pool.length >= sp.voiceCap) stop(pool.shift(), when, SAMPLER_STEAL_FADE_SEC);
       }
       var node = offlineCtx.createBufferSource();
-      node.buffer = srcSample.buffer;
       node.playbackRate.value = samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose);
       var gainNode = offlineCtx.createGain();
       var vol = (volCell!==null && volCell!==undefined) ? volCell/15 : 1;
+      vol *= sp.volume;
       var sustainLevel = vol*sp.sustain;
       gainNode.gain.setValueAtTime(0, when);
       gainNode.gain.linearRampToValueAtTime(vol, when+Math.max(sp.attack,0.003));
       gainNode.gain.linearRampToValueAtTime(sustainLevel, when+sp.attack+sp.decay);
-      node.connect(gainNode); gainNode.connect(offChannelGain[ch]);
+      var pannerNode = offlineCtx.createStereoPanner();
+      pannerNode.pan.value = pickRandomPan(sp);
+      node.connect(gainNode); gainNode.connect(pannerNode); pannerNode.connect(offChannelGain[ch]);
       var dur = sp.endSec - sp.startSec;
       if(sp.loop){
-        node.loop = true; node.loopStart = sp.startSec; node.loopEnd = sp.endSec;
-        node.start(when, sp.startSec);
+        var loopBuf = getLoopReadyBuffer(insIndex);
+        node.buffer = loopBuf;
+        node.loop = true; node.loopStart = 0; node.loopEnd = loopBuf.duration;
+        node.start(when, 0);
         // A looped voice never ends on its own — cap it at the render's own
         // end so it doesn't try to sound forever inside a finite offline buffer.
         node.stop(songDuration);
       } else {
+        node.buffer = srcSample.buffer;
         node.start(when, sp.startSec, dur);
       }
       var voice = { source:node, gainNode:gainNode, sustainLevel:sustainLevel, releaseSec:sp.release, finished:false };
@@ -3602,25 +3973,33 @@
         delete sp.rootNote; // don't leave the old field sitting unused on the merged sampler object
         song.instruments[i].sampler = Object.assign({}, song.instruments[i].sampler, sp);
         // instrumentsFieldHTML only rendered this once at page load, well
-        // before any restore — the Instruments table's own Transpose
+        // before any restore — the Instruments table's own Transpose/Volume
         // display needs an explicit refresh here or it keeps showing
-        // whatever it started with (0) regardless of what just got merged
-        // in, until something else (the +/- buttons) happens to touch it.
+        // whatever it started with regardless of what just got merged in,
+        // until something else (the +/- buttons, typing in the dB field)
+        // happens to touch it.
         var transposeEl = document.getElementById('insTransposeVal'+i);
         if(transposeEl) transposeEl.textContent = formatTranspose(song.instruments[i].sampler.transpose);
+        syncInstrumentVolumeField(i);
       });
       renderSourceSamplesPanel(); // also refreshes each instrument row's "current source" label
       // Re-render any restored Spectral Fusion instruments now that their
       // source samples have loaded — the rendered AudioBuffer itself never
       // travels through JSON (see spectralFusionCache), so it has to be
       // rebuilt here for the tracker to actually have something to play.
-      // One instrument's fusion failing to render (e.g. its secondary
-      // sample also failed to load) shouldn't block the rest of the
-      // restore, same reasoning as the per-slot sample-load catch above.
+      // preserveTrim=true: this is reconstructing a result the user already
+      // trimmed and saved, not presenting a fresh one — without this,
+      // renderSpectralFusion's normal "new render, snap to full range"
+      // behavior was silently discarding the just-restored Start/End (and
+      // any Sampler-tab trim applied on top of a fused result) on every
+      // single Project JSON reload. One instrument's fusion failing to
+      // render (e.g. its secondary sample also failed to load) shouldn't
+      // block the rest of the restore, same reasoning as the per-slot
+      // sample-load catch above.
       var fusionRenders = song.instruments.map(function(ins, i){
         var sp = ins.sampler;
         if(!sp.spectralFusion || !sp.spectralFusion.enabled || sp.spectralFusion.sourceIndex2===null) return Promise.resolve();
-        return renderSpectralFusion(i).catch(function(err){
+        return renderSpectralFusion(i, true).catch(function(err){
           console.warn('Could not re-render Spectral Fusion for instrument '+i+':', err.message);
         });
       });
@@ -4174,10 +4553,15 @@
     document.getElementById('samplerSourceSelect').innerHTML = samplerSourceOptionsHTML(insIndex);
     document.getElementById('samplerTranspose').value = sp.transpose;
     document.getElementById('samplerLoopToggle').checked = sp.loop;
+    document.getElementById('samplerPingPongToggle').checked = sp.pingPong;
     document.getElementById('samplerAttack').value = sp.attack;
     document.getElementById('samplerDecay').value = sp.decay;
     document.getElementById('samplerSustain').value = sp.sustain;
     document.getElementById('samplerRelease').value = sp.release;
+    document.getElementById('samplerVolume').value = sp.volume;
+    syncMixerDbField(document.getElementById('samplerVolumeDb'), sp.volume);
+    document.getElementById('samplerPanRange').value = Math.round(sp.panRandomRange*100);
+    document.getElementById('samplerPanRangeVal').textContent = Math.round(sp.panRandomRange*100)+'%';
     document.getElementById('samplerPolyToggle').checked = sp.polyphonic;
     document.getElementById('samplerVoiceCap').value = sp.voiceCap;
     updateSamplerADSRLabels();
@@ -4232,6 +4616,31 @@
   document.getElementById('samplerLoopToggle').addEventListener('change', function(e){
     song.instruments[samplerModalInsIndex].sampler.loop = e.target.checked;
   });
+  document.getElementById('samplerPingPongToggle').addEventListener('change', function(e){
+    song.instruments[samplerModalInsIndex].sampler.pingPong = e.target.checked;
+  });
+  document.getElementById('samplerVolume').addEventListener('input', function(e){
+    var v = parseFloat(e.target.value);
+    song.instruments[samplerModalInsIndex].sampler.volume = v;
+    syncMixerDbField(document.getElementById('samplerVolumeDb'), v);
+    syncInstrumentVolumeField(samplerModalInsIndex);
+  });
+  document.getElementById('samplerVolumeDb').addEventListener('change', function(e){
+    var dbInput = e.target;
+    var db = parseDbText(dbInput.value);
+    var slider = document.getElementById('samplerVolume');
+    if(db===null){ syncMixerDbField(dbInput, parseFloat(slider.value)); return; } // unparseable — revert rather than guess
+    var v = Math.max(parseFloat(slider.min), Math.min(parseFloat(slider.max), dbToLinear(db)));
+    slider.value = v;
+    song.instruments[samplerModalInsIndex].sampler.volume = v;
+    syncMixerDbField(dbInput, v); // reformats to the actual (possibly clamped) value
+    syncInstrumentVolumeField(samplerModalInsIndex);
+  });
+  document.getElementById('samplerPanRange').addEventListener('input', function(e){
+    var pct = parseInt(e.target.value, 10);
+    song.instruments[samplerModalInsIndex].sampler.panRandomRange = pct/100;
+    document.getElementById('samplerPanRangeVal').textContent = pct+'%';
+  });
 
   // --- Spectral Fusion tab wiring ---
   // Shared by the tab-strip's own click handler below and openSamplerModal
@@ -4246,30 +4655,37 @@
   document.querySelectorAll('.sampler-tab-btn').forEach(function(btn){
     btn.addEventListener('click', function(){ switchSamplerModalTab(btn.getAttribute('data-sampler-tab')); });
   });
-  var FUSION_AMOUNT_LABELS = { 'spectral-blend':'Blend Amount', 'convolve':'Mix', 'ring-mod':'Mix' };
   // Repaints the whole Fusion pane from current state — called on modal
   // open, tab switch, and after anything that changes what it should show
   // (render completing, a parameter edit, primary sample changing
   // elsewhere). Also greys out + disables everything below the pill
   // whenever Fusion is off, so there's nothing to tweak (or accidentally
-  // trigger a render from) until it's on.
+  // trigger a render from) until it's on — and separately greys out just
+  // the Sample B picker for single-input algorithms, which ignore it.
   function refreshFusionTabUI(){
     if(samplerModalInsIndex===null) return;
     var sp = song.instruments[samplerModalInsIndex].sampler, fusion = sp.spectralFusion;
     var fc = spectralFusionCache[samplerModalInsIndex];
+    var meta = FUSION_ALGORITHMS[fusion.algorithm];
     document.getElementById('samplerFusionEnableToggle').checked = fusion.enabled;
     document.getElementById('samplerFusionEnableLabel').textContent = fusion.enabled ? 'ON' : 'OFF';
     document.getElementById('samplerFusionBody').classList.toggle('fusion-off', !fusion.enabled);
     document.getElementById('samplerFusionSourceSelect').innerHTML = samplerSourceOptionsHTML(samplerModalInsIndex, fusion.sourceIndex2);
-    document.getElementById('samplerFusionSourceSelect').disabled = !fusion.enabled;
+    document.getElementById('samplerFusionSourceSelect').disabled = !fusion.enabled || !meta.needsB;
+    document.getElementById('samplerFusionWaveBBlock').classList.toggle('fusion-io-inactive', !meta.needsB);
     document.querySelectorAll('.fusion-algo-item').forEach(function(btn){
       btn.classList.toggle('active', btn.getAttribute('data-algo')===fusion.algorithm);
       btn.disabled = !fusion.enabled;
     });
-    document.getElementById('samplerFusionAmountLabel').firstChild.textContent = FUSION_AMOUNT_LABELS[fusion.algorithm]+' ';
-    document.getElementById('samplerFusionAmount').value = fusion.amount;
-    document.getElementById('samplerFusionAmount').disabled = !fusion.enabled;
+    var amountEl = document.getElementById('samplerFusionAmount');
+    document.getElementById('samplerFusionAmountLabel').firstChild.textContent = meta.amountLabel+' ';
+    amountEl.min = meta.amountMin; amountEl.max = meta.amountMax;
+    amountEl.value = fusion.amount;
+    amountEl.disabled = !fusion.enabled;
     document.getElementById('samplerFusionAmountVal').textContent = fusion.amount+'%';
+    document.getElementById('samplerFusionFormantShift').value = fusion.formantShift;
+    document.getElementById('samplerFusionFormantShift').disabled = !fusion.enabled;
+    document.getElementById('samplerFusionFormantShiftVal').textContent = fusion.formantShift+'st';
     var waveA = document.getElementById('samplerFusionWaveA'), waveB = document.getElementById('samplerFusionWaveB'), waveR = document.getElementById('samplerFusionResultWave');
     var a = sp.sourceIndex!==null ? sourceSamples[sp.sourceIndex] : null;
     var b = fusion.sourceIndex2!==null ? sourceSamples[fusion.sourceIndex2] : null;
@@ -4286,13 +4702,16 @@
       statusEl.textContent = 'Not rendered yet';
     }
   }
-  // Renders right away whenever Fusion is on and B is picked — there's no
-  // separate Render button any more, so "letting go" of a parameter (a
-  // select's change, a slider's release) IS the trigger. No-ops quietly
-  // while Fusion is off or B isn't picked yet (nothing to render toward).
+  // Renders right away whenever Fusion is on and (for algorithms that need
+  // one) B is picked — there's no separate Render button, so "letting go"
+  // of a parameter (a select's change, a slider's release, an algorithm
+  // click) IS the trigger. No-ops quietly while Fusion is off, or a
+  // needsB algorithm doesn't have B picked yet.
   function autoRenderFusion(insIndex){
-    var sp = song.instruments[insIndex].sampler;
-    if(!sp.spectralFusion.enabled || sp.spectralFusion.sourceIndex2===null) return;
+    var sp = song.instruments[insIndex].sampler, fusion = sp.spectralFusion;
+    var meta = FUSION_ALGORITHMS[fusion.algorithm];
+    if(!fusion.enabled) return;
+    if(meta.needsB && fusion.sourceIndex2===null) return;
     if(samplerModalInsIndex===insIndex) document.getElementById('samplerFusionStatus').textContent = 'Rendering…';
     renderSpectralFusion(insIndex).catch(function(err){
       console.error('Spectral Fusion render failed:', err);
@@ -4307,7 +4726,7 @@
       fusion.savedStartSec = sp.startSec; fusion.savedEndSec = sp.endSec;
       fusion.enabled = true;
       if(fc && fc.buffer){ sp.startSec = 0; sp.endSec = fc.buffer.duration; }
-      else autoRenderFusion(i); // no-ops cleanly if B isn't picked yet
+      else autoRenderFusion(i); // no-ops cleanly if a needsB algorithm doesn't have B picked yet
     } else {
       fusion.enabled = false;
       sp.startSec = fusion.savedStartSec; sp.endSec = fusion.savedEndSec;
@@ -4322,13 +4741,21 @@
     refreshFusionTabUI();
     autoRenderFusion(i);
   });
-  document.querySelectorAll('.fusion-algo-item').forEach(function(btn){
-    btn.addEventListener('click', function(){
-      var i = samplerModalInsIndex;
-      song.instruments[i].sampler.spectralFusion.algorithm = btn.getAttribute('data-algo');
-      refreshFusionTabUI();
-      autoRenderFusion(i);
-    });
+  // Delegated (one listener on the list, not one per button) so the 3
+  // algorithms added alongside the original 3 don't need their own bind —
+  // any future addition here is automatically wired too.
+  document.getElementById('samplerFusionAlgoList').addEventListener('click', function(e){
+    var btn = e.target.closest('.fusion-algo-item');
+    if(!btn) return;
+    var i = samplerModalInsIndex;
+    var fusion = song.instruments[i].sampler.spectralFusion;
+    fusion.algorithm = btn.getAttribute('data-algo');
+    // A value picked under one algorithm's range (e.g. Cross-Synth's 150%)
+    // must not silently leak into another's math that assumes 0-100 (e.g.
+    // Convolve's 1-amount/100 dry gain going negative).
+    fusion.amount = Math.min(fusion.amount, FUSION_ALGORITHMS[fusion.algorithm].amountMax);
+    refreshFusionTabUI();
+    autoRenderFusion(i);
   });
   document.getElementById('samplerFusionAmount').addEventListener('input', function(e){
     var i = samplerModalInsIndex;
@@ -4339,6 +4766,15 @@
   // as samplerTranspose's own split input/change handlers above, so a
   // render doesn't fire on every intermediate value while dragging.
   document.getElementById('samplerFusionAmount').addEventListener('change', function(){
+    autoRenderFusion(samplerModalInsIndex);
+  });
+  document.getElementById('samplerFusionFormantShift').addEventListener('input', function(e){
+    var i = samplerModalInsIndex;
+    var v = parseFloat(e.target.value);
+    song.instruments[i].sampler.spectralFusion.formantShift = v;
+    document.getElementById('samplerFusionFormantShiftVal').textContent = v+'st';
+  });
+  document.getElementById('samplerFusionFormantShift').addEventListener('change', function(){
     autoRenderFusion(samplerModalInsIndex);
   });
   var SAMPLER_ADSR_FIELDS = { samplerAttack:'attack', samplerDecay:'decay', samplerSustain:'sustain', samplerRelease:'release' };
@@ -4487,25 +4923,29 @@
     stopSamplerPreviewVoice();
     var when = previewAc.currentTime;
     var node = previewAc.createBufferSource();
-    node.buffer = srcSample.buffer;
     node.playbackRate.value = Math.pow(2, sp.transpose/12); // same Transpose math as samplerPlaybackRate, at the neutral reference note (ratio=1)
     var gainNode = previewAc.createGain();
-    var sustainLevel = sp.sustain;
+    var sustainLevel = sp.volume*sp.sustain;
     gainNode.gain.setValueAtTime(0, when);
-    gainNode.gain.linearRampToValueAtTime(1, when+Math.max(sp.attack,0.003));
+    gainNode.gain.linearRampToValueAtTime(sp.volume, when+Math.max(sp.attack,0.003));
     gainNode.gain.linearRampToValueAtTime(sustainLevel, when+sp.attack+sp.decay);
-    node.connect(gainNode); gainNode.connect(previewAc.destination);
+    var pannerNode = previewAc.createStereoPanner();
+    pannerNode.pan.value = pickRandomPan(sp);
+    node.connect(gainNode); gainNode.connect(pannerNode); pannerNode.connect(previewAc.destination);
     var fakeVoice = { gainNode:gainNode, source:node, finished:false, insIndex:insIndex };
     var totalDur;
     if(sp.loop){
-      node.loop = true; node.loopStart = sp.startSec; node.loopEnd = sp.endSec;
-      node.start(when, sp.startSec);
+      var loopBuf = getLoopReadyBuffer(insIndex);
+      node.buffer = loopBuf;
+      node.loop = true; node.loopStart = 0; node.loopEnd = loopBuf.duration;
+      node.start(when, 0);
       var holdSec = 1.5;
       gainNode.gain.setValueAtTime(sustainLevel, when+holdSec);
       gainNode.gain.linearRampToValueAtTime(0, when+holdSec+sp.release);
       node.stop(when+holdSec+sp.release+0.05);
       totalDur = holdSec + sp.release + 0.05;
     } else {
+      node.buffer = srcSample.buffer;
       node.start(when, sp.startSec, sp.endSec-sp.startSec);
       totalDur = (sp.endSec-sp.startSec) / node.playbackRate.value; // playbackRate speeds up/slows down real elapsed time, not just pitch
     }
@@ -4803,15 +5243,17 @@
     if(previewAc.state!=='running') previewAc.resume();
     var when = previewAc.currentTime;
     var node = previewAc.createBufferSource();
-    node.buffer = srcSample.buffer;
     node.playbackRate.value = samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose);
     var gainNode = previewAc.createGain();
     var vol = (volCell!==null && volCell!==undefined) ? volCell/15 : 1;
+    vol *= sp.volume;
     var sustainLevel = vol*sp.sustain;
     gainNode.gain.setValueAtTime(0, when);
     gainNode.gain.linearRampToValueAtTime(vol, when+Math.max(sp.attack,0.003));
     gainNode.gain.linearRampToValueAtTime(sustainLevel, when+sp.attack+sp.decay);
-    node.connect(gainNode); gainNode.connect(previewAc.destination);
+    var pannerNode = previewAc.createStereoPanner();
+    pannerNode.pan.value = pickRandomPan(sp);
+    node.connect(gainNode); gainNode.connect(pannerNode); pannerNode.connect(previewAc.destination);
     // Capped to PREVIEW_DUR_CELLS rows' worth of audition time — same
     // budget as the stem-based preview (previewAtTime) — rather than
     // playing out the sample's full trimmed length or ringing forever on a
@@ -4819,9 +5261,12 @@
     // (holdSec clamps down to the natural length) and it plays out as-is.
     var holdSec = PREVIEW_DUR_CELLS * rowDurationSec();
     if(sp.loop){
-      node.loop = true; node.loopStart = sp.startSec; node.loopEnd = sp.endSec;
-      node.start(when, sp.startSec);
+      var loopBuf = getLoopReadyBuffer(insIndex);
+      node.buffer = loopBuf;
+      node.loop = true; node.loopStart = 0; node.loopEnd = loopBuf.duration;
+      node.start(when, 0);
     } else {
+      node.buffer = srcSample.buffer;
       holdSec = Math.min(holdSec, sp.endSec-sp.startSec);
       node.start(when, sp.startSec, sp.endSec-sp.startSec);
     }
@@ -4922,9 +5367,12 @@
     mutedInstruments: mutedInstruments,
     spectralFusionCache: function(){ return spectralFusionCache; },
     activeSourcePlayheads: function(){ return activeSourcePlayheads; },
+    getLoopReadyBuffer: getLoopReadyBuffer,
+    loopBufferCache: function(){ return loopBufferCache; },
+    pickRandomPan: pickRandomPan,
     pianoRoll: function(){ return { active: pianoRollActiveNotes, flashes: pianoRollFlashes, range: pianoRollRange }; },
     noiseBox: function(){ return { active: noiseActive, flash: noiseFlash }; },
-    coverArt: function(){ return { jets: jets.map(function(j){ return {spread0:j.spread0,age:j.age,maxAge:j.maxAge,width:j.width,length:j.length}; }), cloudPuffs: cloudPuffs.length, driftT: coverDriftT, overallVol: coverOverallVol, sourceWobble: currentJetSourceOffset(), curveScale: currentJetCurveScale() }; },
+    coverArt: function(){ return { scanPulses: scanPulses.map(function(p){ return {angle:p.angle,age:p.age,maxAge:p.maxAge,arcWidth:p.arcWidth}; }), driftT: coverDriftT, overallVol: coverOverallVol, spinAngle: (coverDriftT*DISC_SPIN_HZ*Math.PI*2) % (Math.PI*2) }; },
     coverBufAt: function(x,y){ var idx=(Math.round(y)*COVER_GRID+Math.round(x))*3; return [coverGridBuf[idx],coverGridBuf[idx+1],coverGridBuf[idx+2]]; },
     spawnJetForCell: spawnJetForCell
   };
