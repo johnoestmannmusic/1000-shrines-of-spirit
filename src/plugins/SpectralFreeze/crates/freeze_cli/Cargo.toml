@@ -1,0 +1,9 @@
+[package]
+name = "freeze_cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+freeze_dsp = { path = "../freeze_dsp" }
+hound = "3.5"
+clap = { version = "4", features = ["derive"] }

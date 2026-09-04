@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["crates/freeze_dsp", "crates/freeze_cli"]
+
+# freeze_plugin and xtask are added to the workspace in Phase B, once the
+# nih-plug git dependency is pinned. Phase A only needs the DSP core + CLI.
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
