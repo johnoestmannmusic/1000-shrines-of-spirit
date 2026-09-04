@@ -7,7 +7,7 @@
     0.62,
     1
   ],
-  "masterVolume": 0.63,
+  "masterVolume": 1,
   "mutedChannels": [
     false,
     false,
@@ -30,40 +30,20 @@
     {
       "name": "flowing-synthesis-pads-dreamlike-new-age-2",
       "url": "ASSETS/SourceSamples/0.ogg",
-      "comments": "Sample generated with AceStep 1.5 local GenAI"
+      "comments": "5-sec sample generated with AceStep 1.5 local GenAI"
     },
-    {
-      "name": "seagulls-inside-tornado-of-glass",
-      "url": "ASSETS/SourceSamples/1.ogg",
-      "comments": "Sample generated with AceStep 1.5 local GenAI"
-    },
-    {
-      "name": "2",
-      "url": "ASSETS/SourceSamples/2.ogg",
-      "comments": ""
-    },
-    {
-      "name": "3",
-      "url": "ASSETS/SourceSamples/3.ogg",
-      "comments": ""
-    },
-    {
-      "name": "4",
-      "url": "ASSETS/SourceSamples/4.ogg",
-      "comments": ""
-    },
-    {
-      "name": "5",
-      "url": "ASSETS/SourceSamples/5.ogg",
-      "comments": ""
-    }
+    null,
+    null,
+    null,
+    null,
+    null
   ],
   "instruments": [
     {
-      "sourceIndex": 1,
-      "startSec": 0,
-      "endSec": 0.777875,
-      "transpose": 12,
+      "sourceIndex": 0,
+      "startSec": 0.3702479338842975,
+      "endSec": 1.1636363636363636,
+      "transpose": 0,
       "loop": false,
       "attack": 0.005,
       "decay": 0.08,
@@ -73,10 +53,10 @@
       "voiceCap": 8
     },
     {
-      "sourceIndex": 3,
-      "startSec": 0,
-      "endSec": 6.0869375,
-      "transpose": 12,
+      "sourceIndex": 0,
+      "startSec": 2.2849586776859505,
+      "endSec": 2.898512396694215,
+      "transpose": 0,
       "loop": false,
       "attack": 0.005,
       "decay": 0.08,
@@ -86,36 +66,10 @@
       "voiceCap": 8
     },
     {
-      "sourceIndex": 4,
-      "startSec": 0,
-      "endSec": 0.4461110545602606,
-      "transpose": 12,
-      "loop": false,
-      "attack": 0.005,
-      "decay": 0.08,
-      "sustain": 0.7,
-      "release": 0.15,
-      "polyphonic": false,
-      "voiceCap": 8
-    },
-    {
-      "sourceIndex": 3,
-      "startSec": 0,
-      "endSec": 0.2874937907166124,
-      "transpose": 10,
-      "loop": false,
-      "attack": 0.005,
-      "decay": 0.08,
-      "sustain": 0.7,
-      "release": 0.15,
-      "polyphonic": false,
-      "voiceCap": 8
-    },
-    {
-      "sourceIndex": 1,
-      "startSec": 0,
-      "endSec": 0.777875,
-      "transpose": 12,
+      "sourceIndex": 0,
+      "startSec": 2.930247933884298,
+      "endSec": 3.734214876033058,
+      "transpose": 0,
       "loop": false,
       "attack": 0.005,
       "decay": 0.08,
@@ -128,6 +82,19 @@
       "sourceIndex": null,
       "startSec": 0,
       "endSec": 0,
+      "transpose": 0,
+      "loop": false,
+      "attack": 0.005,
+      "decay": 0.08,
+      "sustain": 0.7,
+      "release": 0.15,
+      "polyphonic": false,
+      "voiceCap": 8
+    },
+    {
+      "sourceIndex": 0,
+      "startSec": 0,
+      "endSec": 0.23272727272727273,
       "transpose": 0,
       "loop": false,
       "attack": 0.005,
@@ -177,10 +144,23 @@
       "voiceCap": 8
     },
     {
-      "sourceIndex": 1,
+      "sourceIndex": null,
       "startSec": 0,
-      "endSec": 0.777875,
-      "transpose": 12,
+      "endSec": 0,
+      "transpose": 0,
+      "loop": false,
+      "attack": 0.005,
+      "decay": 0.08,
+      "sustain": 0.7,
+      "release": 0.15,
+      "polyphonic": false,
+      "voiceCap": 8
+    },
+    {
+      "sourceIndex": 0,
+      "startSec": 0.3385123966942149,
+      "endSec": 1.1424793388429753,
+      "transpose": 0,
       "loop": false,
       "attack": 0.005,
       "decay": 0.08,
@@ -193,7 +173,7 @@
   "songTitle": "0006-alpha",
   "artist": "John Oestmann",
   "album": "1000 - shrines - /of/ - SPIRIT",
-  "comments": "Sample-swap of flight_school_night_shift, in the updated SAMPLER MODE of Lantern Music Player. \n\nWas actually created accidently while testing new features, then slightly refined.",
+  "comments": "Sample-based re-play of flight_school_night_shift\"\n\nMusic License: CC0 / Public Domain\nCode License: MIT",
   "musicLicense": "CC0 / Public Domain",
   "codeLicense": "MIT",
   "viewSourceLink": "https://github.com/johnoestmannmusic/1000-shrines-of-spirit",
