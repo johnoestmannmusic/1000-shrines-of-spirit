@@ -3,6 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Defense-in-depth only, not a fix for javascript:-href injection (see
+     isSafeHttpUrl in the script below for that): script-src needs
+     'unsafe-inline' for this file's own inline script block to run at all (no
+     build step to add a nonce that wouldn't just be visible to anyone
+     reading the file), and CSP can't tell that script apart from a clicked
+     javascript: link under 'unsafe-inline' — so this can't block that
+     vector. What it does do: connect-src 'self' blocks exfiltration-style
+     fetches to other hosts, object-src/base-uri close plugin-embedding and
+     base-tag-hijack vectors. frame-ancestors is deliberately omitted — it's
+     spec-ignored via <meta> (only a real HTTP header enforces it); real
+     clickjacking protection needs a response-header config on whatever
+     static host serves this file, outside this file's own control. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>1000 - shrines - /of/ - SPIRIT</title>
 <link rel="icon" href="data:,">
 <style>
@@ -421,7 +434,7 @@
 <body>
 
 <h1>1000 - shrines - /of/ - SPIRIT · <b id="pageTitleSongName">flight_school_night_shift</b></h1>
-<div class="subtitle">Lantern Music Player - build 260830   //   Base track composed in <a href="https://github.com/tildearrow/furnace" target="_blank" rel="noreferrer noopener">Furnace</a>.</div>
+<div class="subtitle">Lantern Music Player - build 260905   //   Base track composed in <a href="https://github.com/tildearrow/furnace" target="_blank" rel="noreferrer noopener">Furnace</a>.</div>
 
 <div class="shrine">
   <div class="controls">
@@ -2266,29 +2279,10 @@
       if(pool.length >= sp.voiceCap) forceStopVoice(pool.shift(), whenCtx, SAMPLER_STEAL_FADE_SEC);
     }
 
-    var node = ac.createBufferSource();
-    node.playbackRate.value = samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose);
-    var gainNode = ac.createGain();
     var vol = (volCell!==null && volCell!==undefined) ? volCell/15 : 1; // matches the existing default-to-15 convention elsewhere in this file
-    vol *= sp.volume;
-    var sustainLevel = vol*sp.sustain;
-    gainNode.gain.setValueAtTime(0, whenCtx);
-    gainNode.gain.linearRampToValueAtTime(vol, whenCtx+Math.max(sp.attack,0.003)); // floor avoids a 0-length ramp click
-    gainNode.gain.linearRampToValueAtTime(sustainLevel, whenCtx+sp.attack+sp.decay);
-    var pannerNode = ac.createStereoPanner();
-    pannerNode.pan.value = pickRandomPan(sp);
-    node.connect(gainNode); gainNode.connect(pannerNode); pannerNode.connect(channelGain[ch]);
-
-    var dur = sp.endSec - sp.startSec;
-    if(sp.loop){
-      var loopBuf = getLoopReadyBuffer(insIndex); // isolated, declicked, pingPong-doubled if applicable — see its own comment
-      node.buffer = loopBuf;
-      node.loop = true; node.loopStart = 0; node.loopEnd = loopBuf.duration;
-      node.start(whenCtx, 0);
-    } else {
-      node.buffer = srcSample.buffer;
-      node.start(whenCtx, sp.startSec, dur); // one-shot ends naturally; sustain/release above only matter if cut short first
-    }
+    var built = buildSamplerVoice(ac, insIndex, sp, srcSample, samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose), vol, whenCtx, channelGain[ch]);
+    var node = built.node, gainNode = built.gainNode, pannerNode = built.pannerNode, sustainLevel = built.sustainLevel;
+    // one-shot ends naturally; sustain/release above only matter if cut short first
 
     var voice = { channel:ch, insIndex:insIndex, source:node, gainNode:gainNode, sustainLevel:sustainLevel, releaseSec:sp.release, startCtxTime:whenCtx, finished:false };
     node.onended = function(){
@@ -3667,6 +3661,41 @@
     var range = sp.panRandomRange || 0;
     return range>0 ? (Math.random()*2-1)*range : 0;
   }
+  // Shared core of "build and start a sampler voice" — every one of the 4
+  // places that trigger sampler audio (live playback, offline WAV export,
+  // the Sampler modal's own Preview, and the Patterns-panel note preview)
+  // used to reimplement this same ~18-line block independently. What's
+  // genuinely different per caller (destination routing, playbackRate/vol
+  // computation, voice-steal bookkeeping, onended vs synchronous stop,
+  // hold-length policy) stays in each call site; only the truly identical
+  // node/envelope/panner/loop-vs-one-shot setup lives here now. Callers
+  // that need extra gain automation after this (the two preview functions'
+  // hold+release) can schedule it on the returned gainNode — Web Audio
+  // automation events layer additively over time, so that's equivalent to
+  // today's single unbroken sequence.
+  function buildSamplerVoice(ctx, insIndex, sp, srcSample, playbackRate, vol, whenCtx, destination){
+    var node = ctx.createBufferSource();
+    node.playbackRate.value = playbackRate;
+    var gainNode = ctx.createGain();
+    vol *= sp.volume;
+    var sustainLevel = vol*sp.sustain;
+    gainNode.gain.setValueAtTime(0, whenCtx);
+    gainNode.gain.linearRampToValueAtTime(vol, whenCtx+Math.max(sp.attack,0.003)); // floor avoids a 0-length ramp click
+    gainNode.gain.linearRampToValueAtTime(sustainLevel, whenCtx+sp.attack+sp.decay);
+    var pannerNode = ctx.createStereoPanner();
+    pannerNode.pan.value = pickRandomPan(sp);
+    node.connect(gainNode); gainNode.connect(pannerNode); pannerNode.connect(destination);
+    if(sp.loop){
+      var loopBuf = getLoopReadyBuffer(insIndex); // isolated, declicked, pingPong-doubled if applicable
+      node.buffer = loopBuf;
+      node.loop = true; node.loopStart = 0; node.loopEnd = loopBuf.duration;
+      node.start(whenCtx, 0);
+    } else {
+      node.buffer = srcSample.buffer;
+      node.start(whenCtx, sp.startSec, sp.endSec-sp.startSec);
+    }
+    return { node: node, gainNode: gainNode, pannerNode: pannerNode, sustainLevel: sustainLevel };
+  }
   // Primary sample changing elsewhere (Instruments panel, Sampler tab)
   // while Fusion is on re-renders in place, same as any other Fusion
   // parameter — see autoRenderFusion (tab-switch wiring, hoisted same as
@@ -3752,30 +3781,13 @@
         var pool = voicesByIns[insIndex] || (voicesByIns[insIndex]=[]);
         if(pool.length >= sp.voiceCap) stop(pool.shift(), when, SAMPLER_STEAL_FADE_SEC);
       }
-      var node = offlineCtx.createBufferSource();
-      node.playbackRate.value = samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose);
-      var gainNode = offlineCtx.createGain();
       var vol = (volCell!==null && volCell!==undefined) ? volCell/15 : 1;
-      vol *= sp.volume;
-      var sustainLevel = vol*sp.sustain;
-      gainNode.gain.setValueAtTime(0, when);
-      gainNode.gain.linearRampToValueAtTime(vol, when+Math.max(sp.attack,0.003));
-      gainNode.gain.linearRampToValueAtTime(sustainLevel, when+sp.attack+sp.decay);
-      var pannerNode = offlineCtx.createStereoPanner();
-      pannerNode.pan.value = pickRandomPan(sp);
-      node.connect(gainNode); gainNode.connect(pannerNode); pannerNode.connect(offChannelGain[ch]);
-      var dur = sp.endSec - sp.startSec;
+      var built = buildSamplerVoice(offlineCtx, insIndex, sp, srcSample, samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose), vol, when, offChannelGain[ch]);
+      var node = built.node, gainNode = built.gainNode, sustainLevel = built.sustainLevel;
       if(sp.loop){
-        var loopBuf = getLoopReadyBuffer(insIndex);
-        node.buffer = loopBuf;
-        node.loop = true; node.loopStart = 0; node.loopEnd = loopBuf.duration;
-        node.start(when, 0);
         // A looped voice never ends on its own — cap it at the render's own
         // end so it doesn't try to sound forever inside a finite offline buffer.
         node.stop(songDuration);
-      } else {
-        node.buffer = srcSample.buffer;
-        node.start(when, sp.startSec, dur);
       }
       var voice = { source:node, gainNode:gainNode, sustainLevel:sustainLevel, releaseSec:sp.release, finished:false };
       if(sp.polyphonic) voicesByIns[insIndex].push(voice);
@@ -3888,6 +3900,16 @@
     if(song.meta.name) document.title = song.meta.name + ' — shrines of SPIRIT';
   }
   function urlDisplayText(url){ return url.replace(/^https?:\/\//,''); }
+  // Project JSON is a shareable/pasteable format (also auto-loaded from
+  // ASSETS/lmp-default-proj.json at page load) — viewSourceLink/websiteLink
+  // below land straight in a real, visible, clickable <a> href, so a
+  // javascript:/data:/etc URI in a malicious or tampered JSON would
+  // execute on click despite rel="noreferrer noopener" (which only affects
+  // window.opener/referrer, not URI scheme). Only http(s) is ever assigned.
+  function isSafeHttpUrl(url){
+    try { var u = new URL(url, location.href); return u.protocol==='http:' || u.protocol==='https:'; }
+    catch(e){ return false; }
+  }
   function applyProjectState(project){
     if(!project || typeof project!=='object' || !Array.isArray(project.instruments)){
       return Promise.reject(new Error('Not a recognizable Project JSON'));
@@ -3930,11 +3952,16 @@
     if(metaChanged) renderProjectMetaPanels();
     if(typeof project.musicLicense==='string') document.getElementById('footerMusicLicense').textContent = project.musicLicense;
     if(typeof project.codeLicense==='string') document.getElementById('footerCodeLicense').textContent = project.codeLicense;
-    if(typeof project.viewSourceLink==='string') document.getElementById('footerViewSourceLink').href = project.viewSourceLink;
+    if(typeof project.viewSourceLink==='string'){
+      if(isSafeHttpUrl(project.viewSourceLink)) document.getElementById('footerViewSourceLink').href = project.viewSourceLink;
+      else console.warn('Ignored unsafe viewSourceLink in Project JSON:', project.viewSourceLink);
+    }
     if(typeof project.websiteLink==='string'){
-      var websiteEl = document.getElementById('footerWebsiteLink');
-      websiteEl.href = project.websiteLink;
-      websiteEl.textContent = urlDisplayText(project.websiteLink);
+      if(isSafeHttpUrl(project.websiteLink)){
+        var websiteEl = document.getElementById('footerWebsiteLink');
+        websiteEl.href = project.websiteLink;
+        websiteEl.textContent = urlDisplayText(project.websiteLink);
+      } else console.warn('Ignored unsafe websiteLink in Project JSON:', project.websiteLink);
     }
     if(project.theme==='system' || project.theme==='light' || project.theme==='dark') setTheme(project.theme);
     var loaders = (project.sourceSamples||[]).map(function(s, i){
@@ -3947,6 +3974,19 @@
       if(!s) return Promise.resolve();
       var src = s.url || s.dataUrl;
       if(!src) return Promise.resolve();
+      // s.url is a real network fetch() to wherever a Project JSON says —
+      // restrict it to same-origin (a data: URI needs no such check, it's
+      // never a network request). Externally-hosted audio is already fully
+      // supported via dataUrl embedding, so this closes an unvalidated
+      // cross-origin fetch with no real feature loss.
+      if(s.url && !s.dataUrl){
+        try {
+          if(new URL(s.url, location.href).origin !== location.origin){
+            console.warn('Ignored cross-origin Source Sample URL in Project JSON (slot '+i+'):', s.url);
+            return Promise.resolve();
+          }
+        } catch(e){ return Promise.resolve(); }
+      }
       return fetch(src).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
         .then(function(buf){ return ac.decodeAudioData(buf); })
         .then(function(audioBuf){
@@ -3971,6 +4011,13 @@
         // an old Project JSON still applies its pitch correction correctly.
         if(sp.rootNote!==undefined && sp.transpose===undefined) sp.transpose = A_REF_NOTE - sp.rootNote;
         delete sp.rootNote; // don't leave the old field sitting unused on the merged sampler object
+        // spectralFusion is deep-merged against the CURRENT object first,
+        // rather than left to the outer Object.assign below (which would
+        // replace the whole nested object wholesale) — an older/hand-edited/
+        // partial JSON missing a newly-added spectralFusion field (e.g. a
+        // future field added after this export was made) would otherwise
+        // silently null it out instead of keeping the existing default.
+        if(sp.spectralFusion) sp.spectralFusion = Object.assign({}, song.instruments[i].sampler.spectralFusion, sp.spectralFusion);
         song.instruments[i].sampler = Object.assign({}, song.instruments[i].sampler, sp);
         // instrumentsFieldHTML only rendered this once at page load, well
         // before any restore — the Instruments table's own Transpose/Volume
@@ -3998,7 +4045,18 @@
       // sample-load catch above.
       var fusionRenders = song.instruments.map(function(ins, i){
         var sp = ins.sampler;
-        if(!sp.spectralFusion || !sp.spectralFusion.enabled || sp.spectralFusion.sourceIndex2===null) return Promise.resolve();
+        if(!sp.spectralFusion || !sp.spectralFusion.enabled) return Promise.resolve();
+        // needsB algorithms (Cross-Synth/Convolve/Ring Mod) can't render
+        // without a Sample B; single-input algorithms (Freq Shift/Freeze/
+        // Smear) have sourceIndex2:null as their NORMAL state and must
+        // still render — a bare "sourceIndex2===null -> skip" check here
+        // (unlike renderSpectralFusion's own guard and autoRenderFusion's,
+        // which both already check meta.needsB) was skipping every
+        // single-input-algorithm instrument on every reload, leaving its
+        // fusion cache empty and its restored Start/End applied against
+        // the wrong (raw, unfused) buffer instead.
+        var meta = FUSION_ALGORITHMS[sp.spectralFusion.algorithm];
+        if(!meta || (meta.needsB && sp.spectralFusion.sourceIndex2===null)) return Promise.resolve();
         return renderSpectralFusion(i, true).catch(function(err){
           console.warn('Could not re-render Spectral Fusion for instrument '+i+':', err.message);
         });
@@ -4922,31 +4980,20 @@
     if(previewAc.state!=='running') previewAc.resume();
     stopSamplerPreviewVoice();
     var when = previewAc.currentTime;
-    var node = previewAc.createBufferSource();
-    node.playbackRate.value = Math.pow(2, sp.transpose/12); // same Transpose math as samplerPlaybackRate, at the neutral reference note (ratio=1)
-    var gainNode = previewAc.createGain();
-    var sustainLevel = sp.volume*sp.sustain;
-    gainNode.gain.setValueAtTime(0, when);
-    gainNode.gain.linearRampToValueAtTime(sp.volume, when+Math.max(sp.attack,0.003));
-    gainNode.gain.linearRampToValueAtTime(sustainLevel, when+sp.attack+sp.decay);
-    var pannerNode = previewAc.createStereoPanner();
-    pannerNode.pan.value = pickRandomPan(sp);
-    node.connect(gainNode); gainNode.connect(pannerNode); pannerNode.connect(previewAc.destination);
+    // vol=1 here (not sp.volume) — buildSamplerVoice multiplies by sp.volume
+    // internally, so passing 1 as the "per-cell velocity" baseline reproduces
+    // the same ramp-to-sp.volume this neutral-pitch preview always used.
+    var built = buildSamplerVoice(previewAc, insIndex, sp, srcSample, Math.pow(2, sp.transpose/12), 1, when, previewAc.destination); // same Transpose math as samplerPlaybackRate, at the neutral reference note (ratio=1)
+    var node = built.node, gainNode = built.gainNode, sustainLevel = built.sustainLevel;
     var fakeVoice = { gainNode:gainNode, source:node, finished:false, insIndex:insIndex };
     var totalDur;
     if(sp.loop){
-      var loopBuf = getLoopReadyBuffer(insIndex);
-      node.buffer = loopBuf;
-      node.loop = true; node.loopStart = 0; node.loopEnd = loopBuf.duration;
-      node.start(when, 0);
       var holdSec = 1.5;
       gainNode.gain.setValueAtTime(sustainLevel, when+holdSec);
       gainNode.gain.linearRampToValueAtTime(0, when+holdSec+sp.release);
       node.stop(when+holdSec+sp.release+0.05);
       totalDur = holdSec + sp.release + 0.05;
     } else {
-      node.buffer = srcSample.buffer;
-      node.start(when, sp.startSec, sp.endSec-sp.startSec);
       totalDur = (sp.endSec-sp.startSec) / node.playbackRate.value; // playbackRate speeds up/slows down real elapsed time, not just pitch
     }
     node.onended = function(){ fakeVoice.finished = true; if(samplerPreviewVoice===fakeVoice) samplerPreviewVoice = null; };
@@ -5242,34 +5289,16 @@
     if(!previewAc) previewAc = new (window.AudioContext||window.webkitAudioContext)();
     if(previewAc.state!=='running') previewAc.resume();
     var when = previewAc.currentTime;
-    var node = previewAc.createBufferSource();
-    node.playbackRate.value = samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose);
-    var gainNode = previewAc.createGain();
     var vol = (volCell!==null && volCell!==undefined) ? volCell/15 : 1;
-    vol *= sp.volume;
-    var sustainLevel = vol*sp.sustain;
-    gainNode.gain.setValueAtTime(0, when);
-    gainNode.gain.linearRampToValueAtTime(vol, when+Math.max(sp.attack,0.003));
-    gainNode.gain.linearRampToValueAtTime(sustainLevel, when+sp.attack+sp.decay);
-    var pannerNode = previewAc.createStereoPanner();
-    pannerNode.pan.value = pickRandomPan(sp);
-    node.connect(gainNode); gainNode.connect(pannerNode); pannerNode.connect(previewAc.destination);
+    var built = buildSamplerVoice(previewAc, insIndex, sp, srcSample, samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose), vol, when, previewAc.destination);
+    var node = built.node, gainNode = built.gainNode, sustainLevel = built.sustainLevel;
     // Capped to PREVIEW_DUR_CELLS rows' worth of audition time — same
     // budget as the stem-based preview (previewAtTime) — rather than
     // playing out the sample's full trimmed length or ringing forever on a
     // loop. For a one-shot shorter than that budget, the cap just no-ops
     // (holdSec clamps down to the natural length) and it plays out as-is.
     var holdSec = PREVIEW_DUR_CELLS * rowDurationSec();
-    if(sp.loop){
-      var loopBuf = getLoopReadyBuffer(insIndex);
-      node.buffer = loopBuf;
-      node.loop = true; node.loopStart = 0; node.loopEnd = loopBuf.duration;
-      node.start(when, 0);
-    } else {
-      node.buffer = srcSample.buffer;
-      holdSec = Math.min(holdSec, sp.endSec-sp.startSec);
-      node.start(when, sp.startSec, sp.endSec-sp.startSec);
-    }
+    if(!sp.loop) holdSec = Math.min(holdSec, sp.endSec-sp.startSec);
     gainNode.gain.setValueAtTime(sustainLevel, when+holdSec);
     gainNode.gain.linearRampToValueAtTime(0, when+holdSec+sp.release);
     node.stop(when+holdSec+sp.release+0.05);
@@ -5367,6 +5396,8 @@
     mutedInstruments: mutedInstruments,
     spectralFusionCache: function(){ return spectralFusionCache; },
     activeSourcePlayheads: function(){ return activeSourcePlayheads; },
+    buildProjectExportJSON: buildProjectExportJSON,
+    applyProjectState: applyProjectState,
     getLoopReadyBuffer: getLoopReadyBuffer,
     loopBufferCache: function(){ return loopBufferCache; },
     pickRandomPan: pickRandomPan,
