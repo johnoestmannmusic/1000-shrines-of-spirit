@@ -139,6 +139,21 @@
   table.ins-table input.ins-mute-toggle{cursor:pointer;}
   table.ins-table tr.ins-muted{opacity:.5;}
   table.ins-table tr.ins-muted .ins-name{text-decoration:line-through;}
+  .ins-transpose-cell{display:flex;align-items:center;gap:4px;white-space:nowrap;}
+  .ins-transpose-btn{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);cursor:pointer;
+    font-family:var(--mono);font-size:13px;line-height:1;padding:2px 6px;}
+  .ins-transpose-btn:hover{border-color:var(--edge-hover);}
+  .ins-transpose-val{font-size:14px;color:var(--ink);min-width:2.5em;text-align:center;display:inline-block;}
+  /* CHIP MODE has no Sampler engine running at all — Transpose, the
+     Sampler column, and the whole Source Samples panel only mean anything
+     in SAMPLER MODE, so they're hidden rather than left visible-but-inert.
+     Wave is the mirror case: only relevant to the stems CHIP MODE plays
+     back (the Wave channel's actual recorded waveform), meaningless once
+     Sampler Mode is choosing what plays instead. Toggled via a class on
+     <body> (see syncModeVisibility) rather than re-rendering the table on
+     every Sampler Mode flip. */
+  body.chip-mode .ins-col-transpose, body.chip-mode .ins-col-sampler, body.chip-mode #field-source-samples{display:none;}
+  body.sampler-mode .ins-col-wave{display:none;}
   input.ins-color-input{width:22px;height:16px;padding:0;border:1px solid var(--edge);background:none;cursor:pointer;}
   /* Flash an instrument row the instant it's actually triggered during
      playback — instant snap-in (no transition while .firing is applied),
@@ -155,17 +170,19 @@
   .sampler-btn{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);cursor:pointer;
     font-family:var(--mono);font-size:14px;padding:2px 8px;}
   .sampler-btn:hover{border-color:var(--edge-hover);}
-  .sampler-src-label{font-size:14px;color:var(--dim);}
+  .ins-sampler-source-select{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);
+    font-family:var(--mono);font-size:14px;max-width:140px;cursor:pointer;}
 
   /* Source Samples panel: one slot per fixed filename (0.ogg, 1.ogg, …),
      each a playable waveform preview (or an "empty — drop a file in" note). */
+  .src-samples-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:6px;}
   .src-sample-slot{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-bottom:1px solid var(--edge);}
   .src-sample-slot:last-child{border-bottom:none;}
   .src-sample-title{font-size:15px;font-weight:600;color:var(--ink);}
   .src-sample-dur{font-size:14px;font-weight:400;color:var(--dim);}
   .src-sample-slot-buttons{display:flex;gap:8px;}
-  .src-sample-play, .src-sample-comments-btn{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);cursor:pointer;padding:2px 8px;font-family:var(--mono);font-size:14px;}
-  .src-sample-play:hover, .src-sample-comments-btn:hover{border-color:var(--edge-hover);}
+  .src-sample-play, .src-sample-comments-btn, .src-sample-load-btn{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);cursor:pointer;padding:2px 8px;font-family:var(--mono);font-size:14px;}
+  .src-sample-play:hover, .src-sample-comments-btn:hover, .src-sample-load-btn:hover{border-color:var(--edge-hover);}
   .src-sample-canvas{display:block;background:var(--surface-deep);border:1px solid var(--edge);width:100%;max-width:100%;}
   .src-sample-comment-preview{font-size:13px;color:var(--dim);font-style:italic;}
   /* Fixed to the piano roll canvas's own height (PIANO_WHITE_KEY_H, 60px)
@@ -268,6 +285,9 @@
   .mixer-strip{display:flex;align-items:center;gap:8px;padding:4px 0;}
   .mixer-label{font-size:14px;color:var(--dim);width:44px;flex:none;}
   .mixer-vol{width:80px;flex:none;}
+  .mixer-db{width:40px;flex:none;background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);
+    font-family:var(--mono);font-size:13px;padding:2px 3px;text-align:right;}
+  .mixer-db-unit{font-size:12px;color:var(--dim);flex:none;}
   .meter{flex:1;height:10px;background:var(--surface-deep);border:1px solid var(--edge);position:relative;overflow:hidden;}
   .meter-fill{position:absolute;left:0;top:0;bottom:0;width:0%;background:#6cbf6c;}
   .meter-fill.clip{background:#e05252;}
@@ -416,11 +436,11 @@
           <span class="collapse-arrow">▾</span>
         </div>
         <div class="field-body">
-          <div class="mixer-strip" data-explain="mixer-ch-0"><span class="mixer-label">CH0</span><input type="range" class="mixer-vol" data-mixer-chan="0" min="0" max="1.5" step="0.01" value="1"><div class="meter"><div class="meter-fill" id="meterFillCh0"></div></div></div>
-          <div class="mixer-strip" data-explain="mixer-ch-1"><span class="mixer-label">CH1</span><input type="range" class="mixer-vol" data-mixer-chan="1" min="0" max="1.5" step="0.01" value="1"><div class="meter"><div class="meter-fill" id="meterFillCh1"></div></div></div>
-          <div class="mixer-strip" data-explain="mixer-ch-2"><span class="mixer-label">CH2</span><input type="range" class="mixer-vol" data-mixer-chan="2" min="0" max="1.5" step="0.01" value="1"><div class="meter"><div class="meter-fill" id="meterFillCh2"></div></div></div>
-          <div class="mixer-strip" data-explain="mixer-ch-3"><span class="mixer-label">CH3</span><input type="range" class="mixer-vol" data-mixer-chan="3" min="0" max="1.5" step="0.01" value="1"><div class="meter"><div class="meter-fill" id="meterFillCh3"></div></div></div>
-          <div class="mixer-strip mixer-master" data-explain="mixer-master"><span class="mixer-label">Master</span><input type="range" class="mixer-vol" id="mixerMasterVol" min="0" max="1.5" step="0.01" value="1"><div class="meter"><div class="meter-fill" id="meterFillMaster"></div></div></div>
+          <div class="mixer-strip" data-explain="mixer-ch-0"><span class="mixer-label">CH0</span><input type="range" class="mixer-vol" data-mixer-chan="0" min="0" max="1.5" step="0.01" value="1"><input type="text" class="mixer-db" data-mixer-chan="0" inputmode="decimal" title="level in dB — editable, same value as the slider"><span class="mixer-db-unit">dB</span><div class="meter"><div class="meter-fill" id="meterFillCh0"></div></div></div>
+          <div class="mixer-strip" data-explain="mixer-ch-1"><span class="mixer-label">CH1</span><input type="range" class="mixer-vol" data-mixer-chan="1" min="0" max="1.5" step="0.01" value="1"><input type="text" class="mixer-db" data-mixer-chan="1" inputmode="decimal" title="level in dB — editable, same value as the slider"><span class="mixer-db-unit">dB</span><div class="meter"><div class="meter-fill" id="meterFillCh1"></div></div></div>
+          <div class="mixer-strip" data-explain="mixer-ch-2"><span class="mixer-label">CH2</span><input type="range" class="mixer-vol" data-mixer-chan="2" min="0" max="1.5" step="0.01" value="1"><input type="text" class="mixer-db" data-mixer-chan="2" inputmode="decimal" title="level in dB — editable, same value as the slider"><span class="mixer-db-unit">dB</span><div class="meter"><div class="meter-fill" id="meterFillCh2"></div></div></div>
+          <div class="mixer-strip" data-explain="mixer-ch-3"><span class="mixer-label">CH3</span><input type="range" class="mixer-vol" data-mixer-chan="3" min="0" max="1.5" step="0.01" value="1"><input type="text" class="mixer-db" data-mixer-chan="3" inputmode="decimal" title="level in dB — editable, same value as the slider"><span class="mixer-db-unit">dB</span><div class="meter"><div class="meter-fill" id="meterFillCh3"></div></div></div>
+          <div class="mixer-strip mixer-master" data-explain="mixer-master"><span class="mixer-label">Master</span><input type="range" class="mixer-vol" id="mixerMasterVol" min="0" max="1.5" step="0.01" value="1"><input type="text" class="mixer-db" id="mixerMasterDb" inputmode="decimal" title="level in dB — editable, same value as the slider"><span class="mixer-db-unit">dB</span><div class="meter"><div class="meter-fill" id="meterFillMaster"></div></div></div>
         </div>
       </div>
     </div>
@@ -437,6 +457,9 @@
     <div class="sampler-modal-head">
       <b id="samplerModalTitle">Sampler</b>
       <div class="sampler-modal-head-actions">
+        <label class="tint-toggle" title="when checked, clicking Preview also plays a -8dB reference sine tone at this Sampler system's neutral pitch (Transpose 0) for as long as the preview lasts — use it to dial in Transpose by ear against a known pitch">
+          <input type="checkbox" id="samplerRefPitchToggle"> Ref Pitch
+        </label>
         <button type="button" id="samplerPreviewBtn" title="preview this instrument at a neutral reference pitch, using the current trim/ADSR/loop/Transpose settings">▶ Preview</button>
         <button type="button" id="samplerModalClose" title="close">✕</button>
       </div>
@@ -451,10 +474,11 @@
     <div class="sampler-row">
       <label>Start <input type="number" id="samplerStartSecInput" step="0.001" min="0" style="width:76px" title="exact sample start, in seconds">s</label>
       <label>End <input type="number" id="samplerEndSecInput" step="0.001" min="0" style="width:76px" title="exact sample end, in seconds">s</label>
+      <button type="button" id="samplerResetTrimBtn" title="reset Start/End to the full length of the loaded sample">Reset Start/End</button>
     </div>
     <div class="sampler-row">
       <label>Source <select id="samplerSourceSelect" title="which Source Sample this instrument plays"></select></label>
-      <label>Transpose <input type="number" id="samplerTranspose" step="0.01" min="-24" max="24" style="width:64px" title="pitch-shift the sample by this many semitones (decimals = cents, e.g. 3.50 = 3 semitones + 50 cents up) — for correcting a sample that isn't naturally at this song's reference pitch">st</label>
+      <label>Transpose <input type="number" id="samplerTranspose" step="1" min="-24" max="24" style="width:64px" title="pitch-shift the sample by this many semitones (decimals = cents, e.g. 3.50 = 3 semitones + 50 cents up) — the up/down arrows step by a full semitone; type a decimal for cents. For correcting a sample that isn't naturally at this song's reference pitch">st</label>
       <label class="tint-toggle"><input type="checkbox" id="samplerLoopToggle" title="loop the trimmed region while the note is held"> Loop</label>
     </div>
     <canvas id="samplerADSRCanvas" class="sampler-adsr-canvas" width="600" height="100" title="attack/decay/sustain/release shape — drag the amber points to adjust (sustain segment shown at a fixed nominal width — actual hold time depends on the note)"></canvas>
@@ -502,6 +526,13 @@
     </div>
   </div>
 </div>
+
+<!-- Shared by every slot's Load button in the Source Samples panel — kept
+     as one static element outside that panel's own outerHTML (rebuilt on
+     every render) rather than one per slot, so there's nothing to lose or
+     re-bind when the panel redraws. Which slot a click targets is tracked
+     in sourceSampleLoadTargetSlot, set right before this is clicked. -->
+<input type="file" id="sourceSampleLoadInput" accept="audio/wav,audio/mpeg,audio/ogg,.wav,.mp3,.ogg" style="display:none">
 
 <script id="fur-json" type="application/json">
 {"assetDirs":{"ins":[{"assets":[0,1,2,3,4,5,6,7,8,9],"name":""}],"wave":[{"assets":[0,1,2],"name":""}]},"chips":[{"flags":null,"frontRear":0.0,"id":6,"name":"Game Boy","panning":0.0,"volume":1.0}],"instruments":[{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":4,"envVol":13,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"name":"Bass 1","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":4,"envVol":13,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"macros":[{"code":2,"data":[3],"delay":0,"instantRelease":false,"length":1,"loop":255,"mode":0,"open":1,"release":255,"speed":1,"type":0,"wordSize":0}],"name":"Mid 1","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":2,"envVol":15,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":true,"soundLen":64},"name":"Lead 1","type":2,"waveSynth":{"effect":0,"enabled":true,"global":false,"oneShot":false,"param1":0,"param2":0,"param3":0,"param4":0,"rateDivider":1,"speed":0,"wave1":0,"wave2":0}},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":1,"envVol":8,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"name":"Perc 1","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":2,"envVol":15,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":true,"soundLen":64},"name":"Lead 2","type":2,"waveSynth":{"effect":0,"enabled":true,"global":false,"oneShot":false,"param1":0,"param2":0,"param3":0,"param4":0,"rateDivider":1,"speed":0,"wave1":1,"wave2":0}},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":2,"envVol":15,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":true,"soundLen":64},"name":"Lead 3","type":2,"waveSynth":{"effect":0,"enabled":true,"global":false,"oneShot":false,"param1":0,"param2":0,"param3":0,"param4":0,"rateDivider":1,"speed":0,"wave1":2,"wave2":0}},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":4,"envVol":12,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"macros":[{"code":2,"data":[1],"delay":0,"instantRelease":false,"length":1,"loop":255,"mode":0,"open":1,"release":255,"speed":1,"type":0,"wordSize":0}],"name":"Mid 2","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":4,"envVol":13,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"macros":[{"code":2,"data":[0],"delay":0,"instantRelease":false,"length":1,"loop":255,"mode":0,"open":1,"release":255,"speed":1,"type":0,"wordSize":0}],"name":"Mid 3","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":5,"envVol":3,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"name":"Perc Long","type":2},{"gb":{"alwaysInit":false,"doubleWave":false,"envDir":0,"envLen":5,"envVol":11,"hwSeq":[{"cmd":0,"data":0}],"hwSeqLen":0,"softEnv":false,"soundLen":64},"name":"Night Harmonies","type":2}],"patchbay":{"auto":true,"connections":[0,65537,4290772992,4290838529,4290904066,4290969603,4291035140,4291100677,4291166214,4291231751,4291297288,4291362825,4291428362,4291493899,4291559436,4291624973,4291690510,4291756047,4291821568,4291821569,4291821570,4291821571,4291821572,4291821573,4291821574,4291821575,4291821576,4291821577,4291821578,4291821579,4291821580,4291821581,4291821582,4291821583,4292870144,4292870145,4292870146,4292870147,4292870148,4292870149,4292870150,4292870151,4292870152,4292870153,4292870154,4292870155,4292870156,4292870157,4292870158,4292870159]},"samples":null,"songInfo":{"album":"1000 - shrines - /of/ - SPIRIT","author":"John Oestmann","comments":"Variation on flight_school from my album \"minimal_worlds_ii\"\n\nMusic License: CC0 / Public Domain\nCode License: MIT","instrumentCount":10,"name":"flight_school_night_shift","sampleCount":0,"system":[true,"Game Boy"],"tuning":440.0,"version":251,"wavetableCount":3},"subsongs":[{"channelData":[{"collapse":0,"effectColumns":1,"name":"","shortName":"","show":{"chanOsc":true,"pattern":true}},{"collapse":0,"effectColumns":1,"name":"","shortName":"","show":{"chanOsc":true,"pattern":true}},{"collapse":0,"effectColumns":1,"name":"","shortName":"","show":{"chanOsc":true,"pattern":true}},{"collapse":0,"effectColumns":1,"name":"","shortName":"","show":{"chanOsc":true,"pattern":true}}],"highlights":[4,16],"name":"","notes":"","orderLength":13,"orders":[[0,1,2,3,5,10,11,12,13,6,7,8,9],[0,1,2,3,5,10,11,12,13,6,7,8,9],[0,1,2,3,5,10,11,12,13,6,7,8,9],[0,1,2,3,5,10,11,12,13,6,7,8,9]],"patternLength":64,"patterns":[[{"rows":[{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":95,"vol":15},{},{},{},{},{},{"ins":0,"note":96},{},{},{},{},{},{},{},{},{},{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":88,"vol":15},{},{},{},{},{},{"ins":0,"note":89},{},{},{},{},{},{},{},{},{}]},{"rows":[{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":95,"vol":15},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":91,"vol":15},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{},{},{},{},{"ins":0,"note":98},{},{"ins":0,"note":91},{}]},{"rows":[{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":95,"vol":15},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":91,"vol":15},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253}]},{"rows":[{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":95,"vol":15},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":91,"vol":15},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{},{},{},{},{"ins":0,"note":98},{},{"ins":0,"note":91},{}]},null,{"rows":[{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253}]},{"rows":[{"ins":0,"note":89},{},{},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{},{},{"ins":0,"note":95},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{},{},{},{},{"ins":0,"note":98},{"note":253},{"ins":0,"note":103},{}]},{"rows":[{"ins":0,"note":89},{},{},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{},{},{},{},{"ins":0,"note":98},{},{"ins":0,"note":91},{}]},{"rows":[{"ins":0,"note":131,"vol":9},{"ins":0,"note":132},{"ins":0,"note":127},{"ins":0,"note":131},{"ins":0,"note":132},{"ins":0,"note":127},{"ins":0,"note":131},{"ins":0,"note":132},{"ins":0,"note":91,"vol":15},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":131,"vol":9},{"ins":0,"note":132},{"ins":0,"note":127},{"ins":0,"note":131},{"ins":0,"note":132},{"ins":0,"note":127},{"ins":0,"note":131},{"ins":0,"note":132},{"ins":0,"note":91,"vol":15},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{},{},{},{},{"ins":0,"note":98},{},{"ins":0,"note":91},{}]},{"rows":[{"ins":0,"note":131,"vol":9},{"ins":0,"note":132},{"ins":0,"note":127},{"ins":0,"note":131},{"ins":0,"note":132},{"ins":0,"note":127},{"ins":0,"note":131},{"ins":0,"note":132},{"ins":0,"note":91,"vol":15},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":131,"vol":9},{"ins":0,"note":132},{"ins":0,"note":127},{"ins":0,"note":131},{"ins":0,"note":132},{"ins":0,"note":127},{"ins":0,"note":131},{"ins":0,"note":132},{"ins":0,"note":91,"vol":15},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":100},{},{},{},{},{},{"ins":0,"note":98},{},{"ins":0,"note":91},{}]},{"rows":[{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{"ins":0,"note":100},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253}]},{"rows":[{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":95,"vol":15},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":91,"vol":15},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253}]},{"rows":[{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":95},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":89},{},{"ins":0,"note":89},{},{},{},{"ins":0,"note":91},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253}]},{"rows":[{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":95,"vol":15},{},{"ins":0,"note":95},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":96},{"note":253},{"ins":0,"note":96},{},{},{},{"ins":0,"note":96},{},{"ins":0,"note":143,"vol":6},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":143},{"note":139},{"note":136},{"note":132},{"note":131},{"note":115},{"note":131},{"note":127},{"note":124},{"note":120},{"ins":0,"note":91,"vol":15},{"note":253},{"ins":0,"note":91},{},{},{},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{"note":253},{"ins":0,"note":91},{},{"ins":0,"note":91},{},{},{}]},null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],[{"rows":[{"ins":1,"note":96},{},{},{},{},{},{"ins":1,"note":98},{},{},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{},{}]},{"rows":[{"ins":1,"note":96},{},{},{},{"ins":9,"note":108},{},{},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{"ins":9,"note":115},{},{},{},{"ins":9,"note":117},{},{"ins":1,"note":119},{},{"ins":1,"note":120},{},{},{},{"ins":1,"note":120},{},{},{},{},{},{"ins":1,"note":119},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":96},{},{},{},{"ins":9,"note":108},{},{},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{"ins":9,"note":115},{},{},{},{"ins":9,"note":117},{},{"ins":1,"note":119},{},{"ins":1,"note":120},{},{},{},{"ins":1,"note":120},{},{},{},{},{},{"ins":1,"note":119},{},{"ins":9,"note":103},{}]},null,{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":96},{},{},{},{"ins":9,"note":108},{},{},{},{"ins":9,"note":110},{},{},{},{},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{},{},{"ins":9,"note":110},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{"ins":9,"note":115},{},{},{},{"ins":9,"note":117},{},{"ins":1,"note":119},{},{"ins":1,"note":120},{},{},{},{"ins":1,"note":108,"vol":10},{"note":253},{"ins":1,"note":115},{},{"effects":[{"code":2,"value":8}]},{},{"effects":[{"code":2,"value":0}],"ins":1,"note":107},{},{},{}]},{"rows":[{"ins":1,"note":96,"vol":15},{},{},{},{"ins":9,"note":108},{},{},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{},{},{"ins":9,"note":117},{},{"ins":1,"note":119},{},{"ins":1,"note":120},{},{},{},{"ins":1,"note":120},{},{},{},{},{},{"ins":1,"note":119},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":131,"vol":6},{"ins":1,"note":132},{"ins":1,"note":127},{"ins":1,"note":131},{"ins":1,"note":132},{"ins":1,"note":127},{"ins":1,"note":131},{"ins":1,"note":132},{"ins":1,"note":103,"vol":15},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":131,"vol":6},{"ins":1,"note":132},{"ins":1,"note":127},{"ins":1,"note":131},{"ins":1,"note":132},{"ins":1,"note":127},{"ins":1,"note":131},{"ins":1,"note":132},{"ins":1,"note":103,"vol":15},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{"ins":9,"note":103},{"ins":9,"note":105}]},{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":131,"vol":6},{"ins":1,"note":132},{"ins":1,"note":127},{"ins":1,"note":131},{"ins":1,"note":132},{"ins":1,"note":127},{"ins":1,"note":131},{"ins":1,"note":132},{"ins":1,"note":103,"vol":15},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":131,"vol":6},{"ins":1,"note":132},{"ins":1,"note":127},{"ins":1,"note":131},{"ins":1,"note":132},{"ins":1,"note":127},{"ins":1,"note":131},{"ins":1,"note":132},{"ins":1,"note":103,"vol":15},{},{"ins":9,"note":110},{},{"ins":9,"note":107},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":110},{},{"ins":1,"note":112},{},{},{},{"ins":9,"note":108},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":115},{},{"ins":9,"note":117},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{},{},{"ins":1,"note":120},{},{"ins":1,"note":110},{},{"ins":1,"note":108},{},{"ins":9,"note":120},{},{},{},{"ins":1,"note":110},{},{},{},{"ins":9,"note":122},{},{"ins":9,"note":127},{},{},{},{"ins":1,"note":131},{},{"ins":1,"note":132},{},{},{},{"ins":1,"note":132},{},{},{},{},{},{"ins":1,"note":131},{},{},{}]},{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{},{},{"ins":9,"note":103},{}]},{"rows":[{"ins":1,"note":108},{},{},{},{"ins":9,"note":120},{},{},{},{},{},{"ins":9,"note":119},{},{},{},{},{},{"ins":1,"note":115},{},{"ins":9,"note":122},{},{},{},{"ins":9,"note":115},{},{},{},{"ins":1,"note":112},{"note":253},{"ins":1,"note":112},{"note":253},{"ins":1,"note":110},{},{"ins":4,"note":110},{},{},{},{"effects":[{"code":1,"value":8}],"ins":4,"note":114},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":115},{},{},{},{"ins":9,"note":127},{},{},{},{"ins":9,"note":129},{},{"ins":1,"note":131},{},{"ins":1,"note":132},{},{},{},{"ins":1,"note":132},{},{},{},{},{},{"ins":9,"note":115},{},{},{}]},{"rows":[{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":1,"note":100},{},{},{},{"ins":1,"note":98},{},{"ins":1,"note":96},{},{"ins":9,"note":108},{},{},{},{"ins":1,"note":98},{},{"ins":9,"note":110},{},{},{},{},{},{},{},{"ins":1,"note":103},{},{"ins":9,"note":110},{},{},{},{"ins":9,"note":103},{},{},{},{"ins":9,"note":105},{},{"ins":9,"note":103},{},{},{}]},null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],[{"rows":[{},{},{},{},{"ins":2,"note":124,"vol":15},{"vol":13},{"note":253,"vol":12},{"vol":11},{"ins":2,"note":124,"vol":10},{"vol":8},{"vol":7},{"vol":6},{"vol":5},{"vol":3},{"vol":2},{"vol":1},{"vol":0},{},{},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"note":253,"vol":12},{"vol":11},{"ins":2,"note":122,"vol":10},{"vol":8},{"vol":7},{"vol":6},{"vol":5},{"vol":3},{"vol":2},{"vol":1},{"vol":0},{},{},{},{"ins":2,"note":124,"vol":15},{"vol":13},{"note":253,"vol":12},{"vol":11},{"ins":2,"note":124,"vol":10},{"vol":8},{"vol":7},{"vol":6},{"vol":5},{"vol":3},{"vol":2},{"vol":1},{"vol":0},{},{},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"note":253,"vol":12},{"vol":11},{"ins":2,"note":122,"vol":10},{"vol":8},{"vol":7},{"vol":6},{"vol":5},{"vol":3},{"vol":2},{"vol":1}]},{"rows":[{"effects":[{"code":4,"value":131}],"ins":5,"note":127,"vol":15},{},{},{},{},{},{},{},{"vol":13},{},{"vol":11},{},{"vol":9},{},{"vol":5},{},{"ins":5,"note":127,"vol":15},{},{"ins":5,"note":131},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":5,"note":132},{},{"ins":2,"note":122,"vol":10},{"vol":8},{},{},{"ins":5,"note":139,"vol":15},{},{},{},{},{},{"effects":[{"code":2,"value":6}]},{},{"effects":[{"code":2,"value":0}],"ins":5,"note":136},{},{"vol":12},{"vol":11},{"vol":10},{"vol":8},{"ins":5,"note":132,"vol":15},{},{},{},{"ins":5,"note":134,"vol":15},{"note":253},{"ins":5,"note":139},{},{"ins":5,"note":141},{},{},{"effects":[{"code":2,"value":10}]},{"effects":[{"code":2,"value":0}],"ins":5,"note":136},{},{},{"vol":12},{"vol":10},{"vol":8},{"ins":5,"note":134,"vol":15},{},{},{}]},{"rows":[{},{},{},{},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":134,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8}]},{"rows":[{"effects":[{"code":4,"value":131}],"ins":5,"note":127,"vol":15},{},{},{},{},{},{"ins":5,"note":129,"vol":15},{},{"vol":10},{"vol":8},{"vol":15},{},{"ins":5,"note":124,"vol":15},{},{},{"ins":4,"note":124,"vol":10},{"ins":4,"note":127,"vol":15},{},{"ins":4,"note":131},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":4,"note":132,"vol":15},{},{"ins":2,"note":122,"vol":10},{"vol":8},{"ins":4,"note":134,"vol":15},{},{"ins":4,"note":139},{},{},{},{},{},{"effects":[{"code":2,"value":6}]},{},{"effects":[{"code":2,"value":0}],"ins":4,"note":136,"vol":15},{},{"vol":12},{"vol":11},{"ins":2,"note":124,"vol":10},{"vol":8},{"ins":4,"note":132,"vol":15},{},{"note":253},{},{"ins":4,"note":134},{"note":253},{"ins":4,"note":139},{},{"ins":4,"note":141},{},{},{"effects":[{"code":2,"value":10}]},{"effects":[{"code":2,"value":0}],"ins":4,"note":136},{},{"ins":2,"note":122,"vol":10},{"vol":8},{"vol":7},{},{"ins":4,"note":134,"vol":15},{},{},{}]},null,{"rows":[{"vol":15},{"vol":12},{"vol":10},{"vol":8},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":134,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8}]},{"rows":[{"ins":5,"note":131},{},{"ins":4,"note":127},{},{"ins":4,"note":132},{},{},{},{},{},{"vol":10},{"vol":7},{"ins":4,"note":127,"vol":13},{},{"ins":4,"note":131},{},{"ins":4,"note":134},{},{},{"note":253},{"ins":4,"note":134,"vol":10},{},{"ins":4,"note":136,"vol":12},{},{},{"vol":9},{"vol":5},{"note":253},{"ins":4,"note":134,"vol":3},{},{},{"note":253},{"ins":5,"note":131,"vol":15},{},{"ins":4,"note":127},{},{"ins":4,"note":132},{},{},{},{},{},{},{},{"ins":4,"note":127,"vol":15},{},{},{},{"ins":4,"note":134},{},{},{"note":253},{"ins":4,"note":134,"vol":10},{},{},{"note":253},{"ins":4,"note":134,"vol":7},{},{},{"note":253},{"ins":4,"note":134,"vol":3},{},{},{}]},{"rows":[{"ins":5,"note":131,"vol":15},{},{"ins":4,"note":127},{},{"ins":4,"note":132},{},{},{},{},{},{},{"note":253},{"ins":4,"note":127,"vol":15},{"note":253},{"ins":4,"note":131},{"note":253},{"ins":4,"note":134},{},{},{"note":253},{"ins":4,"note":134,"vol":10},{},{"ins":4,"note":136,"vol":13},{},{},{"vol":9},{"vol":5},{"note":253},{"ins":4,"note":134,"vol":3},{},{},{"note":253},{"ins":4,"note":131,"vol":15},{},{"ins":4,"note":127},{},{"ins":4,"note":132},{},{},{},{},{},{},{"note":253},{"ins":4,"note":127,"vol":15},{"note":253},{"ins":4,"note":131},{},{"ins":4,"note":134},{},{},{"note":253},{"ins":4,"note":134,"vol":10},{},{"ins":4,"note":136,"vol":13},{"note":253},{"ins":4,"note":136,"vol":11},{"note":253},{"effects":[{"code":1,"value":9}],"ins":4,"note":139,"vol":13},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":139,"vol":15},{},{},{}]},{"rows":[{},{},{},{},{"ins":4,"note":132},{},{},{},{},{},{},{},{"ins":4,"note":137},{},{},{},{},{},{},{},{"ins":4,"note":136},{},{},{},{},{},{"effects":[{"code":2,"value":8}]},{},{"effects":[{"code":2,"value":0}],"ins":4,"note":131},{},{},{},{},{},{},{},{"ins":4,"note":132},{},{},{},{},{},{},{},{"ins":4,"note":137},{},{},{},{},{},{},{},{"ins":4,"note":136},{},{},{},{},{},{},{},{"ins":4,"note":131},{},{},{}]},{"rows":[{},{},{},{},{"ins":4,"note":132},{},{},{},{},{},{},{},{"ins":4,"note":131},{},{"ins":4,"note":127},{},{"ins":4,"note":134},{},{},{},{"ins":2,"note":136},{},{"ins":5,"note":137},{},{"ins":2,"note":136},{},{"ins":5,"note":134},{},{"ins":5,"note":131},{},{},{},{"ins":4,"note":131},{},{"ins":4,"note":127},{},{"ins":4,"note":132},{},{},{},{},{},{},{},{"ins":4,"note":127},{},{"ins":4,"note":131},{},{"ins":4,"note":134},{},{},{},{"ins":2,"note":136},{},{"ins":5,"note":137},{},{"ins":2,"note":136},{},{"ins":5,"note":134},{},{"effects":[{"code":1,"value":6}],"ins":4,"note":137},{"effects":[{"code":1,"value":0}],"ins":4,"note":139},{},{}]},{"rows":[{"ins":4,"note":127,"vol":15},{},{},{},{},{},{"ins":4,"note":124,"vol":15},{},{"vol":10},{"vol":8},{"ins":4,"note":129,"vol":15},{},{},{},{},{"ins":4,"note":124},{"ins":4,"note":127},{},{"ins":4,"note":131},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":4,"note":132,"vol":15},{},{"ins":4,"note":131,"vol":15},{"note":253},{"ins":4,"note":132,"vol":15},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":139,"vol":15},{},{},{},{"ins":4,"note":139},{"note":253},{"ins":4,"note":143},{},{"ins":4,"note":144},{"note":253},{"ins":4,"note":146},{},{},{},{"effects":[{"code":2,"value":10}]},{},{"effects":[{"code":2,"value":0}],"ins":4,"note":136},{},{"ins":4,"note":134},{},{"ins":4,"note":139},{},{"ins":4,"note":141},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":4,"note":136,"vol":15},{},{},{"vol":12},{"ins":2,"note":122,"vol":15},{"vol":8},{"ins":4,"note":134,"vol":15},{},{},{}]},{"rows":[{"vol":15},{"vol":12},{"vol":10},{"vol":8},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":134,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":2,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":2,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8}]},{"rows":[{"ins":4,"note":127,"vol":15},{},{},{},{"ins":2,"note":124,"vol":15},{},{},{},{"vol":10},{"vol":8},{"ins":4,"note":127,"vol":15},{},{},{},{},{"ins":4,"note":124},{"ins":4,"note":127},{},{"ins":4,"note":131},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":4,"note":132,"vol":15},{},{"effects":[{"code":1,"value":8}]},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":139},{},{},{},{},{},{"ins":4,"note":139},{"note":253},{"effects":[{"code":1,"value":8}],"ins":4,"note":143},{},{"effects":[{"code":1,"value":0}],"ins":4,"note":144},{},{},{},{},{},{"effects":[{"code":2,"value":10}]},{},{"effects":[{"code":2,"value":0}],"ins":4,"note":136},{},{"ins":4,"note":134},{"note":253},{"ins":4,"note":139},{},{"ins":4,"note":141},{},{"ins":2,"note":122,"vol":15},{"vol":13},{"ins":4,"note":136,"vol":15},{},{},{"vol":12},{"vol":10},{"vol":8},{"ins":4,"note":134,"vol":15},{},{},{}]},{"rows":[{"effects":[{"code":2,"value":6}]},{"effects":[{"code":2,"value":0}],"ins":4,"note":132},{},{},{"effects":[{"code":2,"value":0}],"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":134,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":134,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":132,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":132,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":136,"vol":15},{"vol":12},{"note":253,"vol":10},{"vol":8},{"ins":5,"note":136,"vol":6},{"vol":4},{"vol":2},{"vol":0},{"ins":5,"note":134,"vol":15},{"vol":14},{"vol":13},{}]},null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null],[{"rows":[{"ins":8,"note":124},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{"ins":8,"note":124},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{"ins":8,"note":124},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{"ins":8,"note":124},{},{},{},{"ins":3,"note":124},{"note":253},{},{},{},{},{},{},{"ins":3,"note":124},{"note":253},{},{}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},null,{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{},{},{},{},{},{},{},{},{},{"ins":8,"note":124},{},{},{},{"ins":8,"note":124},{},{},{},{},{},{},{},{},{},{"ins":8,"note":124},{},{},{},{},{},{"ins":8,"note":124},{},{},{},{},{},{},{},{},{},{},{},{"ins":8,"note":124},{},{},{},{"ins":8,"note":124},{},{},{},{},{},{},{},{},{},{},{},{"ins":8,"note":124},{},{},{}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{},{},{"ins":8,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{"ins":8,"note":124},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{"ins":8,"note":124},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{"ins":8,"note":124},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{},{},{}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},{"rows":[{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{},{"ins":3,"note":108},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253},{"ins":8,"note":124},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":107},{"note":253},{},{},{"ins":3,"note":108},{"note":253},{"ins":3,"note":124},{"note":253},{"ins":3,"note":108},{"note":253}]},null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null]],"speeds":[6],"tickRate":47.20000076293945,"virtualTempo":[150,150]}],"wavetables":[{"data":[3,5,7,8,10,12,13,14,15,15,9,12,15,15,15,12,5,3,2,1,0,0,0,0,1,2,3,4,5,6,7,7],"len":32,"max":15},{"data":[0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,14,14,15,15],"len":32,"max":15},{"data":[14,14,14,14,14,14,14,14,14,14,14,14,11,11,11,11,11,11,11,11,11,11,11,2,2,2,2,2,2,2,2,2],"len":32,"max":15}]}
@@ -891,9 +922,16 @@
     '</div>';
   }
   var GB_ROLE_HINT = { 0:'pulse 1', 1:'pulse 2', 2:'wave', 3:'noise' };
+  // Trims a Transpose value down to just what's meaningful — whole
+  // semitones show with no decimal, a cents offset (from the Sampler
+  // modal's own field) still shows. Shared by the Instruments table's
+  // Transpose column and anywhere else that needs the same compact form.
+  function formatTranspose(v){
+    var s = v.toFixed(2).replace(/\.?0+$/, '');
+    return (s===''||s==='-0') ? '0' : s;
+  }
   function instrumentsFieldHTML(){
     var rows = song.instruments.map(function(ins, i){
-      var gb = ins.gb || {};
       var previewBtn = '<button type="button" class="preview-btn" data-preview-ins="'+i+'" title="preview this instrument — same neutral-pitch preview as its Sampler modal when Sampler Mode is on, otherwise a 2-row stem slice from its first appearance in the song">▶</button>';
       // Mini bar-graph of the raw wavetable this instrument points at —
       // only Wave-channel instruments have one; the canvas is empty here
@@ -904,15 +942,19 @@
         var w = song.wavetables[ins.waveSynth.wave1];
         if(w) waveCell = '<canvas class="ins-wave-canvas" width="'+w.len+'" height="16" data-explain="wave-'+ins.waveSynth.wave1+'" data-wave-idx="'+ins.waveSynth.wave1+'" title="wavetable '+ins.waveSynth.wave1+'"></canvas>';
       }
+      var transposeCell = '<div class="ins-transpose-cell">'+
+          '<button type="button" class="ins-transpose-btn" data-transpose-ins="'+i+'" data-transpose-dir="-1" title="transpose down 1 semitone (also previews)">−</button>'+
+          '<span class="ins-transpose-val" id="insTransposeVal'+i+'">'+formatTranspose(ins.sampler.transpose)+'</span>'+
+          '<button type="button" class="ins-transpose-btn" data-transpose-ins="'+i+'" data-transpose-dir="1" title="transpose up 1 semitone (also previews)">+</button>'+
+        '</div>';
       return '<tr data-explain="ins-'+i+'" data-ins-row="'+i+'"'+(mutedInstruments[i]?' class="ins-muted"':'')+'>'+
         '<td>'+previewBtn+'</td>'+
         '<td><input type="checkbox" class="ins-mute-toggle" data-ins-mute="'+i+'"'+(mutedInstruments[i]?' checked':'')+' title="mute this instrument — silences it for real in Sampler Mode; in stem playback (Sampler Mode off) a whole channel\'s audio can\'t be selectively unmixed, so this only marks its cells below"></td>'+
         '<td><input type="color" class="ins-color-input" data-ins="'+i+'" value="'+ins.color+'" title="pattern-grid tint for this instrument"></td>'+
         '<td>'+i+'</td><td class="ins-name">'+esc(ins.name||'(unnamed)')+'</td>'+
-        '<td>'+waveCell+'</td>'+
-        '<td>'+(gb.envVol!==undefined?gb.envVol:'')+'</td>'+
-        '<td>'+((ins.macros||[]).length?(ins.macros.length+' macro(s)'):'')+'</td>'+
-        '<td>'+samplerButtonHTML(i)+'</td>'+
+        '<td class="ins-col-wave">'+waveCell+'</td>'+
+        '<td class="ins-col-transpose">'+transposeCell+'</td>'+
+        '<td class="ins-col-sampler">'+samplerButtonHTML(i)+'</td>'+
       '</tr>';
     }).join('');
     return '<div class="field" id="field-instruments">'+
@@ -921,18 +963,13 @@
         '<span class="field-summary">'+song.instruments.length+'</span>'+
         '<span class="collapse-arrow">▾</span>'+
       '</div>'+
-      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th title="mute this instrument">Mute</th><th>Color</th><th>#</th><th>Name</th><th data-explain="wavetables" title="which wavetable this instrument\'s Wave channel points at, if any">Wave</th><th title="GB hardware envelope starting volume — hover a row for the full envelope details (direction, step length, sound length, software envelope)">Env</th><th>Macros</th><th data-explain="sampler-col" title="assign/edit this instrument\'s Sampler settings for Sampler Mode">Sampler</th></tr></thead>'+
+      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th title="mute this instrument">Mute</th><th>Color</th><th>#</th><th>Name</th><th class="ins-col-wave" data-explain="wavetables" title="which wavetable this instrument\'s Wave channel points at, if any">Wave</th><th class="ins-col-transpose" data-explain="ins-transpose" title="pitch-shift this instrument\'s Sampler-mode sample by semitones — same value as its Sampler modal">Transpose</th><th class="ins-col-sampler" data-explain="sampler-col" title="assign/edit this instrument\'s Sampler settings for Sampler Mode">Sampler</th></tr></thead>'+
       '<tbody>'+rows+'</tbody></table></div></div>'+
     '</div>';
   }
-  function samplerButtonHTML(insIndex){
-    var sp = song.instruments[insIndex].sampler;
-    var label = (sp.sourceIndex!==null && sourceSamples[sp.sourceIndex]) ? esc(sourceSamples[sp.sourceIndex].name) : '(none)';
-    return '<button type="button" class="sampler-btn" data-sampler-ins="'+insIndex+'" title="open sampler settings for this instrument">Sampler</button> '+
-      '<span class="sampler-src-label">'+label+'</span>';
-  }
-  // Options for the Sampler modal's own Source select — separate from the
-  // button above, which just opens the modal.
+  // Options for a Source select — shared by the Sampler modal's own select
+  // and each Instruments-row select below, so the two never drift apart in
+  // what they list.
   function samplerSourceOptionsHTML(insIndex){
     var sp = song.instruments[insIndex].sampler;
     return '<option value="">(none)</option>' + sourceSamples.map(function(s, si){
@@ -940,20 +977,27 @@
       return '<option value="'+si+'"'+(sp.sourceIndex===si?' selected':'')+'>'+esc(s.name)+'</option>';
     }).join('');
   }
-  // Refresh just the per-row "current source" label after the modal
-  // changes a sourceIndex — cheaper than re-rendering the whole table and
-  // doesn't disturb any other row state.
+  function samplerButtonHTML(insIndex){
+    return '<button type="button" class="sampler-btn" data-sampler-ins="'+insIndex+'" title="open the full sampler settings (trim, ADSR, loop, polyphony) for this instrument">Sampler</button> '+
+      '<select class="ins-sampler-source-select" data-ins="'+insIndex+'" title="which Source Sample this instrument plays — changing it resets Start/End to the new sample\'s full length">'+samplerSourceOptionsHTML(insIndex)+'</select>';
+  }
+  // Refresh just the per-row Source selects after something elsewhere
+  // changes a sample's name or which slots exist (Info edit, Load, Clear
+  // Samples, initial probeSourceSample load) — cheaper than re-rendering
+  // the whole table and doesn't disturb any other row state.
   function refreshInstrumentSamplerButtons(){
     song.instruments.forEach(function(ins, i){
-      var cell = document.querySelector('.ins-table [data-ins-row="'+i+'"] .sampler-src-label');
-      if(!cell) return;
-      var sp = ins.sampler;
-      cell.textContent = (sp.sourceIndex!==null && sourceSamples[sp.sourceIndex]) ? sourceSamples[sp.sourceIndex].name : '(none)';
+      var sel = document.querySelector('.ins-sampler-source-select[data-ins="'+i+'"]');
+      if(sel) sel.innerHTML = samplerSourceOptionsHTML(i);
     });
   }
   function sourceSamplesFieldHTML(){
     var slots = sourceSamples.map(function(s, i){
-      if(!s) return '<div class="src-sample-slot empty"><span class="src-sample-label">Slot '+i+' — empty (drop a file at ASSETS/SourceSamples/'+i+'.ogg)</span></div>';
+      var loadBtn = '<button type="button" class="src-sample-load-btn" data-load-slot="'+i+'" data-explain="sample-load" title="load a .wav/.mp3/.ogg from your computer into this slot — session only, see Package Samples above to keep it">Load</button>';
+      if(!s) return '<div class="src-sample-slot empty">'+
+          '<span class="src-sample-label">Slot '+i+' — empty (drop a file at ASSETS/SourceSamples/'+i+'.ogg or .wav)</span>'+
+          '<div class="src-sample-slot-buttons">'+loadBtn+'</div>'+
+        '</div>';
       var commentPreview = s.comments && s.comments.trim() ?
         '<div class="src-sample-comment-preview">'+esc(s.comments.trim().slice(0,80))+(s.comments.trim().length>80?'…':'')+'</div>' : '';
       // Vertically stacked (title, comment preview, buttons, waveform) so
@@ -966,6 +1010,7 @@
         '<div class="src-sample-slot-buttons">'+
           '<button type="button" class="src-sample-play" data-play-slot="'+i+'" data-explain="sample-preview-play" title="play this source sample in full">▶</button>'+
           '<button type="button" class="src-sample-comments-btn" data-comments-slot="'+i+'" data-explain="sample-comments" title="edit this sample\'s name and notes">Info</button>'+
+          loadBtn+
         '</div>'+
         '<canvas class="src-sample-canvas" data-slot="'+i+'" width="480" height="60"></canvas>'+
       '</div>';
@@ -976,7 +1021,14 @@
         '<span class="field-summary">'+sourceSamples.filter(Boolean).length+' / '+SOURCE_SAMPLE_SLOTS+'</span>'+
         '<span class="collapse-arrow">▾</span>'+
       '</div>'+
-      '<div class="field-body">'+slots+'</div>'+
+      '<div class="field-body">'+
+        '<div class="src-samples-toolbar">'+
+          '<button type="button" id="packageSamplesBtn" data-explain="package-samples" title="download every populated slot as numbered .wav files in one .zip — drop them into ASSETS/SourceSamples/ to make them permanent">Package Samples</button>'+
+          '<button type="button" id="clearSamplesBtn" data-explain="clear-samples" title="remove all loaded samples from memory and reset every instrument\'s Start/End and ADSR — does not touch any files on disk">Clear Samples</button>'+
+          '<span class="project-io-status" id="sourceSamplesStatus"></span>'+
+        '</div>'+
+        slots+
+      '</div>'+
     '</div>';
   }
   function pianoRollFieldHTML(){
@@ -1073,6 +1125,37 @@
       if(row) row.classList.toggle('ins-muted', mutedInstruments[i]);
       if(mutedInstruments[i]) killSamplerVoicesForInstrument(i); // real, immediate silence in Sampler Mode — see its own comment
       renderPatternTable(); // reflect the mute in the currently-visible cells (see ins-muted-cell)
+    });
+  });
+
+  // Instruments table's Transpose −/+ buttons: same semitone-step + preview
+  // behaviour as the Sampler modal's own Transpose field, just reachable
+  // without opening that modal first. triggerSamplerPreviewWithRefTone is
+  // defined further down but hoisted, same as other forward references
+  // already used throughout this file.
+  document.querySelectorAll('.ins-transpose-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var i = parseInt(btn.getAttribute('data-transpose-ins'), 10);
+      var dir = parseInt(btn.getAttribute('data-transpose-dir'), 10);
+      var sp = song.instruments[i].sampler;
+      sp.transpose = Math.max(-24, Math.min(24, sp.transpose + dir));
+      document.getElementById('insTransposeVal'+i).textContent = formatTranspose(sp.transpose);
+      triggerSamplerPreviewWithRefTone(i);
+    });
+  });
+
+  // Instruments table's own Source select — same field the Sampler modal
+  // has, just reachable without opening it. Changing it resets Start/End
+  // to the new sample's full length (or 0/0 for "(none)"), same as the
+  // modal's own select does below — a prior trim almost certainly doesn't
+  // fit whatever's now assigned (or nothing at all).
+  document.querySelectorAll('.ins-sampler-source-select').forEach(function(sel){
+    sel.addEventListener('change', function(){
+      var i = parseInt(sel.getAttribute('data-ins'), 10);
+      var sp = song.instruments[i].sampler;
+      sp.sourceIndex = sel.value==='' ? null : parseInt(sel.value, 10);
+      sp.startSec = 0;
+      sp.endSec = sp.sourceIndex!==null ? sourceSamples[sp.sourceIndex].duration : 0;
     });
   });
 
@@ -1490,7 +1573,7 @@
     },
     'mixer': function(){
       return { title:'Mixer — levels and clipping',
-        html: P('Per-channel + master volume, each with a live peak meter tapped off that channel\'s own gain stage.') +
+        html: P('Per-channel + master volume, each with a live peak meter and an editable dB field that tracks the slider (type a value, '+KW('Enter')+'/blur to apply).') +
           P('Meter turns red at 98% of full scale — near/at clipping, worth checking before exporting a WAV.') };
     },
     'mixer-master': function(){
@@ -1499,13 +1582,33 @@
     },
     'source-samples': function(){
       return { title:'Source Samples — Sampler Mode\'s raw material',
-        html: P('Up to '+N(SOURCE_SAMPLE_SLOTS)+' clips. No manifest — slot '+N('i')+' is just '+VR('ASSETS/SourceSamples/i.ogg')+'; drop or swap that exact file to fill it.') +
+        html: P('Up to '+N(SOURCE_SAMPLE_SLOTS)+' clips. No manifest — slot '+N('i')+' is just '+VR('ASSETS/SourceSamples/i.ogg')+' (or '+VR('.wav')+'); drop or swap that exact file to fill it.') +
           P('Click ▶ to preview. An instrument points at a slot via its own '+KW('Sampler')+' button below to play it, pitched to the note.') };
+    },
+    'package-samples': function(){
+      return { title:'Package Samples — save loaded samples as files',
+        html: P('Downloads every populated slot as one '+esc('.zip')+' of numbered '+VR('.wav')+' files — matches the '+VR('i.ogg')+'/'+VR('i.wav')+' naming above, so unzipping straight into '+VR('ASSETS/SourceSamples/')+' just works.') +
+          P('Mainly for anything brought in via a slot\'s own '+KW('Load')+' button — that only lasts this session otherwise.') };
+    },
+    'sample-load': function(){
+      return { title:'Load — bring in a file from your computer',
+        html: P('Decodes a '+esc('.wav')+'/'+esc('.mp3')+'/'+esc('.ogg')+' from your computer straight into this slot, overwriting whatever was there.') +
+          P('Session only — nothing here can write to '+VR('ASSETS/SourceSamples/')+' itself. Use '+KW('Package Samples')+' above once you want to keep it.') };
+    },
+    'clear-samples': function(){
+      return { title:'Clear Samples — wipe every slot',
+        html: P('Empties all '+N(SOURCE_SAMPLE_SLOTS)+' slots and resets every instrument\'s Start/End and ADSR back to defaults, since they were tuned against audio that\'s now gone.') +
+          P('Session only — files under '+VR('ASSETS/SourceSamples/')+' aren\'t touched; reloading the page brings them straight back.') };
     },
     'sampler-col': function(){
       return { title:'Sampler — turn an instrument into a sample player',
         html: P('Opens the Sampler editor: source slot, Start/End trim, Transpose, loop, ADSR (live preview), Polyphonic + voice cap, and '+KW('▶ Preview')+'.') +
           P('Label shows the assigned Source Sample — '+esc('(none)')+' means silent in Sampler Mode until set.') };
+    },
+    'ins-transpose': function(){
+      return { title:'Transpose — pitch-shift this instrument\'s sample',
+        html: P('−/+ step one semitone at a time and preview immediately, same value as the Transpose field in this instrument\'s own Sampler modal.') +
+          P('No source sample assigned yet? Still adjustable, just silent until one is.') };
     },
     'sample-preview-play': function(){
       return { title:'Preview — hear the raw Source Sample',
@@ -1701,28 +1804,43 @@
   // the rest of the sampler data model, since instrumentsFieldHTML needs it
   // before this section of the script even runs.
   //
-  // No upload/browse control, and no manifest either: a static HTML page
-  // can't list a folder's contents over plain HTTP (no server-side
+  // No manifest, and no browse control at PAGE-LOAD time: a static HTML
+  // page can't list a folder's contents over plain HTTP (no server-side
   // directory listing — and that wouldn't work once this is deployed
   // somewhere like GitHub Pages or a WordPress media folder anyway), so
-  // there's no way to discover an arbitrary filename. Instead each of the 6
-  // slots maps to one fixed filename — slot i is exactly
+  // there's no way to discover an arbitrary filename automatically. Instead
+  // each of the 6 slots maps to one fixed filename — slot i is exactly
   // ASSETS/SourceSamples/i.ogg — and the app just tries fetching each one
   // directly. A missing file is the normal "empty slot" state (not an
-  // error): "add/swap a sample" is just dropping (or replacing) that exact
-  // file, nothing else to edit. The display name defaults to the slot
-  // number; give a sample a real title via its own Info button (see
-  // openSampleCommentsModal further down) — that's saved into Project JSON
-  // same as everything else. ---
+  // error): "add/swap a sample" (permanently) is just dropping (or
+  // replacing) that exact file, nothing else to edit. The display name
+  // defaults to the slot number; give a sample a real title via its own
+  // Info button (see openSampleCommentsModal further down) — that's saved
+  // into Project JSON same as everything else.
+  //
+  // Each slot's own Load button (see sourceSampleLoadInput further down) is
+  // the one place a file DOES get picked from disk — but that's a
+  // session-only shortcut for auditioning something before committing to
+  // it as a real numbered file; see Package Samples in
+  // packageSourceSamplesAsZip for turning it into one. ---
+  // .ogg first (this project's own convention), .wav as a fallback — Package
+  // Samples can only hand back .wav (see its own comment: no in-browser Ogg
+  // Vorbis encoder), so a slot filled that way still gets found here
+  // without any renaming.
+  var SOURCE_SAMPLE_EXTENSIONS = ['ogg', 'wav'];
   function probeSourceSample(i){
-    var url = 'ASSETS/SourceSamples/'+i+'.ogg';
-    return fetch(url)
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
-      .then(function(buf){ return ac.decodeAudioData(buf); })
-      .then(function(audioBuf){
-        sourceSamples[i] = { name:String(i), url:url, buffer:audioBuf, duration:audioBuf.duration, waveformCache:computeWaveformCache(audioBuf), comments:'' };
-      })
-      .catch(function(){}); // no file at this slot — that's just an empty slot, not worth logging
+    function tryExt(idx){
+      if(idx>=SOURCE_SAMPLE_EXTENSIONS.length) return Promise.resolve();
+      var url = 'ASSETS/SourceSamples/'+i+'.'+SOURCE_SAMPLE_EXTENSIONS[idx];
+      return fetch(url)
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
+        .then(function(buf){ return ac.decodeAudioData(buf); })
+        .then(function(audioBuf){
+          sourceSamples[i] = { name:String(i), url:url, buffer:audioBuf, duration:audioBuf.duration, waveformCache:computeWaveformCache(audioBuf), comments:'' };
+        })
+        .catch(function(){ return tryExt(idx+1); }); // no file at this extension — try the next, or give up (empty slot) after the last
+    }
+    return tryExt(0);
   }
   function loadSourceSamples(){
     ensureAudioContext();
@@ -2158,9 +2276,20 @@
     document.getElementById('samplerModeLabel').textContent =
       document.getElementById('samplerModeToggle').checked ? 'SAMPLER MODE' : 'CHIP MODE';
   }
+  // Shows/hides whichever Instruments-table columns and panels only make
+  // sense in one mode — see the body.chip-mode/body.sampler-mode CSS rules
+  // near .ins-transpose-val. Called on every mode change plus the couple of
+  // places elsewhere that flip samplerModeEnabled programmatically (Project
+  // JSON restore), same reasoning as syncSamplerModeLabel above.
+  function syncModeVisibility(){
+    document.body.classList.toggle('chip-mode', !samplerModeEnabled);
+    document.body.classList.toggle('sampler-mode', samplerModeEnabled);
+  }
+  syncModeVisibility(); // initial state — samplerModeEnabled defaults true, so this just confirms the default rather than changing anything
   document.getElementById('samplerModeToggle').addEventListener('change', function(e){
     samplerModeEnabled = e.target.checked;
     syncSamplerModeLabel();
+    syncModeVisibility();
     doSeek(currentSongTime()); // reuses doSeek's stop-both/restart-the-right-one logic verbatim
     document.getElementById('field-song').outerHTML = songFieldHTML(); // swaps the Game Boy/tuning/format tail for "SAMPLER MODE" (or back)
   });
@@ -2183,13 +2312,59 @@
   // Mixer: fixed 4-channel + master markup (this song always has exactly
   // 4 GB channels), so it's plain static HTML wired once here — no
   // per-render rebinding needed, unlike the Source Samples panel.
+  //
+  // Each slider (linear gain, 0-1.5) has its own dB text field kept in
+  // sync both ways: moving the slider reformats the field, typing a dB
+  // value and committing it (blur/Enter, not live-as-you-type — a partial
+  // "-1" mid-edit shouldn't fight the field back) moves the slider. Gain 0
+  // is genuinely silent, i.e. -Infinity dB — shown/accepted as "-Inf"
+  // rather than a huge negative number, since there's no real floor here
+  // the way an analog fader has.
+  function linearToDb(v){ return v<=0 ? -Infinity : 20*Math.log10(v); }
+  function dbToLinear(db){ return isFinite(db) ? Math.pow(10, db/20) : 0; }
+  function formatDb(db){ return isFinite(db) ? db.toFixed(1) : '-Inf'; }
+  function parseDbText(text){
+    var t = text.trim().toLowerCase();
+    if(t==='-inf' || t==='-infinity' || t==='-∞') return -Infinity;
+    var v = parseFloat(text);
+    return isNaN(v) ? null : v;
+  }
+  function syncMixerDbField(dbInput, linearVal){
+    if(dbInput) dbInput.value = formatDb(linearToDb(linearVal));
+  }
   document.querySelectorAll('.mixer-vol[data-mixer-chan]').forEach(function(inp){
+    var c = parseInt(inp.getAttribute('data-mixer-chan'), 10);
+    var dbInput = document.querySelector('.mixer-db[data-mixer-chan="'+c+'"]');
+    syncMixerDbField(dbInput, parseFloat(inp.value));
     inp.addEventListener('input', function(){
-      setChannelVolume(parseInt(inp.getAttribute('data-mixer-chan'), 10), parseFloat(inp.value));
+      var v = parseFloat(inp.value);
+      setChannelVolume(c, v);
+      syncMixerDbField(dbInput, v);
+    });
+    if(dbInput) dbInput.addEventListener('change', function(){
+      var db = parseDbText(dbInput.value);
+      if(db===null){ syncMixerDbField(dbInput, parseFloat(inp.value)); return; } // unparseable — revert rather than guess
+      var v = Math.max(parseFloat(inp.min), Math.min(parseFloat(inp.max), dbToLinear(db)));
+      inp.value = v;
+      setChannelVolume(c, v);
+      syncMixerDbField(dbInput, v); // reformats to the actual (possibly clamped) value
     });
   });
-  document.getElementById('mixerMasterVol').addEventListener('input', function(e){
-    setMasterVolume(parseFloat(e.target.value));
+  var mixerMasterVol = document.getElementById('mixerMasterVol');
+  var mixerMasterDb = document.getElementById('mixerMasterDb');
+  syncMixerDbField(mixerMasterDb, parseFloat(mixerMasterVol.value));
+  mixerMasterVol.addEventListener('input', function(e){
+    var v = parseFloat(e.target.value);
+    setMasterVolume(v);
+    syncMixerDbField(mixerMasterDb, v);
+  });
+  mixerMasterDb.addEventListener('change', function(){
+    var db = parseDbText(mixerMasterDb.value);
+    if(db===null){ syncMixerDbField(mixerMasterDb, parseFloat(mixerMasterVol.value)); return; }
+    var v = Math.max(parseFloat(mixerMasterVol.min), Math.min(parseFloat(mixerMasterVol.max), dbToLinear(db)));
+    mixerMasterVol.value = v;
+    setMasterVolume(v);
+    syncMixerDbField(mixerMasterDb, v);
   });
   function readAnalyserPeak(analyser){
     if(!analyser) return 0;
@@ -2672,10 +2847,11 @@
     setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
   }
   // Encodes any AudioBuffer as a 16-bit PCM WAV Blob. Shared by the Sampler
-  // Mode WAV export below and the Project JSON export further down (which
-  // embeds uploaded — non-preset — Source Samples as WAV data URLs, since
-  // decodeAudioData doesn't keep the original compressed file bytes around
-  // to re-embed verbatim).
+  // Mode WAV export below and packageSourceSamplesAsZip further down (the
+  // Source Samples panel's "Package Samples" button) — decodeAudioData
+  // doesn't keep the original compressed file's bytes around, so re-writing
+  // as WAV from the decoded PCM is the only way to hand any of these back
+  // as real files, regardless of what format they were loaded from.
   function audioBufferToWavBlob(buffer){
     var numCh = buffer.numberOfChannels, len = buffer.length, sr = buffer.sampleRate;
     var blockAlign = numCh*2, dataSize = len*blockAlign;
@@ -2698,6 +2874,156 @@
     }
     return new Blob([view.buffer], {type:'audio/wav'});
   }
+
+  // --- Package Samples: a from-scratch, dependency-free .zip writer (STORE
+  // method — raw bytes, no compression) so "download all my Source Samples
+  // as files" doesn't need pulling in a third-party zip library just for
+  // this one button, keeping this page's only external dependency its own
+  // font file. Real Ogg Vorbis encoding isn't something a browser can do
+  // natively either (no built-in encoder, only decoding) — encoding to
+  // proper .ogg would mean shipping a whole WASM codec, so this writes
+  // 16-bit PCM .wav instead (same encoder as the ⇩ WAV mixdown button
+  // above) and probeSourceSample below accepts either extension when
+  // looking for a slot's file, so a packaged .wav dropped into
+  // ASSETS/SourceSamples/ still "just works" next time this page opens. ---
+  var CRC32_TABLE = (function(){
+    var table = new Uint32Array(256);
+    for(var n=0;n<256;n++){
+      var c = n;
+      for(var k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1);
+      table[n] = c>>>0;
+    }
+    return table;
+  })();
+  function crc32(bytes){
+    var crc = 0xFFFFFFFF;
+    for(var i=0;i<bytes.length;i++) crc = CRC32_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  }
+  // MS-DOS date/time fields the zip format itself requires per entry —
+  // just "when this was packaged", not meaningful metadata for audio files,
+  // so today's date/time is fine.
+  function dosDateTime(date){
+    return {
+      time: ((date.getHours()&0x1F)<<11) | ((date.getMinutes()&0x3F)<<5) | ((date.getSeconds()>>1)&0x1F),
+      date: (((date.getFullYear()-1980)&0x7F)<<9) | (((date.getMonth()+1)&0xF)<<5) | (date.getDate()&0x1F)
+    };
+  }
+  // entries: [{name, data:Uint8Array}]. Builds a minimal, valid PKZIP
+  // archive by hand: one local file header + raw data per entry, followed
+  // by the central directory and its end-of-central-directory record —
+  // see e.g. the PKZIP APPNOTE.TXT format spec for the field layout below.
+  function buildZipBlob(entries){
+    var encoder = new TextEncoder();
+    var localParts = [], centralParts = [], offset = 0, centralSize = 0;
+    var dt = dosDateTime(new Date());
+    entries.forEach(function(entry){
+      var nameBytes = encoder.encode(entry.name);
+      var data = entry.data;
+      var crc = crc32(data);
+      var lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true);
+      lh.setUint16(4, 20, true); lh.setUint16(6, 0, true); lh.setUint16(8, 0, true);
+      lh.setUint16(10, dt.time, true); lh.setUint16(12, dt.date, true);
+      lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true);
+      lh.setUint16(26, nameBytes.length, true); lh.setUint16(28, 0, true);
+      localParts.push(new Uint8Array(lh.buffer), nameBytes, data);
+
+      var ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true);
+      ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0, true); ch.setUint16(10, 0, true);
+      ch.setUint16(12, dt.time, true); ch.setUint16(14, dt.date, true);
+      ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true);
+      ch.setUint16(28, nameBytes.length, true); ch.setUint16(30, 0, true); ch.setUint16(32, 0, true);
+      ch.setUint16(34, 0, true); ch.setUint16(36, 0, true); ch.setUint32(38, 0, true);
+      ch.setUint32(42, offset, true);
+      var chBytes = new Uint8Array(ch.buffer);
+      centralParts.push(chBytes, nameBytes);
+      centralSize += chBytes.length + nameBytes.length;
+
+      offset += 30 + nameBytes.length + data.length;
+    });
+    var eocd = new DataView(new ArrayBuffer(22));
+    eocd.setUint32(0, 0x06054b50, true);
+    eocd.setUint16(4, 0, true); eocd.setUint16(6, 0, true);
+    eocd.setUint16(8, entries.length, true); eocd.setUint16(10, entries.length, true);
+    eocd.setUint32(12, centralSize, true); eocd.setUint32(16, offset, true);
+    eocd.setUint16(20, 0, true);
+    return new Blob(localParts.concat(centralParts, [new Uint8Array(eocd.buffer)]), {type:'application/zip'});
+  }
+  // Re-encodes every populated slot's already-decoded PCM as .wav, numbered
+  // to match the fixed-filename convention probeSourceSample expects
+  // (0.wav, 1.wav, …) — so the zip's contents can be dropped straight into
+  // ASSETS/SourceSamples/ with no renaming, replacing/filling in whichever
+  // slots they're numbered for.
+  function packageSourceSamplesAsZip(){
+    var populated = sourceSamples.map(function(s,i){ return s ? i : null; }).filter(function(i){ return i!==null; });
+    if(populated.length===0){ flashStatus('sourceSamplesStatus', 'No samples loaded — nothing to package'); return; }
+    flashStatus('sourceSamplesStatus', 'Packaging…');
+    var entries = populated.map(function(i){
+      return audioBufferToWavBlob(sourceSamples[i].buffer).arrayBuffer().then(function(buf){
+        return { name: i+'.wav', data: new Uint8Array(buf) };
+      });
+    });
+    Promise.all(entries).then(function(files){
+      downloadBlob(buildZipBlob(files), (song.meta.name||'source-samples')+'-source-samples.zip');
+      flashStatus('sourceSamplesStatus', 'Downloaded '+files.length+' sample'+(files.length===1?'':'s'));
+    }).catch(function(err){
+      console.error('Could not package Source Samples:', err);
+      flashStatus('sourceSamplesStatus', 'Packaging failed — see console');
+    });
+  }
+  // Load: decode a local audio file straight into whichever slot's Load
+  // button was clicked (set just before sourceSampleLoadInput.click() in
+  // the delegated #legend handler above). Session only, same as the file
+  // input's own comment up in the markup explains — Package Samples is the
+  // way to keep it. Overwrites whatever was already in that slot; any
+  // instrument still pointed at it gets its trim clamped to fit the new
+  // audio's length rather than reset outright, so a still-valid Start/End
+  // survives a same-length swap.
+  // Clear Samples: wipes every slot from memory and resets the Start/End +
+  // ADSR that were tuned against them, back to the same defaults each
+  // instrument's sampler starts with (see the song.instruments.forEach
+  // above). Doesn't touch sourceIndex/loop/Transpose/polyphonic/voiceCap —
+  // only what actually depended on the specific audio that's now gone.
+  // Files on disk are untouched — a reload re-probes ASSETS/SourceSamples/
+  // same as any other load, so this is really "reset this session", not
+  // "delete anything permanent".
+  function clearAllSourceSamples(){
+    if(!confirm('Clear all loaded samples and reset every instrument\'s Start/End and ADSR? Files on disk are untouched, but this can\'t be undone for the current session.')) return;
+    for(var i=0;i<SOURCE_SAMPLE_SLOTS;i++) sourceSamples[i] = null;
+    song.instruments.forEach(function(ins){
+      var sp = ins.sampler;
+      sp.sourceIndex = null;
+      sp.startSec = 0; sp.endSec = 0;
+      sp.attack = 0.005; sp.decay = 0.08; sp.sustain = 0.7; sp.release = 0.15;
+    });
+    renderSourceSamplesPanel();
+    flashStatus('sourceSamplesStatus', 'Cleared all samples');
+  }
+  var sourceSampleLoadTargetSlot = null;
+  document.getElementById('sourceSampleLoadInput').addEventListener('change', function(e){
+    var file = e.target.files[0];
+    var slot = sourceSampleLoadTargetSlot;
+    e.target.value = ''; // so picking the exact same file again still fires 'change'
+    sourceSampleLoadTargetSlot = null;
+    if(!file || slot===null) return;
+    ensureAudioContext();
+    file.arrayBuffer().then(function(buf){ return ac.decodeAudioData(buf); }).then(function(audioBuf){
+      sourceSamples[slot] = { name:file.name.replace(/\.[^.]+$/,''), url:null, buffer:audioBuf, duration:audioBuf.duration, waveformCache:computeWaveformCache(audioBuf), comments:'' };
+      song.instruments.forEach(function(ins){
+        var sp = ins.sampler;
+        if(sp.sourceIndex!==slot) return;
+        if(sp.endSec > audioBuf.duration) sp.endSec = audioBuf.duration;
+        if(sp.startSec >= sp.endSec) sp.startSec = Math.max(0, sp.endSec-0.01);
+      });
+      renderSourceSamplesPanel(); // also refreshes each instrument row's "current source" label
+      flashStatus('sourceSamplesStatus', 'Loaded into slot '+slot+' (session only — Package Samples to keep it)');
+    }).catch(function(err){
+      console.error('Could not load sample file:', err);
+      flashStatus('sourceSamplesStatus', 'Could not decode that file — see console');
+    });
+  });
 
   // --- Sampler Mode WAV export: a from-scratch OfflineAudioContext replay
   // of one full pass through the song's own order list, deterministic and
@@ -2838,6 +3164,7 @@
       masterVolume: masterVolume,
       mutedChannels: mutedChannels.slice(),
       mutedInstruments: mutedInstruments.slice(),
+      refPitchEnabled: document.getElementById('samplerRefPitchToggle').checked,
       sourceSamples: sourceSamplesOut,
       instruments: song.instruments.map(function(ins){ return ins.sampler; }),
       // Page metadata — kept here too (rather than only in the Furnace
@@ -2883,6 +3210,7 @@
     samplerModeEnabled = !!project.samplerModeEnabled;
     document.getElementById('samplerModeToggle').checked = samplerModeEnabled;
     syncSamplerModeLabel();
+    syncModeVisibility();
     document.getElementById('field-song').outerHTML = songFieldHTML(); // Song panel's tail reads "SAMPLER MODE" instead of Game Boy/tuning/format while this is on
     (project.mutedChannels||[]).forEach(function(m,c){ mutedChannels[c]=!!m; setChannelMute(c,!!m); });
     (project.mutedInstruments||[]).forEach(function(m,i){
@@ -2894,13 +3222,16 @@
       if(mutedInstruments[i]) killSamplerVoicesForInstrument(i);
     });
     renderPatternTable(); // reflect any restored mutedInstruments in the currently-visible cells
+    if(typeof project.refPitchEnabled==='boolean') document.getElementById('samplerRefPitchToggle').checked = project.refPitchEnabled;
     (project.channelVolume||[]).forEach(function(v,c){
       channelVolume[c]=v; setChannelVolume(c,v);
       var sl = document.querySelector('.mixer-vol[data-mixer-chan="'+c+'"]'); if(sl) sl.value=v;
+      syncMixerDbField(document.querySelector('.mixer-db[data-mixer-chan="'+c+'"]'), v);
     });
     if(typeof project.masterVolume==='number'){
       setMasterVolume(project.masterVolume);
       document.getElementById('mixerMasterVol').value = project.masterVolume;
+      syncMixerDbField(document.getElementById('mixerMasterDb'), project.masterVolume);
     }
     // Page metadata — every field optional/backward-compatible, so a
     // Project JSON exported before these existed (or hand-written without
@@ -2949,12 +3280,23 @@
         if(sp.rootNote!==undefined && sp.transpose===undefined) sp.transpose = A_REF_NOTE - sp.rootNote;
         delete sp.rootNote; // don't leave the old field sitting unused on the merged sampler object
         song.instruments[i].sampler = Object.assign({}, song.instruments[i].sampler, sp);
+        // instrumentsFieldHTML only rendered this once at page load, well
+        // before any restore — the Instruments table's own Transpose
+        // display needs an explicit refresh here or it keeps showing
+        // whatever it started with (0) regardless of what just got merged
+        // in, until something else (the +/- buttons) happens to touch it.
+        var transposeEl = document.getElementById('insTransposeVal'+i);
+        if(transposeEl) transposeEl.textContent = formatTranspose(song.instruments[i].sampler.transpose);
       });
       renderSourceSamplesPanel(); // also refreshes each instrument row's "current source" label
     });
   }
-  function flashProjectIOStatus(msg){
-    var el = document.getElementById('projectIOStatus');
+  // elId-parameterized so the same fade-after-3s status-line behaviour can
+  // be reused for other small async actions elsewhere (e.g. the Source
+  // Samples panel's Package Samples/Load buttons) without a copy of this
+  // function per status element.
+  function flashStatus(elId, msg){
+    var el = document.getElementById(elId);
     el.textContent = msg;
     setTimeout(function(){ if(el.textContent===msg) el.textContent=''; }, 3000);
   }
@@ -2972,7 +3314,7 @@
     }).catch(function(err){
       console.error('Project export failed:', err);
       ta.value = '';
-      flashProjectIOStatus('Export failed — see console');
+      flashStatus('projectIOStatus', 'Export failed — see console');
     });
   }
   function closeProjectModal(){
@@ -2988,12 +3330,12 @@
     var ta = document.getElementById('projectJsonText');
     function fallbackCopy(){
       ta.focus(); ta.select();
-      try{ document.execCommand('copy'); flashProjectIOStatus('Copied to clipboard'); }
-      catch(e){ flashProjectIOStatus('Copy failed — select the text and copy manually'); }
+      try{ document.execCommand('copy'); flashStatus('projectIOStatus', 'Copied to clipboard'); }
+      catch(e){ flashStatus('projectIOStatus', 'Copy failed — select the text and copy manually'); }
     }
     if(navigator.clipboard && navigator.clipboard.writeText){
       navigator.clipboard.writeText(ta.value).then(function(){
-        flashProjectIOStatus('Copied to clipboard');
+        flashStatus('projectIOStatus', 'Copied to clipboard');
       }).catch(fallbackCopy);
     } else {
       fallbackCopy();
@@ -3006,12 +3348,12 @@
     var text = document.getElementById('projectJsonText').value;
     var parsed;
     try{ parsed = JSON.parse(text); }
-    catch(err){ flashProjectIOStatus('Invalid JSON — see console'); console.error('Project import failed:', err); return; }
+    catch(err){ flashStatus('projectIOStatus', 'Invalid JSON — see console'); console.error('Project import failed:', err); return; }
     applyProjectState(parsed).then(function(){
-      flashProjectIOStatus('Project imported');
+      flashStatus('projectIOStatus', 'Project imported');
     }).catch(function(err){
       console.error('Project import failed:', err);
-      flashProjectIOStatus('Import failed — see console');
+      flashStatus('projectIOStatus', 'Import failed — see console');
     });
   });
 
@@ -3486,13 +3828,23 @@
     var sp = song.instruments[samplerModalInsIndex].sampler;
     var val = e.target.value;
     sp.sourceIndex = val==='' ? null : parseInt(val,10);
-    if(sp.sourceIndex!==null){ sp.startSec = 0; sp.endSec = sourceSamples[sp.sourceIndex].duration; }
+    sp.startSec = 0;
+    sp.endSec = sp.sourceIndex!==null ? sourceSamples[sp.sourceIndex].duration : 0;
     redrawSamplerModalWave();
     refreshInstrumentSamplerButtons();
   });
   document.getElementById('samplerTranspose').addEventListener('input', function(e){
     var v = parseFloat(e.target.value);
     song.instruments[samplerModalInsIndex].sampler.transpose = isNaN(v) ? 0 : v;
+  });
+  // 'change' (not 'input') so this fires once per committed value — the
+  // native number input's own up/down arrows fire it immediately on each
+  // click, but typing only fires it on blur/Enter, avoiding a preview per
+  // keystroke while composing a multi-digit value. triggerSamplerPreviewWithRefTone
+  // is defined further down but hoisted, same as other forward references
+  // in this file.
+  document.getElementById('samplerTranspose').addEventListener('change', function(){
+    if(samplerModalInsIndex!==null) triggerSamplerPreviewWithRefTone(samplerModalInsIndex);
   });
   document.getElementById('samplerLoopToggle').addEventListener('change', function(e){
     song.instruments[samplerModalInsIndex].sampler.loop = e.target.checked;
@@ -3596,6 +3948,13 @@
     sp.endSec = Math.min(maxEnd, Math.max(v, sp.startSec+0.01));
     redrawSamplerModalWave();
   });
+  document.getElementById('samplerResetTrimBtn').addEventListener('click', function(){
+    var sp = song.instruments[samplerModalInsIndex].sampler;
+    var s = currentSamplerModalSample();
+    if(!s) return;
+    sp.startSec = 0; sp.endSec = s.buffer.duration;
+    redrawSamplerModalWave();
+  });
   // Preview: a one-shot at a neutral reference pitch (A_REF_NOTE) through
   // the current trim/ADSR/loop/Transpose settings — hear exactly what's
   // configured, including the Transpose correction, on the dedicated
@@ -3622,10 +3981,14 @@
     samplerPreviewVoice.finished = true;
     samplerPreviewVoice = null;
   }
+  // Returns the real-world seconds this preview will actually sound for
+  // (null if it didn't start at all — no source assigned), so
+  // playReferencePitchTone below can be timed to match it exactly rather
+  // than guessing a fixed length.
   function previewSamplerInstrument(insIndex){
     var ins = song.instruments[insIndex], sp = ins.sampler;
     var srcSample = sourceSamples[sp.sourceIndex];
-    if(!srcSample) return;
+    if(!srcSample) return null;
     ensureAudioContext();
     if(!previewAc) previewAc = new (window.AudioContext||window.webkitAudioContext)();
     if(previewAc.state!=='running') previewAc.resume();
@@ -3641,6 +4004,7 @@
     gainNode.gain.linearRampToValueAtTime(sustainLevel, when+sp.attack+sp.decay);
     node.connect(gainNode); gainNode.connect(previewAc.destination);
     var fakeVoice = { gainNode:gainNode, source:node, finished:false, insIndex:insIndex };
+    var totalDur;
     if(sp.loop){
       node.loop = true; node.loopStart = sp.startSec; node.loopEnd = sp.endSec;
       node.start(when, sp.startSec);
@@ -3648,8 +4012,10 @@
       gainNode.gain.setValueAtTime(sustainLevel, when+holdSec);
       gainNode.gain.linearRampToValueAtTime(0, when+holdSec+sp.release);
       node.stop(when+holdSec+sp.release+0.05);
+      totalDur = holdSec + sp.release + 0.05;
     } else {
       node.start(when, sp.startSec, sp.endSec-sp.startSec);
+      totalDur = (sp.endSec-sp.startSec) / node.playbackRate.value; // playbackRate speeds up/slows down real elapsed time, not just pitch
     }
     node.onended = function(){ fakeVoice.finished = true; if(samplerPreviewVoice===fakeVoice) samplerPreviewVoice = null; };
     samplerPreviewVoice = fakeVoice;
@@ -3657,9 +4023,50 @@
       kind:'voice', sourceIndex: sp.sourceIndex, voice: fakeVoice, ctxRef: previewAc, startedAtCtx: when,
       offsetSec: sp.startSec, rate: 1, loop: sp.loop, loopStart: sp.startSec, loopEnd: sp.endSec
     });
+    return totalDur;
+  }
+  // Reference Pitch: a plain sine tone at this Sampler system's own neutral
+  // pitch (A_REF_NOTE — the same "Transpose 0" reference samplerPlaybackRate
+  // and previewSamplerInstrument already use), at -8dB so it doesn't fight
+  // the sample for attention. Runs alongside previewSamplerInstrument on the
+  // same previewAc, entirely independent of it — this is just a tuning
+  // fork, not shaped by that instrument's ADSR/loop — but timed to match
+  // the sample preview's own real-world length (durationSec, from
+  // previewSamplerInstrument's return value) so it doesn't linger after the
+  // sample stops, or cut off while it's still sounding.
+  function playReferencePitchTone(durationSec){
+    if(!previewAc) previewAc = new (window.AudioContext||window.webkitAudioContext)();
+    if(previewAc.state!=='running') previewAc.resume();
+    var when = previewAc.currentTime;
+    var osc = previewAc.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = noteToFreq(A_REF_NOTE, song.meta.tuning);
+    var gainNode = previewAc.createGain();
+    var peak = Math.pow(10, -8/20); // -8dB
+    var fadeSec = Math.min(0.01, durationSec/4); // guards against a fade longer than a very short preview
+    var holdSec = Math.max(fadeSec*2, durationSec);
+    gainNode.gain.setValueAtTime(0, when);
+    gainNode.gain.linearRampToValueAtTime(peak, when+fadeSec);
+    gainNode.gain.setValueAtTime(peak, when+holdSec-fadeSec);
+    gainNode.gain.linearRampToValueAtTime(0, when+holdSec);
+    osc.connect(gainNode); gainNode.connect(previewAc.destination);
+    osc.start(when);
+    osc.stop(when+holdSec+0.02);
+  }
+  // Shared by the Sampler modal's own ▶ Preview/Transpose field and the
+  // Instruments table's Transpose −/+ buttons — same "preview it, and play
+  // the reference tone too if that's ticked" behaviour regardless of which
+  // control triggered it. samplerRefPitchToggle lives in the modal (there's
+  // only one, not per-instrument), so it reads as a general "do I want the
+  // comparison tone right now" preference rather than something scoped to
+  // whichever instrument's modal happens to be open.
+  function triggerSamplerPreviewWithRefTone(insIndex){
+    var durationSec = previewSamplerInstrument(insIndex);
+    if(durationSec!==null && document.getElementById('samplerRefPitchToggle').checked) playReferencePitchTone(durationSec);
   }
   document.getElementById('samplerPreviewBtn').addEventListener('click', function(){
-    if(samplerModalInsIndex!==null) previewSamplerInstrument(samplerModalInsIndex);
+    if(samplerModalInsIndex===null) return;
+    triggerSamplerPreviewWithRefTone(samplerModalInsIndex);
   });
   document.getElementById('samplerPolyToggle').addEventListener('change', function(e){
     song.instruments[samplerModalInsIndex].sampler.polyphonic = e.target.checked;
@@ -3973,6 +4380,15 @@
     if(samplerBtn) openSamplerModal(parseInt(samplerBtn.getAttribute('data-sampler-ins'), 10));
     var commentsBtn = e.target.closest('[data-comments-slot]');
     if(commentsBtn) openSampleCommentsModal(parseInt(commentsBtn.getAttribute('data-comments-slot'), 10));
+    var packageBtn = e.target.closest('#packageSamplesBtn');
+    if(packageBtn) packageSourceSamplesAsZip();
+    var clearBtn = e.target.closest('#clearSamplesBtn');
+    if(clearBtn) clearAllSourceSamples();
+    var loadSlotBtn = e.target.closest('[data-load-slot]');
+    if(loadSlotBtn){
+      sourceSampleLoadTargetSlot = parseInt(loadSlotBtn.getAttribute('data-load-slot'), 10);
+      document.getElementById('sourceSampleLoadInput').click();
+    }
   });
 
 
