@@ -100,6 +100,15 @@
   .cover-art-wrap{width:240px;flex:none;}
   #coverArt{width:240px;height:240px;background:var(--surface-deep);border:1px solid var(--edge);border-radius:2px;
     display:block;image-rendering:pixelated;image-rendering:crisp-edges;cursor:pointer;}
+  /* Fixed at 280px on purpose (not grown to fit content) — reading an
+     explanation should never require moving the mouse off whatever's being
+     hovered just to scroll the sidebar. That means every EXPLAIN/cell-
+     inspector entry has to fit inside this box unscrolled: budget ~260
+     characters of visible text (tags not counted, so N()/VR()/KW() wrapper
+     markup is free) per entry, 1-2 short paragraphs, and if there's a CODE
+     block treat it as costing ~50 of that budget on its own. If this height
+     value ever changes, re-check/rewrite the entries against the new budget
+     — don't just widen the box to swallow longer AI-drafted text. */
   .explainer{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:10px 12px;
     height:280px;overflow-y:auto;flex:none;}
   .explain-title{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;
@@ -205,7 +214,7 @@
   .sampler-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;
     display:flex;align-items:center;justify-content:center;}
   .sampler-modal{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:16px;
-    width:520px;max-width:92vw;display:flex;flex-direction:column;gap:10px;font-size:15px;color:var(--ink);}
+    width:650px;max-width:92vw;display:flex;flex-direction:column;gap:10px;font-size:15px;color:var(--ink);}
   .sampler-modal-head{display:flex;align-items:center;justify-content:space-between;font-size:17px;}
   .sampler-modal-head button{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);cursor:pointer;padding:2px 8px;}
   .sampler-modal-head-actions{display:flex;align-items:center;gap:8px;}
@@ -223,9 +232,9 @@
   .sampler-row label{display:flex;align-items:center;gap:6px;color:var(--dim);}
   .sampler-row select{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:14px;}
   .sampler-row input[type=number]{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:14px;padding:2px 4px;}
+  .sampler-adsr-canvas{display:block;width:100%;height:100px;background:var(--surface-deep);border:1px solid var(--edge);cursor:default;}
   .sampler-adsr label{flex-direction:column;align-items:flex-start;gap:2px;}
   .sampler-adsr input[type=range]{width:100px;}
-  .sampler-adsr-canvas{display:block;width:100%;height:50px;background:var(--surface-deep);border:1px solid var(--edge);}
   .sampler-adsr .sampler-val{color:var(--ink);font-family:var(--mono);}
 
   /* Mixer: per-channel + master volume sliders with a live peak meter,
@@ -397,7 +406,7 @@
       </div>
     </div>
     <div class="sampler-wave-wrap">
-      <canvas id="samplerWaveCanvas" class="sampler-wave-canvas" width="480" height="100"></canvas>
+      <canvas id="samplerWaveCanvas" class="sampler-wave-canvas" width="600" height="100"></canvas>
       <div class="sampler-trim-shade" id="samplerTrimShadeLeft" style="width:0"></div>
       <div class="sampler-trim-shade" id="samplerTrimShadeRight" style="left:100%;width:0"></div>
       <div class="sampler-handle" id="samplerHandleStart" title="drag to set sample start"></div>
@@ -412,7 +421,7 @@
       <label>Root note <select id="samplerRootNote" title="the note this sample plays at its original recorded speed/pitch"></select></label>
       <label class="tint-toggle"><input type="checkbox" id="samplerLoopToggle" title="loop the trimmed region while the note is held"> Loop</label>
     </div>
-    <canvas id="samplerADSRCanvas" class="sampler-adsr-canvas" width="480" height="50" title="attack/decay/sustain/release shape (sustain segment shown at a fixed nominal width — actual hold time depends on the note)"></canvas>
+    <canvas id="samplerADSRCanvas" class="sampler-adsr-canvas" width="600" height="100" title="attack/decay/sustain/release shape — drag the amber points to adjust (sustain segment shown at a fixed nominal width — actual hold time depends on the note)"></canvas>
     <div class="sampler-row sampler-adsr">
       <label>Attack <input type="range" id="samplerAttack" min="0" max="1" step="0.005"><span class="sampler-val" id="samplerAttackVal"></span></label>
       <label>Decay <input type="range" id="samplerDecay" min="0" max="1" step="0.005"><span class="sampler-val" id="samplerDecayVal"></span></label>
@@ -521,15 +530,15 @@
   // this page. Codes outside this set still parse fine — normalizeCell
   // keeps every effect — they just don't have a friendly name yet.
   var CORE_EFFECTS = {
-    0: 'Arpeggio — cycles rapidly between this note and two offsets (nibbles below) each tick, faking a chord on one channel.',
-    1: 'Pitch Up — slides pitch upward continuously by the given amount each tick, until cleared with value 00 or a plain new note.',
-    2: 'Pitch Down — slides pitch downward continuously by the given amount each tick, until cleared with value 00 or a plain new note.',
-    3: 'Tone Portamento — glides smoothly from whatever note was playing to this row\'s new note, at the given speed, instead of retriggering.',
-    4: 'Vibrato — oscillates pitch using the nibbles below as speed/depth (max depth ±1 semitone).',
-    8: 'Panning — sets this channel\'s LEFT and RIGHT volume independently (nibbles below: left/right, 0–15 each) — not a single left↔right position.',
+    0: 'Arpeggio — cycles rapidly between this note and two offsets (nibbles below), faking a chord on one channel.',
+    1: 'Pitch Up — slides pitch upward each tick until cleared with 00 or a new note.',
+    2: 'Pitch Down — slides pitch downward each tick until cleared with 00 or a new note.',
+    3: 'Tone Portamento — glides from the prior note to this row\'s note at the given speed, instead of retriggering.',
+    4: 'Vibrato — oscillates pitch using the nibbles below as speed/depth (max ±1 semitone).',
+    8: 'Panning — sets LEFT/RIGHT volume independently (nibbles: left/right, 0–15 each).',
     10: 'Volume Slide — ramps this channel\'s volume up or down each tick (nibbles below).',
     11: 'Position Jump — after this row, playback continues at a different order position.',
-    13: 'Pattern Break — ends the current pattern early and jumps to the given row of the next order.'
+    13: 'Pattern Break — ends the pattern early and jumps to the given row of the next order.'
   };
 
   function buildSongModel(mod){
@@ -1285,9 +1294,9 @@
       var absRow = currentOrderPos*song.meta.patternLength + rowIndex;
       var rowDur = song.meta.speeds[0] / song.meta.tickRate;
       var vt = song.meta.virtualTempo;
-      var vtNote = (vt[0]===vt[1]) ? '' : ' (approximate — virtual tempo '+vt[0]+'/'+vt[1]+' isn\'t modeled here yet, so timing may drift slightly from Furnace\'s own playback)';
+      var vtNote = (vt[0]===vt[1]) ? '' : ' (approx — virtual tempo not modeled yet, may drift)';
       return { title:'Row 0x'+hex2(rowIndex)+' · order '+currentOrderPos,
-        html: P('At the current tempo (speed '+N(song.meta.speeds[0])+' ticks/row, tick rate '+N(song.meta.tickRate.toFixed(2))+'Hz), this row lands at roughly '+N((absRow*rowDur).toFixed(2)+'s')+' into the piece'+vtNote+'. Click it to jump playback here.') };
+        html: P('At speed '+N(song.meta.speeds[0])+' ticks/row ('+N(song.meta.tickRate.toFixed(2))+'Hz), lands ~'+N((absRow*rowDur).toFixed(2)+'s')+' in'+vtNote+'. Click to jump playback here.') };
     }
     var raw = (currentChannelRows()[chIndex] || {}).rows[rowIndex];
     var ch = song.channels[chIndex];
@@ -1302,48 +1311,48 @@
         var priorNote = findPriorValue(chIndex, rowIndex, 'note');
         if(priorNote===null){
           return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · note',
-            html: P('No note has played on this channel yet within this view.') };
+            html: P('No note yet on this channel in this view.') };
         }
         if(priorNote===NOTE_OFF){
           return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · note',
-            html: P('No note playing — the last event on this channel was a '+esc('NOTE OFF')+'.') };
+            html: P('No note playing — last event here was '+esc('NOTE OFF')+'.') };
         }
         var contName = noteToName(priorNote);
         var contFreq = noteToFreq(priorNote, song.meta.tuning);
         var contIns = findPriorValue(chIndex, rowIndex, 'ins');
         return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · continuing '+contName,
           html: CODE(VR('note')+' = continuation of '+N(contName)+'  (raw '+N(priorNote)+')') +
-            P('Still sounding from an earlier row, not a new note here — ≈ '+N(contFreq.toFixed(2)+'Hz')+'.') +
-            (contIns!==null ? P('Playing on instrument '+N(contIns)+' · '+instrumentShortDesc(contIns)+'.') : '') };
+            P('≈ '+N(contFreq.toFixed(2)+'Hz')+', still sounding from an earlier row.') +
+            (contIns!==null ? P('Instrument '+N(contIns)+' · '+instrumentShortDesc(contIns)+'.') : '') };
       }
       if(cell.noteName==='OFF'){
         return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · NOTE OFF',
-          html: P('Releases whatever note this channel is currently sounding — the Game Boy hardware envelope (or the instrument\'s software envelope) then decays/cuts from here rather than a new pitch starting.') };
+          html: P('Releases the currently sounding note — the envelope decays/cuts from here instead of a new pitch starting.') };
       }
       var freq = noteToFreq(cell.noteRaw, song.meta.tuning);
       var insHolding = cell.instrument!==null ? cell.instrument : findPriorValue(chIndex, rowIndex, 'ins');
       return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · '+cell.noteName,
         html: CODE(VR('note')+' = '+N(cell.noteName)+'  (raw '+N(cell.noteRaw)+')') +
-          P('≈ '+N(freq.toFixed(2)+'Hz')+' at this song\'s tuning ('+N(song.meta.tuning)+'Hz reference).') +
-          (insHolding!==null ? P('Plays on instrument '+N(insHolding)+' · '+instrumentShortDesc(insHolding)+'.') : P('No instrument has been set on this channel yet at this point.')) };
+          P('≈ '+N(freq.toFixed(2)+'Hz')+' (tuning '+N(song.meta.tuning)+'Hz).') +
+          (insHolding!==null ? P('Instrument '+N(insHolding)+' · '+instrumentShortDesc(insHolding)+'.') : P('No instrument set yet on this channel.')) };
     }
     if(field==='ins'){
       if(cell.instrument===null){
         var prior = findPriorValue(chIndex, rowIndex, 'ins');
         return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · instrument',
-          html: P('No instrument change this row — the channel keeps whatever instrument was last triggered'+(prior!==null?' ('+N(prior)+' · '+instrumentShortDesc(prior)+').':' (none set yet in this view).')) };
+          html: P('No change — keeps prior instrument'+(prior!==null?' ('+N(prior)+' · '+instrumentShortDesc(prior)+').':' (none yet).')) };
       }
       return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · instrument '+cell.instrument,
-        html: P('Selects instrument '+N(cell.instrument)+' · '+instrumentShortDesc(cell.instrument)+' for notes on this channel from here on, until the next instrument change.') };
+        html: P('Selects '+N(cell.instrument)+' · '+instrumentShortDesc(cell.instrument)+' from here until the next change.') };
     }
     if(field==='vol'){
       if(cell.volume===null){
         return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · volume',
-          html: P('No per-row volume override — the channel plays at whatever level its instrument\'s envelope and any active volume-slide effect already have it at.') };
+          html: P('No override — plays at whatever level the envelope/volume-slide already set.') };
       }
       return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · volume '+cell.volume,
         html: CODE(VR('volume')+' = '+N(cell.volume)+' / 15') +
-          P('Sets this channel\'s volume to '+N(cell.volume)+' out of 15 (≈'+N(Math.round(cell.volume/15*100))+'%) from this row on, until the next volume cell or a volume-slide effect changes it.') };
+          P(N(cell.volume)+'/15 (≈'+N(Math.round(cell.volume/15*100))+'%) from here until the next volume cell or slide.') };
     }
     if(field==='fx'){
       var e = cell.effects[fxCol];
@@ -1351,8 +1360,8 @@
         return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · effect '+(fxCol+1),
           html: P('No effect in this column this row.') };
       }
-      var meaning = CORE_EFFECTS[e.code] || ('Effect 0x'+hex2(e.code)+' — not one of the core effects this shrine documents yet; still parsed and preserved, just not explained in detail here.');
-      var nibbleLine = (e.code===0||e.code===4||e.code===10) ? P('As two nibbles: high '+N((e.value>>4).toString(16).toUpperCase())+' / low '+N((e.value&0xF).toString(16).toUpperCase())+'.') : '';
+      var meaning = CORE_EFFECTS[e.code] || ('Effect 0x'+hex2(e.code)+' — not documented here yet, but parsed and preserved.');
+      var nibbleLine = (e.code===0||e.code===4||e.code===10) ? P('Nibbles: high '+N((e.value>>4).toString(16).toUpperCase())+' / low '+N((e.value&0xF).toString(16).toUpperCase())+'.') : '';
       return { title:chLabel+' · row 0x'+hex2(rowIndex)+' · effect 0x'+hex2(e.code)+hex2(e.value),
         html: CODE(VR('effect')+' = code '+N('0x'+hex2(e.code))+', value '+N('0x'+hex2(e.value))) +
           P(meaning) + nibbleLine };
@@ -1376,118 +1385,111 @@
   var EXPLAIN = {
     'song': function(){
       return { title:'Song — top-level metadata',
-        html: P('Read straight from the Furnace JSON export\'s '+VR('songInfo')+' object — name, author, album, target system, and the reference tuning ('+N(song.meta.tuning)+'Hz = the frequency treated as A4 when converting note numbers to pitch).') +
-          P('This is the whole export, JSON-parsed and reshaped — no binary parsing involved for this pass (see Future section of the plan for the eventual '+VR('.fur')+' binary parser).') };
+        html: P('From the Furnace export\'s '+VR('songInfo')+' — name, author, album, system, and tuning ('+N(song.meta.tuning)+'Hz = A4).') +
+          P('JSON-parsed and reshaped, no binary parsing yet (a '+VR('.fur')+' parser is a future step).') };
     },
     'comments': function(){
       return { title:'Song Comments — from the composer',
-        html: P('The '+VR('songInfo.comments')+' field from the Furnace JSON export, verbatim — whatever the composer wrote there (notes on the recording process, licensing, credits, anything else worth knowing before you dig into the data below).') };
+        html: P('The composer\'s '+VR('songInfo.comments')+' field, verbatim — recording notes, licensing, credits, anything worth knowing before the data below.') };
     },
     'timing': function(){
       return { title:'Timing — how fast the tracker ticks',
         html: CODE(VR('rowDurationSec')+' = speed / tickRate') +
-          P('Tick rate = '+N(song.meta.tickRate.toFixed(3))+'Hz — the base clock. Speed = '+N(song.meta.speeds.join('/'))+' ticks per row, so each row lasts '+N((song.meta.speeds[0]/song.meta.tickRate*1000).toFixed(1))+'ms. Virtual tempo ('+N(song.meta.virtualTempo.join('/'))+') is a Furnace-specific fine-tune multiplier on top of that.') +
-          P('Order length '+N(song.meta.orderLength)+' × pattern length '+N(song.meta.patternLength)+' rows = the full arrangement length per channel, before any per-channel effect (like a jump/break) changes the path.') };
+          P('Tick rate '+N(song.meta.tickRate.toFixed(3))+'Hz, speed '+N(song.meta.speeds.join('/'))+' ticks/row → '+N((song.meta.speeds[0]/song.meta.tickRate*1000).toFixed(1))+'ms/row. Virtual tempo '+N(song.meta.virtualTempo.join('/'))+' fine-tunes further.') +
+          P('Order length '+N(song.meta.orderLength)+' × pattern length '+N(song.meta.patternLength)+' rows = full arrangement per channel.') };
     },
     'chips': function(){
       return { title:'Chips — the sound hardware being emulated',
-        html: P('One Game Boy chip, contributing all 4 channels below. '+VR('volume')+'/'+VR('panning')+'/'+VR('front/rear')+' are master-bus trims applied to everything this chip outputs — separate from any per-instrument or per-row volume.') };
+        html: P('One Game Boy chip, all 4 channels below. '+VR('volume')+'/'+VR('panning')+' are master-bus trims, separate from per-instrument/per-row volume.') };
     },
     'instruments': function(){
       return { title:'Instruments — GB channel presets',
-        html: P(song.instruments.length+' instruments, each a preset of Game Boy envelope + (optionally) duty-cycle or wavetable settings that a pattern row can trigger by index. Hover a row for that instrument\'s specific envelope.') };
+        html: P(song.instruments.length+' instruments — GB envelope + optional duty-cycle/wavetable settings, triggered by index. Hover a row for its envelope.') };
     },
     'mixer': function(){
       return { title:'Mixer — levels and clipping',
-        html: P('One volume slider per channel plus a master slider, each with a live peak meter fed by an AnalyserNode tapped right off that channel\'s own gain stage — so it reflects whatever\'s actually playing, stems or Sampler Mode alike.') +
-          P('A meter turns red when its peak hits '+esc('98%')+' of full scale — a warning that this channel (or the overall mix) is close to or past digital clipping, which is worth checking before exporting a WAV.') };
+        html: P('Per-channel + master volume, each with a live peak meter tapped off that channel\'s own gain stage.') +
+          P('Meter turns red at 98% of full scale — near/at clipping, worth checking before exporting a WAV.') };
     },
     'mixer-master': function(){
       return { title:'Master — the final output stage',
-        html: P('Every channel sums into this before reaching your speakers (or a WAV export). If the master meter is clipping even with every channel slider under '+esc('100%')+', the channels are adding up louder than the mix bus can carry — turn a few down rather than the master, so individual channels don\'t start clipping into master first.') };
+        html: P('Every channel sums here before output/export. If master clips even with channels under 100%, turn individual channels down rather than master.') };
     },
     'source-samples': function(){
       return { title:'Source Samples — Sampler Mode\'s raw material',
-        html: P('Up to '+N(SOURCE_SAMPLE_SLOTS)+' short audio clips, loaded from '+VR('ASSETS/SourceSamples/manifest.json')+' — an ordered list of filenames, one per slot, each expected to already exist in that folder. There\'s no upload button on purpose: listing a file there is how you confirm it\'s actually in place before the app tries to use it.') +
-          P('Each slot shows its title, any comment notes (click '+KW('Comments')+' to add or read them), and its full waveform — click ▶ to hear it in full. A colored, numbered line spawns over the waveform every time an instrument (or the ▶ button itself) actually plays a snippet of it, fading out with that voice\'s real volume envelope.') +
-          P('An instrument becomes a sampler by pointing at one of these slots via its own '+KW('Sampler')+' button in the Instruments table below — Sampler Mode then plays that clip, pitched to the note being played, instead of this song\'s original Furnace-rendered stem.') };
+        html: P('Up to '+N(SOURCE_SAMPLE_SLOTS)+' clips from '+VR('ASSETS/SourceSamples/manifest.json')+'. No upload button — listing a file there is how you confirm it exists first.') +
+          P('Click ▶ to preview. An instrument points at a slot via its own '+KW('Sampler')+' button below to play it, pitched to the note.') };
     },
     'sampler-col': function(){
       return { title:'Sampler — turn an instrument into a sample player',
-        html: P('Opens that instrument\'s Sampler editor: which Source Sample slot it plays, an exact Start/End trim (drag the waveform\'s handles or type exact seconds), root note, loop toggle, an ADSR envelope (with a live preview of the shape), Polyphonic on/off with a voice cap, and a '+KW('▶ Preview')+' button to hear it at its root note with the current settings.') +
-          P('The label next to the button shows which Source Sample (if any) this instrument currently points at — '+esc('(none)')+' means it stays silent in Sampler Mode until you assign one.') };
+        html: P('Opens the Sampler editor: source slot, Start/End trim, root note, loop, ADSR (live preview), Polyphonic + voice cap, and '+KW('▶ Preview')+'.') +
+          P('Label shows the assigned Source Sample — '+esc('(none)')+' means silent in Sampler Mode until set.') };
     },
     'sample-preview-play': function(){
       return { title:'Preview — hear the raw Source Sample',
-        html: P('Plays this clip in full, start to finish, at its original pitch/speed — independent of any instrument\'s trim, root note, or ADSR. Click again while it\'s playing (the button turns into '+KW('■')+') to stop it early.') };
+        html: P('Plays this clip in full at its original pitch/speed, independent of any instrument\'s settings. Click again ('+KW('■')+') to stop early.') };
     },
     'sample-comments': function(){
       return { title:'Comments — notes about this sample',
-        html: P('Free-text notes about this specific Source Sample — where it came from, licensing, how it\'s meant to be used, anything worth remembering later. Saved into this sample\'s own entry and included in Project JSON, so it travels with the rest of the setup. The first 80 characters show as a preview line under the sample\'s title.') };
+        html: P('Free-text notes on this sample — origin, licensing, usage. Saved with it and included in Project JSON; first 80 characters preview under the title.') };
     },
     'sampler-mode': function(){
       return { title:'Sampler Mode — which engine is actually playing',
-        html: P('ON: instruments with a Source Sample assigned play through the sample-based engine below — real-time triggered playback of the Source Samples, following this song\'s own note/pattern data (pitch-shifted, ADSR-shaped, polyphonic/monophonic per instrument).') +
-          P('OFF: falls back to the original behavior this page started with — the 4 pre-rendered Furnace stems, playing back exactly as exported. Toggling mid-playback re-syncs to the same position in whichever engine you switch to.') +
-          P('This also changes what the '+KW('⇩ WAV')+' button exports, and what the Song panel\'s summary line reads (Game Boy/tuning/format details, or '+esc('SAMPLER MODE')+').') };
+        html: P(KW('ON')+': assigned instruments play via the sample engine — pitch-shifted, ADSR-shaped, per-instrument poly/mono.') +
+          P(KW('OFF')+': falls back to the 4 original Furnace stems. Also changes what '+KW('⇩ WAV')+' exports and the Song summary line.') };
     },
     'project-json': function(){
       return { title:'Project JSON — save and restore the whole Sampler setup',
-        html: P('Opens a text box pre-filled with the current setup as JSON: every instrument\'s Sampler config (source/trim/ADSR/loop/polyphony), mixer levels and mute state, Source Sample comments, page metadata (title/artist/album/comments/licenses/links), and the Theme setting.') +
-          P('Copy it out to save. To restore an earlier one, paste it over the text and click '+KW('Confirm')+' — it re-parses whatever\'s currently in the box, so pasting and editing by hand both work the same way.') +
-          P('Source Samples are always referenced by file path here, never embedded as data — the actual audio files still need to exist under '+VR('ASSETS/SourceSamples/')+'. Saving this as '+VR('ASSETS/lmp-default-proj.json')+' makes it load automatically the next time the page opens.') };
+        html: P('JSON dump of the whole setup: Sampler configs, mixer levels/mutes, sample comments, page metadata, and Theme.') +
+          P('Copy to save; paste + '+KW('Confirm')+' to restore. Samples are referenced by path, never embedded — files must exist under '+VR('ASSETS/SourceSamples/')+'.') };
     },
     'theme': function(){
       return { title:'Theme — Light, Dark, or follow System',
-        html: P(KW('System')+' follows your OS/browser\'s light-or-dark preference automatically. '+KW('Light')+'/'+KW('Dark')+' override that regardless of what your system is set to.') +
-          P('Saved in Project JSON, so a saved setup reopens in the theme it was left in. Most of the page follows the theme, including this Explainer, the panels, and the pattern grid — the Piano Roll and Cover Art visualizations intentionally stay dark in both themes, the same way most audio tools keep waveform/meter displays dark regardless of app-wide theme.') };
+        html: P(KW('System')+' follows your OS/browser. '+KW('Light')+'/'+KW('Dark')+' override it regardless.') +
+          P('Saved in Project JSON. Piano Roll and Cover Art stay dark in both themes, like most audio tools\' waveform displays.') };
     },
     'download-wav': function(){
       return { title:'⇩ WAV — export the mix',
-        html: P('With Sampler Mode ON: renders a fresh offline mixdown of the current Sampler setup (one full loop, honoring every instrument\'s trim/ADSR/polyphony and the current mixer levels/mute state) and downloads it as a '+esc('.wav')+' file. This can take a few seconds for a longer song — the button shows '+esc('Rendering…')+' while it works.') +
-          P('With Sampler Mode OFF: downloads the original Furnace-rendered '+esc('.wav')+' bundled with this track instead, unchanged.') };
+        html: P(KW('ON')+': renders an offline mixdown (trim/ADSR/polyphony/mixer honored) and downloads it as '+esc('.wav')+'. Takes a few seconds.') +
+          P(KW('OFF')+': downloads the original Furnace-rendered '+esc('.wav')+', unchanged.') };
     },
     'piano-roll': function(){
       return { title:'Piano Roll — what\'s sounding right now',
-        html: P('A standard keyboard sized to the pitch range this song actually uses. Any key currently held down lights up in the colour of whichever instrument is playing it — the same colours used everywhere else on this page (pattern-grid tint, instrument swatches).') +
-          P('Clicking a pattern cell, a row number, or an instrument\'s preview button also flashes the relevant key(s) briefly, even when the track isn\'t playing — the same click-to-preview interactions as the Patterns panel below.') +
-          P('CH3 (Noise) is left off the keyboard — its "note" selects a noise-LFSR rate, not a real pitch, so it wouldn\'t mean anything as a lit key. It\'s shown as text in the box on the right instead: the current note value and the instrument playing it.') };
+        html: P('Keyboard sized to this song\'s range. A held key lights up in its instrument\'s colour, same as the pattern grid/swatches.') +
+          P('CH3 (Noise) isn\'t shown as a key — its "note" is a noise rate, not a pitch — it\'s shown as text instead.') };
     },
     'cover-art': function(){
       return { title:'Cover Art — animated, driven by the same triggers as everything else',
-        html: P('A 240×240 pixel-art canvas, dithered down from a native 32×32 buffer with a 4×4 Bayer matrix (the same ordered-dithering technique as the cover art on shrine 0004) for a chunky, retro pixel look rather than a smooth gradient.') +
-          P('Every note trigger — real playback or a preview click from anywhere on this page — fires a jet trail through the clouds, coloured by that note\'s instrument and sized/brightened by its volume. All 4 channels trigger a trail, including Noise, even though Noise doesn\'t appear on the Piano Roll.') +
-          P('Click the canvas itself to save the current frame as a 1600×1600 PNG (a clean 50× upscale of the native 32×32 buffer, so the pixel edges stay crisp rather than blurring).') };
+        html: P('240×240 canvas, dithered from a 32×32 buffer with a 4×4 Bayer matrix, same technique as shrine 0004.') +
+          P('Every note trigger fires a jet trail, coloured/sized by its instrument and volume — all 4 channels, including Noise. Click to save a 1600×1600 PNG.') };
     },
     'wavetables': function(){
       return { title:'Wavetables — custom waveforms for the GB Wave channel',
-        html: P('The Game Boy\'s 3rd channel plays back an arbitrary looping waveform instead of a fixed shape — each wavetable here is '+N('32')+' samples, each a 4-bit value ('+N('0–15')+'). An instrument on the Wave channel points at one of these.') +
-          P('This page doesn\'t synthesize the Wave channel — you\'re hearing Furnace\'s own real recording of it (see the stem playback below), which plays back these exact steps directly. The raw values here are what actually produced that shape.') };
+        html: P('GB channel 3 plays a custom looping waveform — '+N('32')+' samples, 4-bit ('+N('0–15')+') each. An instrument points at one.') +
+          P('Not synthesized here — you\'re hearing Furnace\'s own recording of it; these are the raw values that produced that shape.') };
     },
     'patterns': function(){
       return { title:'Patterns — the actual note data',
-        html: P('All 4 channels shown side by side for one order position at a time — the same whole-song-at-a-glance view Furnace\'s own pattern editor gives you. Each channel has its own independent order list ('+N(song.meta.orderLength)+' positions) pointing at pattern indices, and each pattern is '+N(song.meta.patternLength)+' rows of note/instrument/volume/effect data — same shape Furnace itself dumps in its '+VR('.txt')+' export (\''+esc('NOTE INS VOL FXFX')+'\' per column), which is what this table was verified against.') +
-          P('Row shading follows this song\'s own highlight spacing (every '+N(song.meta.highlights[0])+'/'+N(song.meta.highlights[1])+' rows) — same convention Furnace uses, read from the file rather than assumed.') +
-          P(esc('OFF')+' means "note off" (raw value '+N('253')+' — a sentinel above any real pitch, confirmed against every OFF in the .txt dump). '+esc('...')+' means no note this row; '+esc('..')+' means no instrument/volume; '+esc('....')+' means no effect in that column.') +
-          P('The playhead row highlights here in real time as the real audio plays, mapped from elapsed playback time back onto this data — same as watching it play back inside Furnace.') };
+        html: P('All 4 channels at one order position, like Furnace\'s own view. Each has its own order list ('+N(song.meta.orderLength)+' positions) of '+N(song.meta.patternLength)+'-row patterns.') +
+          P('Row shading follows this song\'s highlights ('+N(song.meta.highlights[0])+'/'+N(song.meta.highlights[1])+'). '+esc('OFF')+' = note off; '+esc('...')+'/'+esc('..')+'/'+esc('....')+' = empty note/ins-vol/effect.') +
+          P('Playhead follows real playback time onto this data, live.') };
     }
   };
   song.channels.forEach(function(ch){
     EXPLAIN['mixer-ch-'+ch.index] = function(){
       return { title:'CH'+ch.index+' volume · '+(GB_ROLE_HINT[ch.index]||''),
-        html: P('Scales this channel\'s output before it reaches the master bus — independent of the mute toggle on the Patterns panel\'s channel header (both multiply together).') };
+        html: P('Scales this channel before the master bus — independent of the mute toggle on the Patterns header (both multiply).') };
     };
     EXPLAIN['chan-'+ch.index] = function(){
       var roleText = {
-        0:'Pulse 1 — a square wave with selectable duty cycle (12.5/25/50/75%) and the GB\'s hardware volume envelope.',
-        1:'Pulse 2 — identical hardware to Pulse 1, just a second independent voice (no frequency-sweep unit, which only Pulse 1 has on real GB hardware).',
-        2:'Wave — plays back a custom 32-sample 4-bit waveform (one of this song\'s wavetables) instead of a fixed shape.',
-        3:'Noise — a pseudo-random LFSR generator instead of a pitched oscillator, typically used for percussion.'
+        0:'Pulse 1 — square wave, selectable duty cycle, GB hardware envelope.',
+        1:'Pulse 2 — same hardware as Pulse 1, second voice (no frequency sweep).',
+        2:'Wave — plays a custom 32-sample 4-bit waveform instead of a fixed shape.',
+        3:'Noise — pseudo-random LFSR generator, typically used for percussion.'
       }[ch.index] || '';
       return { title:'Channel '+ch.index+' · '+(GB_ROLE_HINT[ch.index]||''),
         html: P(roleText) +
-          P('Effect columns: '+N(ch.effectColumns)+' — how many independent effect commands can run on this channel per row.') +
-          P('Click this header to mute/unmute '+esc('CH'+ch.index)+' — handy for isolating one channel to check it in isolation.'+(mutedChannels[ch.index]?' Currently '+LIVE('muted')+'.':'')) };
+          P('Effect columns: '+N(ch.effectColumns)+'. Click header to mute/unmute.'+(mutedChannels[ch.index]?' Currently '+LIVE('muted')+'.':'')) };
     };
   });
   song.wavetables.forEach(function(w, i){
@@ -1499,12 +1501,12 @@
   song.instruments.forEach(function(ins, i){
     EXPLAIN['ins-'+i] = function(){
       var gb = ins.gb || {};
-      var role = ins.waveSynth ? 'wave channel (points at wavetable '+ins.waveSynth.wave1+')' : 'pulse/noise channel (built-in envelope)';
+      var role = ins.waveSynth ? 'wave channel (wavetable '+ins.waveSynth.wave1+')' : 'pulse/noise channel';
       var duty = (ins.macros||[]).filter(function(m){ return m.code===2; })[0];
       return { title:'Instrument '+i+' · '+ins.name,
-        html: CODE(VR('envelope')+' = start at '+N(gb.envVol)+', '+KW(gb.envDir?'count up':'count down')+' every '+N(gb.envLen)+' GB envelope step(s)') +
-          P('Sound length '+N(gb.soundLen)+' (64 = held indefinitely). Software envelope: '+N(gb.softEnv?'yes':'no')+' — when on, Furnace drives the volume itself instead of the GB\'s built-in hardware envelope stepper, which is what lets a Lead voice fade more expressively than raw hardware steps allow.') +
-          P('This is a '+role+'.'+(duty?' Has a fixed duty-cycle macro (value '+N(duty.data[0])+', where 0–3 = 12.5/25/50/75%).':'')) };
+        html: CODE(VR('envelope')+' = start '+N(gb.envVol)+', '+KW(gb.envDir?'up':'down')+' every '+N(gb.envLen)+' step(s)') +
+          P('Sound length '+N(gb.soundLen)+' (64=held). Software envelope: '+N(gb.softEnv?'yes':'no')+'.') +
+          P('This is a '+role+'.'+(duty?' Fixed duty macro '+N(duty.data[0])+' (0–3 = 12.5/25/50/75%).':'')) };
     };
   });
 
@@ -3168,7 +3170,8 @@
   }
 
   var samplerModalInsIndex = null;
-  var samplerDragTarget = null; // 'start' | 'end' | null, while a handle is being dragged
+  var samplerDragTarget = null; // 'start' | 'end' | null, while a trim handle is being dragged
+  var samplerAdsrDragTarget = null; // 'attack' | 'decay' | 'release' | null, while an ADSR graph point is being dragged
 
   function currentSamplerModalSample(){
     if(samplerModalInsIndex===null) return null;
@@ -3201,6 +3204,43 @@
     document.getElementById('samplerStartSecInput').value = sp.startSec.toFixed(3);
     document.getElementById('samplerEndSecInput').value = sp.endSec.toFixed(3);
   }
+  // Same live playhead technique as drawSourceSamplePlayheads (redraw the
+  // static waveform from cache, then one line per matching activeSourcePlayheads
+  // entry), scoped to whichever Source Sample the modal's own instrument is
+  // currently pointed at — so a ▶ Preview click (or this same sample
+  // sounding for real in Sampler Mode) animates on the modal's own, larger
+  // waveform too, not just the small panel strip outside it. Only runs
+  // while the modal is actually open (checked by the RAF loop below) and
+  // repaints the canvas every frame regardless of whether anything's
+  // currently playing, same reasoning as drawSourceSamplePlayheads.
+  function drawSamplerModalPlayhead(){
+    var s = currentSamplerModalSample();
+    if(!s) return; // redrawSamplerModalWave already painted the empty state
+    var canvas = document.getElementById('samplerWaveCanvas');
+    drawWaveformFromCache(canvas, s.waveformCache);
+    var sp = song.instruments[samplerModalInsIndex].sampler;
+    var ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+    activeSourcePlayheads.forEach(function(p){
+      if(p.sourceIndex!==sp.sourceIndex) return;
+      var nowCtx = p.ctxRef.currentTime;
+      var elapsed = (nowCtx - p.startedAtCtx) * p.rate;
+      var posSec = p.offsetSec + elapsed;
+      if(p.loop && p.loopEnd>p.loopStart) posSec = p.loopStart + ((posSec-p.loopStart) % (p.loopEnd-p.loopStart));
+      if(posSec<0 || posSec>s.buffer.duration) return;
+      var x = (posSec/s.buffer.duration) * w;
+      var alpha, color;
+      if(p.kind==='voice'){
+        alpha = Math.max(0, Math.min(1, p.voice.gainNode.gain.value));
+        var ins = song.instruments[p.voice.insIndex];
+        color = ins ? ins.color : '#c9973a';
+      } else {
+        alpha = 1; color = '#e7e7e7';
+      }
+      ctx.strokeStyle = hexToRgba(color, alpha);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+    });
+  }
   function updateSamplerADSRLabels(){
     document.getElementById('samplerAttackVal').textContent = parseFloat(document.getElementById('samplerAttack').value).toFixed(3)+'s';
     document.getElementById('samplerDecayVal').textContent = parseFloat(document.getElementById('samplerDecay').value).toFixed(3)+'s';
@@ -3212,31 +3252,72 @@
   // nominal width purely so the plateau is visible at all, not because
   // that width means anything.
   var SAMPLER_ADSR_NOMINAL_HOLD_SEC = 0.3;
+  // A separate graph again (not overlaid on the waveform — the two timelines
+  // don't actually correspond: this one is the envelope's own attack/decay/
+  // hold/release seconds, the waveform's is the sample's real duration).
+  // The x-axis is a FIXED total (each slider's own max + the nominal hold),
+  // not "whatever the current values add up to" — a dynamic axis would
+  // rescale, and therefore move every point, on every drag, which fights
+  // the user's cursor. Read once: the sliders' min/max attributes are
+  // static markup, not runtime state.
+  var SAMPLER_ADSR_AXIS_TOTAL_SEC = (parseFloat(document.getElementById('samplerAttack').max)||1)
+    + (parseFloat(document.getElementById('samplerDecay').max)||1)
+    + SAMPLER_ADSR_NOMINAL_HOLD_SEC
+    + (parseFloat(document.getElementById('samplerRelease').max)||2);
+  function adsrXAt(t, w){ return (t/SAMPLER_ADSR_AXIS_TOTAL_SEC)*w; }
+  function adsrYAt(level, h){ return (h-4) - level*(h-8); }
+  function adsrLevelAtY(y, h){ return Math.max(0, Math.min(1, ((h-4)-y)/(h-8))); }
+  // The 3 points a viewer can actually grab, in envelope-time/level space —
+  // the hold-segment's end isn't included since its width is nominal, not a
+  // real parameter (see SAMPLER_ADSR_NOMINAL_HOLD_SEC above), so there's
+  // nothing meaningful to drag it to.
+  function adsrDragPoints(){
+    var a = parseFloat(document.getElementById('samplerAttack').value)||0;
+    var d = parseFloat(document.getElementById('samplerDecay').value)||0;
+    var s = parseFloat(document.getElementById('samplerSustain').value)||0;
+    var r = parseFloat(document.getElementById('samplerRelease').value)||0;
+    return {
+      attack:  { t:a,               level:1 },
+      decay:   { t:a+d,             level:s },
+      release: { t:a+d+SAMPLER_ADSR_NOMINAL_HOLD_SEC+r, level:0 }
+    };
+  }
   function drawADSRCurve(){
     var canvas = document.getElementById('samplerADSRCanvas');
     if(!canvas) return;
     var ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
     ctx.fillStyle = getThemeColor('--surface-deep'); ctx.fillRect(0,0,w,h);
-    var a = parseFloat(document.getElementById('samplerAttack').value)||0;
+    var pts = adsrDragPoints();
     var d = parseFloat(document.getElementById('samplerDecay').value)||0;
-    var s = parseFloat(document.getElementById('samplerSustain').value)||0;
-    var r = parseFloat(document.getElementById('samplerRelease').value)||0;
-    var totalSec = Math.max(0.05, a+d+SAMPLER_ADSR_NOMINAL_HOLD_SEC+r);
-    function xAt(t){ return (t/totalSec)*w; }
-    function yAt(level){ return (h-4) - level*(h-8); }
+    var holdEndT = pts.attack.t + d + SAMPLER_ADSR_NOMINAL_HOLD_SEC;
+    function px(t){ return adsrXAt(t,w); }
+    function py(level){ return adsrYAt(level,h); }
     ctx.beginPath();
-    ctx.moveTo(xAt(0), yAt(0));
-    ctx.lineTo(xAt(a), yAt(1));
-    ctx.lineTo(xAt(a+d), yAt(s));
-    ctx.lineTo(xAt(a+d+SAMPLER_ADSR_NOMINAL_HOLD_SEC), yAt(s));
-    ctx.lineTo(xAt(a+d+SAMPLER_ADSR_NOMINAL_HOLD_SEC+r), yAt(0));
+    ctx.moveTo(px(0), py(0));
+    ctx.lineTo(px(pts.attack.t), py(pts.attack.level));
+    ctx.lineTo(px(pts.decay.t), py(pts.decay.level));
+    ctx.lineTo(px(holdEndT), py(pts.decay.level));
+    ctx.lineTo(px(pts.release.t), py(pts.release.level));
     ctx.strokeStyle = '#c9973a';
     ctx.lineWidth = 2;
     ctx.stroke();
-    ctx.lineTo(xAt(0), yAt(0));
+    ctx.lineTo(px(0), py(0));
     ctx.closePath();
     ctx.fillStyle = 'rgba(201,151,58,.15)';
     ctx.fill();
+    // Draggable point markers — bigger/brighter when actively grabbed so
+    // there's clear feedback about which one is under the cursor's control.
+    ['attack','decay','release'].forEach(function(key){
+      var p = pts[key];
+      var isActive = samplerAdsrDragTarget===key;
+      ctx.beginPath();
+      ctx.arc(px(p.t), py(p.level), isActive?6:4.5, 0, Math.PI*2);
+      ctx.fillStyle = isActive ? '#ffd27a' : '#c9973a';
+      ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = getThemeColor('--surface-deep');
+      ctx.stroke();
+    });
   }
   function openSamplerModal(insIndex){
     samplerModalInsIndex = insIndex;
@@ -3292,6 +3373,78 @@
       updateSamplerADSRLabels();
       drawADSRCurve();
     });
+  });
+  // Drag-to-edit ADSR graph: each point writes into the same sliders the
+  // numeric controls use (via a real 'input' event) rather than duplicating
+  // their clamp/store/redraw logic here. Attack and Release only move
+  // horizontally (their level is fixed at 1 and 0 respectively); the
+  // decay/sustain point moves in both axes at once.
+  function adsrCanvasCoords(e){
+    var canvas = document.getElementById('samplerADSRCanvas');
+    var rect = canvas.getBoundingClientRect();
+    return {
+      x: ((e.clientX-rect.left)/rect.width) * canvas.width,
+      y: ((e.clientY-rect.top)/rect.height) * canvas.height,
+      w: canvas.width, h: canvas.height
+    };
+  }
+  var SAMPLER_ADSR_POINT_HIT_PX = 16;
+  function nearestAdsrPoint(cx, cy, w, h){
+    var pts = adsrDragPoints(), best = null, bestDist = SAMPLER_ADSR_POINT_HIT_PX;
+    ['attack','decay','release'].forEach(function(key){
+      var p = pts[key];
+      var dist = Math.hypot(adsrXAt(p.t,w)-cx, adsrYAt(p.level,h)-cy);
+      if(dist<bestDist){ bestDist = dist; best = key; }
+    });
+    return best;
+  }
+  function setAdsrField(id, value){
+    var input = document.getElementById(id);
+    var min = parseFloat(input.min), max = parseFloat(input.max);
+    input.value = Math.max(min, Math.min(max, value));
+    input.dispatchEvent(new Event('input'));
+  }
+  document.getElementById('samplerADSRCanvas').addEventListener('mousedown', function(e){
+    if(samplerModalInsIndex===null) return;
+    var c = adsrCanvasCoords(e);
+    var hit = nearestAdsrPoint(c.x, c.y, c.w, c.h);
+    if(hit){ e.preventDefault(); samplerAdsrDragTarget = hit; drawADSRCurve(); }
+  });
+  document.addEventListener('mousemove', function(e){
+    if(samplerModalInsIndex===null) return;
+    var canvas = document.getElementById('samplerADSRCanvas');
+    if(!samplerAdsrDragTarget){
+      // Not dragging: hover-only pass, just to show a grab cursor over a
+      // point — skip entirely once the modal's closed (canvas.getBoundingClientRect
+      // on a display:none ancestor is cheap, but there's nothing to check).
+      if(document.getElementById('samplerModalBackdrop').style.display==='none') return;
+      var hc = adsrCanvasCoords(e);
+      canvas.style.cursor = nearestAdsrPoint(hc.x, hc.y, hc.w, hc.h) ? 'grab' : 'default';
+      return;
+    }
+    var c = adsrCanvasCoords(e);
+    var t = Math.max(0, (c.x/c.w) * SAMPLER_ADSR_AXIS_TOTAL_SEC);
+    var attackMax = parseFloat(document.getElementById('samplerAttack').max);
+    var decayMax = parseFloat(document.getElementById('samplerDecay').max);
+    var releaseMax = parseFloat(document.getElementById('samplerRelease').max);
+    if(samplerAdsrDragTarget==='attack'){
+      setAdsrField('samplerAttack', Math.min(t, attackMax));
+    } else if(samplerAdsrDragTarget==='decay'){
+      var attackNow = parseFloat(document.getElementById('samplerAttack').value)||0;
+      setAdsrField('samplerDecay', Math.min(Math.max(0, t-attackNow), decayMax));
+      setAdsrField('samplerSustain', adsrLevelAtY(c.y, c.h));
+    } else if(samplerAdsrDragTarget==='release'){
+      var holdEndNow = (parseFloat(document.getElementById('samplerAttack').value)||0)
+        + (parseFloat(document.getElementById('samplerDecay').value)||0)
+        + SAMPLER_ADSR_NOMINAL_HOLD_SEC;
+      setAdsrField('samplerRelease', Math.min(Math.max(0, t-holdEndNow), releaseMax));
+    }
+    canvas.style.cursor = 'grabbing';
+  });
+  document.addEventListener('mouseup', function(){
+    if(!samplerAdsrDragTarget) return;
+    samplerAdsrDragTarget = null;
+    drawADSRCurve();
   });
   // Sample-exact Start/End: typing a value here is equivalent to dragging
   // its handle to that exact position — same clamping (min 0.01s apart),
@@ -3504,6 +3657,7 @@
     drawCoverArtFrame(coverDt);
     updateMixerMeters(); // also runs every frame regardless of transport state — meters should read 0 and settle, not freeze, once nothing's sounding
     drawSourceSamplePlayheads(); // same reasoning — a voice can be sounding from a preview click even with the transport stopped
+    if(samplerModalInsIndex!==null) drawSamplerModalPlayhead(); // ditto, but for the Sampler modal's own larger waveform while it's open
     requestAnimationFrame(playbackRAF);
   }
   requestAnimationFrame(playbackRAF);
