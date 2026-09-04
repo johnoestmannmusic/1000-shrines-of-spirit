@@ -6,17 +6,64 @@
 <title>0005 — shrines of SPIRIT</title>
 <link rel="icon" href="data:,">
 <style>
+  @font-face{
+    font-family:'Medodica';
+    src:url('ASSETS/MedodicaRegular.otf') format('opentype');
+    font-weight:400; font-style:normal; font-display:swap;
+  }
+  /* Theme: dark is the original/default look, defined unguarded on :root.
+     Light overrides apply (a) automatically when the OS prefers light and
+     no explicit choice has been made (data-theme absent), or (b) always,
+     when the user explicitly picked Light via the Theme control. Canvas-
+     drawn visuals (piano roll, cover art) intentionally stay dark in both
+     themes, same as most audio tools keep waveform/meter displays dark
+     regardless of app chrome — only the Source Sample waveform/playhead
+     canvases (drawWaveformFromCache, drawSourceSamplePlayheads) read these
+     tokens at draw time via getThemeColor(), since those are simple enough
+     to reasonably flip with the page. */
   :root{
-    --bg:#101012; --panel:#17171a; --edge:#2a2a2e; --ink:#e9e6db; --dim:#8a877c;
+    --bg:#101012; --panel:#17171a; --edge:#2a2a2e; --edge-hover:#555; --ink:#e9e6db; --dim:#8a877c;
     --amber:#c9973a;
-    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --surface-deep:#0a0a0b; --hover:#1e1e22; --hover2:#232320; --hover3:#26262a;
+    --row-hl1:#1d1d21; --row-hl2:#28282d; --row-playhead:#3a2f18; --cell-hover:#40331a;
+    --line-beat:#3d3b42; --line-bar:#57545c; --line-note:#8f8c94;
+    --muted-ink:#6a4040; --note-off:#c96a6a; --tk-var:#7fb3ff; --tk-kw:#8fd0a0; --live-bg:#242427;
+    --emphasis-ink:#fff;
+    --mono: 'Medodica', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  /* Light palette matches johnoestmannmusic.com's actual computed styles
+     (verified live, not guessed): body background #fafafa, body text
+     #2e3440 (Nord "Polar Night"), link/heading accent #47bb11. --amber
+     (this file's one accent token, used for fx highlighting, active
+     states, playhead emphasis, etc.) becomes that green in light mode —
+     it's still the single accent color, just matching the site's brand
+     green here instead of the dark theme's amber. */
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#fafafa; --panel:#ffffff; --edge:#dcdde0; --edge-hover:#b3b8bd; --ink:#2e3440; --dim:#5e6470;
+      --amber:#3f9e0e;
+      --surface-deep:#eef0e9; --hover:#f0f2ea; --hover2:#e6e9dd; --hover3:#dce0d0;
+      --row-hl1:#f2f4ed; --row-hl2:#e6e9dd; --row-playhead:#d7f0c0; --cell-hover:#c9edac;
+      --line-beat:#d8dde0; --line-bar:#b3b8bd; --line-note:#5e6470;
+      --muted-ink:#b0453f; --note-off:#c0362f; --tk-var:#1f5aa8; --tk-kw:#2e8b3d; --live-bg:#e6e9dd;
+      --emphasis-ink:#141712;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#fafafa; --panel:#ffffff; --edge:#dcdde0; --edge-hover:#b3b8bd; --ink:#2e3440; --dim:#5e6470;
+    --amber:#3f9e0e;
+    --surface-deep:#eef0e9; --hover:#f0f2ea; --hover2:#e6e9dd; --hover3:#dce0d0;
+    --row-hl1:#f2f4ed; --row-hl2:#e6e9dd; --row-playhead:#d7f0c0; --cell-hover:#c9edac;
+    --line-beat:#d8dde0; --line-bar:#b3b8bd; --line-note:#5e6470;
+    --muted-ink:#b0453f; --note-off:#c0362f; --tk-var:#1f5aa8; --tk-kw:#2e8b3d; --live-bg:#e6e9dd;
+    --emphasis-ink:#141712;
   }
   *{box-sizing:border-box;}
   html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);}
   body{padding:24px 16px 40px;display:flex;flex-direction:column;align-items:center;}
-  h1{font-size:13px;font-weight:400;letter-spacing:.08em;color:var(--dim);text-transform:uppercase;margin:0 0 4px;}
+  h1{font-size:17px;font-weight:400;letter-spacing:.08em;color:var(--dim);text-transform:uppercase;margin:0 0 4px;}
   h1 b{color:var(--ink);font-weight:600;}
-  .subtitle{font-size:10px;color:var(--dim);margin:0 0 16px;text-align:center;}
+  .subtitle{font-size:14px;color:var(--dim);margin:0 0 16px;text-align:center;}
 
   .shrine{width:max-content;max-width:100%;display:flex;flex-direction:column;gap:20px;}
   /* Main column sizes to its content (the pattern grid), not a stretched
@@ -38,11 +85,11 @@
     display:flex;flex-direction:column;gap:4px;
     box-shadow:0 0 0 0 var(--flash-color,transparent);
     transition:box-shadow .4s ease-out, background-color .4s ease-out;}
-  .flabel{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);}
+  .flabel{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);}
   .field-header{display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;}
-  .field-summary{font-size:9px;color:var(--dim);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  .field-summary{font-size:13px;color:var(--dim);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
     white-space:nowrap;text-align:right;display:none;}
-  .collapse-arrow{font-size:9px;color:var(--dim);flex:none;width:8px;}
+  .collapse-arrow{font-size:13px;color:var(--dim);flex:none;width:8px;}
   .field-body{display:flex;flex-direction:column;gap:4px;margin-top:4px;}
   .field.collapsed{padding-top:6px;padding-bottom:6px;}
   .field.collapsed .field-body{display:none;}
@@ -51,33 +98,33 @@
 
   .sidebar{display:flex;flex-direction:column;gap:8px;align-self:start;position:sticky;top:12px;}
   .cover-art-wrap{width:240px;flex:none;}
-  #coverArt{width:240px;height:240px;background:#08080a;border:1px solid var(--edge);border-radius:2px;
+  #coverArt{width:240px;height:240px;background:var(--surface-deep);border:1px solid var(--edge);border-radius:2px;
     display:block;image-rendering:pixelated;image-rendering:crisp-edges;cursor:pointer;}
   .explainer{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:10px 12px;
     height:280px;overflow-y:auto;flex:none;}
-  .explain-title{font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;
+  .explain-title{font-size:14px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin:0 0 8px;
     position:sticky;top:-10px;background:var(--panel);padding-top:10px;margin-top:-10px;}
-  .explain-body{font-size:10px;line-height:1.6;color:var(--ink);}
+  .explain-body{font-size:15px;line-height:1.6;color:var(--ink);}
   .explain-body .tk-p{margin:0 0 8px;}
   .explain-body .tk-p:last-child{margin-bottom:0;}
-  .explain-body .tk-block{background:#0c0c0d;border:1px solid var(--edge);border-radius:2px;
+  .explain-body .tk-block{background:var(--surface-deep);border:1px solid var(--edge);border-radius:2px;
     padding:6px 7px;margin:0 0 8px;font-family:var(--mono);white-space:pre-wrap;overflow-wrap:break-word;}
   .explain-body .tk-num{color:var(--amber);}
-  .explain-body .tk-var{color:#7fb3ff;}
-  .explain-body .tk-kw{color:#8fd0a0;}
-  .explain-body .tk-live{color:#fff;background:#242427;border-radius:2px;padding:0 3px;}
+  .explain-body .tk-var{color:var(--tk-var);}
+  .explain-body .tk-kw{color:var(--tk-kw);}
+  .explain-body .tk-live{color:var(--emphasis-ink);background:var(--live-bg);border-radius:2px;padding:0 3px;}
 
-  .song-line{font-size:11px;line-height:1.6;color:var(--ink);}
+  .song-line{font-size:15px;line-height:1.6;color:var(--ink);}
   .song-line b{color:var(--ink);font-weight:600;}
-  .comments-text{font-size:11px;line-height:1.6;color:var(--ink);white-space:pre-wrap;word-break:break-word;}
+  .comments-text{font-size:15px;line-height:1.6;color:var(--ink);white-space:pre-wrap;word-break:break-word;}
 
-  .kv{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:11px;line-height:1.6;}
+  .kv{display:grid;grid-template-columns:120px 1fr;gap:2px 8px;font-size:15px;line-height:1.6;}
   .kv .k{color:var(--dim);}
   .kv .v{color:var(--ink);}
 
-  table.ins-table{width:100%;border-collapse:collapse;font-size:11px;}
+  table.ins-table{width:100%;border-collapse:collapse;font-size:15px;}
   table.ins-table th, table.ins-table td{text-align:left;padding:3px 8px;border-bottom:1px solid var(--edge);}
-  table.ins-table th{color:var(--dim);font-weight:400;text-transform:uppercase;font-size:9px;letter-spacing:.04em;}
+  table.ins-table th{color:var(--dim);font-weight:400;text-transform:uppercase;font-size:13px;letter-spacing:.04em;}
   table.ins-table td{color:var(--ink);}
   table.ins-table tr[data-explain]{cursor:default;}
   input.ins-color-input{width:22px;height:16px;padding:0;border:1px solid var(--edge);background:none;cursor:pointer;}
@@ -87,37 +134,47 @@
      technique as 0004's per-instrument card flash. */
   table.ins-table tr{transition:background-color .5s ease-out;}
   table.ins-table tr.firing{background-color:rgba(201,151,58,.35);transition:none;}
-  table.ins-table tr:hover{background-color:#1e1e22;}
+  table.ins-table tr:hover{background-color:var(--hover);}
 
   /* Per-instrument wavetable mini-preview, inline in the Instruments
      table — only Wave-channel instruments get one (empty td otherwise). */
-  .ins-wave-canvas{display:block;background:#08080a;border:1px solid var(--edge);
+  .ins-wave-canvas{display:block;background:var(--surface-deep);border:1px solid var(--edge);
     image-rendering:pixelated;width:64px;height:16px;cursor:default;}
-  .sampler-btn{background:#0c0c0d;color:var(--ink);border:1px solid var(--edge);cursor:pointer;
-    font-family:var(--mono);font-size:10px;padding:2px 8px;}
-  .sampler-btn:hover{border-color:#555;}
-  .sampler-src-label{font-size:10px;color:var(--dim);}
+  .sampler-btn{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);cursor:pointer;
+    font-family:var(--mono);font-size:14px;padding:2px 8px;}
+  .sampler-btn:hover{border-color:var(--edge-hover);}
+  .sampler-src-label{font-size:14px;color:var(--dim);}
 
-  /* Source Samples panel: one slot per upload/preset, each either an
-     upload prompt or a playable waveform preview. */
-  .src-sample-slot{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--edge);}
+  /* Source Samples panel: one slot per manifest entry, each a playable
+     waveform preview (or an "empty — list it in manifest.json" note). */
+  .src-sample-slot{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-bottom:1px solid var(--edge);}
   .src-sample-slot:last-child{border-bottom:none;}
-  .src-sample-label{font-size:10px;color:var(--dim);min-width:170px;}
-  .src-sample-play{background:#0c0c0d;color:var(--ink);border:1px solid var(--edge);cursor:pointer;padding:2px 8px;}
-  .src-sample-play:hover{border-color:#555;}
-  .src-sample-canvas{display:block;background:#08080a;border:1px solid var(--edge);flex:1;max-width:480px;}
-  .piano-roll-row{display:flex;align-items:stretch;gap:8px;}
-  .piano-roll-scroll{overflow-x:auto;overflow-y:hidden;border:1px solid var(--edge);border-radius:2px;background:#08080a;
+  .src-sample-title{font-size:15px;font-weight:600;color:var(--ink);}
+  .src-sample-dur{font-size:14px;font-weight:400;color:var(--dim);}
+  .src-sample-slot-buttons{display:flex;gap:8px;}
+  .src-sample-play, .src-sample-comments-btn{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);cursor:pointer;padding:2px 8px;font-family:var(--mono);font-size:14px;}
+  .src-sample-play:hover, .src-sample-comments-btn:hover{border-color:var(--edge-hover);}
+  .src-sample-canvas{display:block;background:var(--surface-deep);border:1px solid var(--edge);width:100%;max-width:100%;}
+  .src-sample-comment-preview{font-size:13px;color:var(--dim);font-style:italic;}
+  /* Fixed to the piano roll canvas's own height (PIANO_WHITE_KEY_H, 60px)
+     plus the noise box's padding — without this, a long instrument name in
+     .noise-box-ins would wrap and grow .noise-box taller, and since this
+     row used align-items:stretch, that stretched (and grew) the whole row,
+     pushing every panel below Piano Roll down the page as playback
+     changed which instrument's name was showing. */
+  .piano-roll-row{display:flex;align-items:stretch;gap:8px;height:74px;}
+  .piano-roll-scroll{overflow-x:auto;overflow-y:hidden;border:1px solid var(--edge);border-radius:2px;background:var(--surface-deep);
     width:max-content;max-width:100%;}
   .piano-roll-canvas{display:block;}
-  .noise-box{border:1px solid var(--edge);border-radius:2px;background:#08080a;padding:6px 12px;
-    display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:100px;flex:none;}
-  .noise-box-label{font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);}
-  .noise-box-note{font-size:17px;font-weight:600;font-family:var(--mono);color:var(--dim);}
-  .noise-box-ins{font-size:10px;color:var(--dim);}
+  .noise-box{border:1px solid var(--edge);border-radius:2px;background:var(--surface-deep);padding:6px 12px;
+    display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:100px;flex:none;
+    box-sizing:border-box;overflow:hidden;}
+  .noise-box-label{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);}
+  .noise-box-note{font-size:21px;font-weight:600;font-family:var(--mono);color:var(--dim);}
+  .noise-box-ins{font-size:14px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
-  .order-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin-bottom:6px;font-size:10px;color:var(--dim);}
-  .order-row select{background:#0c0c0d;color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:10px;}
+  .order-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin-bottom:6px;font-size:14px;color:var(--dim);}
+  .order-row select{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:14px;}
 
   /* Custom order picker — a native <select> can't show a multi-colour
      swatch per option in Chrome (option styling is text-only there), so
@@ -125,19 +182,19 @@
      id="orderSelect"> (kept, just display:none) stays the actual state
      the rest of the app already reads/writes via .value, untouched. */
   .order-picker{position:relative;display:inline-block;}
-  .order-picker-btn{display:inline-flex;align-items:center;gap:6px;background:#0c0c0d;color:var(--ink);
-    border:1px solid var(--edge);font-family:var(--mono);font-size:10px;padding:4px 8px;cursor:pointer;}
-  .order-picker-btn:hover{border-color:#555;}
-  .order-picker-arrow{color:var(--dim);font-size:8px;}
+  .order-picker-btn{display:inline-flex;align-items:center;gap:6px;background:var(--surface-deep);color:var(--ink);
+    border:1px solid var(--edge);font-family:var(--mono);font-size:14px;padding:4px 8px;cursor:pointer;}
+  .order-picker-btn:hover{border-color:var(--edge-hover);}
+  .order-picker-arrow{color:var(--dim);font-size:12px;}
   .order-swatch{display:inline-flex;gap:1px;flex:none;}
   .order-swatch span{width:6px;height:11px;display:inline-block;background:var(--edge);border-radius:1px;}
   .order-picker-list{display:none;position:absolute;top:100%;left:0;z-index:10;background:var(--panel);
     border:1px solid var(--edge);border-radius:2px;max-height:280px;overflow-y:auto;min-width:150px;
     margin-top:2px;box-shadow:0 4px 12px rgba(0,0,0,.4);}
   .order-picker-list.open{display:block;}
-  .order-picker-row{display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;font-size:10px;
+  .order-picker-row{display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;font-size:14px;
     color:var(--ink);white-space:nowrap;}
-  .order-picker-row:hover{background:#232320;}
+  .order-picker-row:hover{background:var(--hover2);}
   .order-picker-row.active{background:#2a2416;color:var(--amber);}
   .order-picker-row .order-swatch span{width:8px;height:13px;}
   .tint-toggle{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none;}
@@ -148,35 +205,42 @@
   .sampler-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;
     display:flex;align-items:center;justify-content:center;}
   .sampler-modal{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:16px;
-    width:520px;max-width:92vw;display:flex;flex-direction:column;gap:10px;font-size:11px;color:var(--ink);}
-  .sampler-modal-head{display:flex;align-items:center;justify-content:space-between;font-size:13px;}
-  .sampler-modal-head button{background:#0c0c0d;color:var(--ink);border:1px solid var(--edge);cursor:pointer;padding:2px 8px;}
+    width:520px;max-width:92vw;display:flex;flex-direction:column;gap:10px;font-size:15px;color:var(--ink);}
+  .sampler-modal-head{display:flex;align-items:center;justify-content:space-between;font-size:17px;}
+  .sampler-modal-head button{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);cursor:pointer;padding:2px 8px;}
+  .sampler-modal-head-actions{display:flex;align-items:center;gap:8px;}
   .sampler-wave-wrap{position:relative;user-select:none;}
-  .sampler-wave-canvas{display:block;width:100%;height:100px;background:#08080a;border:1px solid var(--edge);}
+  .sampler-wave-canvas{display:block;width:100%;height:100px;background:var(--surface-deep);border:1px solid var(--edge);}
   .sampler-trim-shade{position:absolute;top:1px;bottom:1px;left:1px;background:rgba(0,0,0,.55);pointer-events:none;}
-  .sampler-handle{position:absolute;top:1px;bottom:1px;width:6px;margin-left:-3px;cursor:ew-resize;
+  /* A wide (10px) invisible drag target for comfortable grabbing, but only
+     a thin 2px visible line down its center — the old solid 6px bar made
+     it hard to see exactly which sample it lined up with. */
+  .sampler-handle{position:absolute;top:1px;bottom:1px;width:10px;margin-left:-5px;cursor:ew-resize;background:transparent;}
+  .sampler-handle::after{content:'';position:absolute;left:50%;top:0;bottom:0;width:2px;margin-left:-1px;
     background:var(--amber);opacity:.85;}
-  .sampler-handle:hover{opacity:1;}
+  .sampler-handle:hover::after{opacity:1;width:3px;margin-left:-1.5px;}
   .sampler-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;}
   .sampler-row label{display:flex;align-items:center;gap:6px;color:var(--dim);}
-  .sampler-row select{background:#0c0c0d;color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:10px;}
+  .sampler-row select{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:14px;}
+  .sampler-row input[type=number]{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:14px;padding:2px 4px;}
   .sampler-adsr label{flex-direction:column;align-items:flex-start;gap:2px;}
   .sampler-adsr input[type=range]{width:100px;}
+  .sampler-adsr-canvas{display:block;width:100%;height:50px;background:var(--surface-deep);border:1px solid var(--edge);}
   .sampler-adsr .sampler-val{color:var(--ink);font-family:var(--mono);}
 
   /* Mixer: per-channel + master volume sliders with a live peak meter,
      same visual language as the rest of the sidebar cards. */
   .mixer-strip{display:flex;align-items:center;gap:8px;padding:4px 0;}
-  .mixer-label{font-size:10px;color:var(--dim);width:44px;flex:none;}
+  .mixer-label{font-size:14px;color:var(--dim);width:44px;flex:none;}
   .mixer-vol{width:80px;flex:none;}
-  .meter{flex:1;height:10px;background:#08080a;border:1px solid var(--edge);position:relative;overflow:hidden;}
+  .meter{flex:1;height:10px;background:var(--surface-deep);border:1px solid var(--edge);position:relative;overflow:hidden;}
   .meter-fill{position:absolute;left:0;top:0;bottom:0;width:0%;background:#6cbf6c;}
   .meter-fill.clip{background:#e05252;}
   .mixer-master{border-top:1px solid var(--edge);margin-top:4px;padding-top:8px;}
-  .project-io-status{font-size:10px;color:var(--dim);}
-  .project-modal-hint{margin:0;color:var(--dim);font-size:10px;}
-  .project-json-text{width:100%;box-sizing:border-box;background:#08080a;color:var(--ink);
-    border:1px solid var(--edge);font-family:var(--mono);font-size:10px;padding:8px;resize:vertical;}
+  .project-io-status{font-size:14px;color:var(--dim);}
+  .project-modal-hint{margin:0;color:var(--dim);font-size:14px;}
+  .project-json-text{width:100%;box-sizing:border-box;background:var(--surface-deep);color:var(--ink);
+    border:1px solid var(--edge);font-family:var(--mono);font-size:14px;padding:8px;resize:vertical;}
 
   /* --- tracker grid: all channels side by side in one screen, like Furnace's
      own pattern view. Row shading follows the song's own "highlights"
@@ -184,19 +248,19 @@
      a fixed guess, so it matches whatever the composer set. .playhead is
      driven live from real stem-playback time, see setPlayheadRow. --- */
   .pattern-scroll{max-height:480px;overflow:auto;border:1px solid var(--edge);border-radius:2px;}
-  table.pat-table{border-collapse:collapse;font-size:10px;}
+  table.pat-table{border-collapse:collapse;font-size:14px;}
   table.pat-table td, table.pat-table th{padding:2px 7px;white-space:nowrap;border-right:1px solid var(--edge);}
   table.pat-table th{position:sticky;top:0;background:var(--panel);color:var(--dim);font-weight:400;text-align:left;
-    text-transform:uppercase;font-size:8px;letter-spacing:.04em;z-index:1;}
+    text-transform:uppercase;font-size:12px;letter-spacing:.04em;z-index:1;}
   table.pat-table th.chan-head{text-align:center;top:0;cursor:pointer;user-select:none;}
   table.pat-table th.chan-head:hover{color:var(--ink);}
-  table.pat-table th.chan-head.muted{color:#6a4040;text-decoration:line-through;background:rgba(180,60,60,.1);}
+  table.pat-table th.chan-head.muted{color:var(--muted-ink);text-decoration:line-through;background:rgba(180,60,60,.1);}
   table.pat-table td.chan-muted{opacity:.32;}
   table.pat-table thead tr:first-child th{top:0;}
   table.pat-table thead tr:last-child th{top:16px;}
   table.pat-table td.row-idx, table.pat-table th.row-idx-head{color:var(--dim);position:sticky;left:0;background:var(--panel);z-index:1;}
   table.pat-table td.row-idx{cursor:pointer;}
-  table.pat-table td.row-idx:hover{color:var(--amber);background:#232320;}
+  table.pat-table td.row-idx:hover{color:var(--amber);background:var(--hover2);}
   /* Same click-to-preview affordance as row-idx, but per-channel-column
      cells (note/ins/vol/fx) — clicking one previews just that stem at that
      point in time rather than jumping/seeking the whole transport. */
@@ -207,13 +271,13 @@
   table.pat-table td[data-field="note"]:hover,
   table.pat-table td[data-field="ins"]:hover,
   table.pat-table td[data-field="vol"]:hover,
-  table.pat-table td[data-field="fx"]:hover{background:#232320;}
+  table.pat-table td[data-field="fx"]:hover{background:var(--hover2);}
   table.pat-table td.note{color:var(--ink);}
-  table.pat-table td.note.off{color:#c96a6a;}
+  table.pat-table td.note.off{color:var(--note-off);}
   table.pat-table td.note.empty{color:var(--dim);}
   table.pat-table td.fx{color:var(--amber);}
-  table.pat-table tr.hl1{background:#1d1d21;}
-  table.pat-table tr.hl2{background:#28282d;}
+  table.pat-table tr.hl1{background:var(--row-hl1);}
+  table.pat-table tr.hl2{background:var(--row-hl2);}
   /* Beat/bar row lines: drawn as a border-top on every cell (not just the
      tr's own background) so they stay visible even under a translucent
      instrument tint sitting on top — a background alone got lost there.
@@ -222,30 +286,31 @@
      a touch lighter than beat (every highlights[0] rows); the new-note
      border (set inline per cell, see renderPatternTable) is lightest of
      all and takes priority over both when a note starts. */
-  table.pat-table td.beat-line{border-top:1px solid #3d3b42;}
-  table.pat-table td.bar-line{border-top:1px solid #57545c;}
-  table.pat-table td.note-start{border-top:1px solid #8f8c94;}
-  table.pat-table td.note-end{border-bottom:1px solid #8f8c94;}
+  table.pat-table td.beat-line{border-top:1px solid var(--line-beat);}
+  table.pat-table td.bar-line{border-top:1px solid var(--line-bar);}
+  table.pat-table td.note-start{border-top:1px solid var(--line-note);}
+  table.pat-table td.note-end{border-bottom:1px solid var(--line-note);}
   /* Instrument colour-tint (--ic set inline per cell): a translucent wash
      so the row/hover highlights underneath still show through. */
   table.pat-table td.ins-tint{background:color-mix(in srgb, var(--ic) 26%, transparent);}
-  table.pat-table tr:hover{background:#26262a;}
-  table.pat-table tr.playhead{background:#3a2f18;}
-  table.pat-table tr.playhead td{color:#fff;}
+  table.pat-table tr:hover{background:var(--hover3);}
+  table.pat-table tr.playhead{background:var(--row-playhead);}
+  table.pat-table tr.playhead td{color:var(--emphasis-ink);}
   /* Cell-level highlight on top of the row highlight — the exact cell under
      the mouse is what the Explainer is currently describing, so it gets its
      own outline to make that link obvious at a glance. */
-  table.pat-table td[data-field]:hover{background:#40331a;outline:1px solid var(--amber);outline-offset:-1px;color:#fff;position:relative;z-index:2;}
+  table.pat-table td[data-field]:hover{background:var(--cell-hover);outline:1px solid var(--amber);outline-offset:-1px;color:var(--emphasis-ink);position:relative;z-index:2;}
 
   .controls{display:flex;align-items:center;gap:10px;}
+  .controls select{background:var(--panel);color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);font-size:15px;padding:3px 4px;cursor:pointer;}
   button{background:var(--panel);color:var(--ink);border:1px solid var(--edge);font-family:var(--mono);
-    font-size:11px;padding:8px 14px;cursor:pointer;}
-  button:hover{border-color:#555;}
+    font-size:15px;padding:8px 14px;cursor:pointer;}
+  button:hover{border-color:var(--edge-hover);}
   button:disabled{opacity:.4;cursor:default;}
 
-  .ins-table .preview-btn{font-size:9px;padding:3px 7px;line-height:1;color:var(--amber);}
+  .ins-table .preview-btn{font-size:13px;padding:3px 7px;line-height:1;color:var(--amber);}
 
-  footer{display:flex;justify-content:space-between;align-items:baseline;font-size:10px;color:var(--dim);flex-wrap:wrap;gap:6px;width:1040px;max-width:100%;}
+  footer{display:flex;justify-content:space-between;align-items:baseline;font-size:14px;color:var(--dim);flex-wrap:wrap;gap:6px;width:1040px;max-width:100%;}
   footer a{color:var(--dim);}
 
   @media (max-width:900px){
@@ -256,19 +321,26 @@
 </head>
 <body>
 
-<h1>1000 - shrines - /of/ - SPIRIT · <b>flight_school_night_shift</b></h1>
-<div class="subtitle">Lantern Music Player - build 260830, track composed in <a href="https://github.com/tildearrow/furnace" target="_blank" rel="noreferrer noopener">Furnace</a>.</div>
+<h1>1000 - shrines - /of/ - SPIRIT · <b id="pageTitleSongName">flight_school_night_shift</b></h1>
+<div class="subtitle">Lantern Music Player - build 260830   //   Base track composed in <a href="https://github.com/tildearrow/furnace" target="_blank" rel="noreferrer noopener">Furnace</a>.</div>
 
 <div class="shrine">
   <div class="controls">
-    <button id="playBtn" type="button">▶ play</button>
-    <button id="pauseBtn" type="button" disabled>❚❚ pause</button>
-    <button id="stopBtn" type="button" disabled>■ stop</button>
-    <button id="downloadFurBtn" type="button" title="download the original Furnace module (.fur)">⇩ .fur</button>
-    <button id="exportMidiBtn" type="button" title="download this composition as a Standard MIDI File, for use in a DAW">⇩ export MIDI</button>
-    <button id="downloadWavBtn" type="button" title="Sampler Mode ON: render and download the current Sampler mix as .wav. OFF: download the original Furnace-rendered .wav.">⇩ WAV</button>
-    <label class="tint-toggle" title="ON: instruments with a Source Sample assigned play through the new sampler engine. OFF: falls back to the original pre-rendered stem playback."><input type="checkbox" id="samplerModeToggle" checked> Sampler Mode</label>
-    <button type="button" id="projectJsonBtn" title="view/copy this project's Sampler settings as JSON, or paste in a previously copied one to restore it">Project JSON</button>
+    <button id="playBtn" type="button">▶ PLAY</button>
+    <button id="pauseBtn" type="button" disabled>❚❚ PAUSE</button>
+    <button id="stopBtn" type="button" disabled>■ STOP</button>
+    <button id="downloadFurBtn" type="button" title="download the original Furnace module (.fur)">⇩ .FUR</button>
+    <button id="exportMidiBtn" type="button" title="download this composition as a Standard MIDI File, for use in a DAW">⇩ .MIDI</button>
+    <button id="downloadWavBtn" type="button" data-explain="download-wav" title="Sampler Mode ON: render and download the current Sampler mix as .wav. OFF: download the original Furnace-rendered .wav.">⇩ .WAV</button>
+    <label class="tint-toggle" data-explain="sampler-mode" title="ON: instruments with a Source Sample assigned play through the new sampler engine. OFF: falls back to the original pre-rendered stem playback."><input type="checkbox" id="samplerModeToggle" checked> SAMPLER MODE</label>
+    <button type="button" id="projectJsonBtn" data-explain="project-json" title="view/copy this project's Sampler settings as JSON, or paste in a previously copied one to restore it">Project JSON</button>
+    <label class="tint-toggle" data-explain="theme" title="Theme: System follows your OS/browser setting; Light and Dark override it. Saved in Project JSON.">Theme
+      <select id="themeSelect">
+        <option value="system">System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+      </select>
+    </label>
   </div>
 
   <div class="panels">
@@ -287,6 +359,11 @@
           </div>
         </div>
       </div>
+      <div class="explainer" id="explainer">
+        <div class="explain-title" id="explainTitle">Explainer</div>
+        <div class="explain-body" id="explainBody">Hover a card's title bar, an instrument row, or a cell inside the pattern grid, to see exactly what that part of the tracker data means — with the live value where one applies.</div>
+      </div>
+      <div class="fields" id="sideLegend"></div>
       <div class="field" id="field-mixer">
         <div class="field-header" data-toggle="mixer" data-explain="mixer">
           <span class="flabel">Mixer</span>
@@ -301,17 +378,12 @@
           <div class="mixer-strip mixer-master" data-explain="mixer-master"><span class="mixer-label">Master</span><input type="range" class="mixer-vol" id="mixerMasterVol" min="0" max="1.5" step="0.01" value="1"><div class="meter"><div class="meter-fill" id="meterFillMaster"></div></div></div>
         </div>
       </div>
-      <div class="explainer" id="explainer">
-        <div class="explain-title" id="explainTitle">Explainer</div>
-        <div class="explain-body" id="explainBody">Hover a card's title bar, an instrument row, or a cell inside the pattern grid, to see exactly what that part of the tracker data means — with the live value where one applies.</div>
-      </div>
-      <div class="fields" id="sideLegend"></div>
     </div>
   </div>
 
   <footer>
-    <span>Music License: CC0 / Public Domain  ·  Code License: MIT · <a href="https://github.com/johnoestmannmusic/1000-shrines-of-spirit" target="_blank" rel="noreferrer noopener">view source</a></span>
-    <span><a href="https://johnoestmannmusic.com" target="_blank" rel="noreferrer noopener">johnoestmannmusic.com</a></span>
+    <span>Music License: <span id="footerMusicLicense">CC0 / Public Domain</span>  ·  Code License: <span id="footerCodeLicense">MIT</span> · <a id="footerViewSourceLink" href="https://github.com/johnoestmannmusic/1000-shrines-of-spirit" target="_blank" rel="noreferrer noopener">view source</a></span>
+    <span><a id="footerWebsiteLink" href="https://johnoestmannmusic.com" target="_blank" rel="noreferrer noopener">johnoestmannmusic.com</a></span>
   </footer>
 </div>
 
@@ -319,7 +391,10 @@
   <div class="sampler-modal" id="samplerModal">
     <div class="sampler-modal-head">
       <b id="samplerModalTitle">Sampler</b>
-      <button type="button" id="samplerModalClose" title="close">✕</button>
+      <div class="sampler-modal-head-actions">
+        <button type="button" id="samplerPreviewBtn" title="preview this instrument at its root note, using the current trim/ADSR/loop settings">▶ Preview</button>
+        <button type="button" id="samplerModalClose" title="close">✕</button>
+      </div>
     </div>
     <div class="sampler-wave-wrap">
       <canvas id="samplerWaveCanvas" class="sampler-wave-canvas" width="480" height="100"></canvas>
@@ -329,10 +404,15 @@
       <div class="sampler-handle" id="samplerHandleEnd" title="drag to set sample end"></div>
     </div>
     <div class="sampler-row">
+      <label>Start <input type="number" id="samplerStartSecInput" step="0.001" min="0" style="width:76px" title="exact sample start, in seconds">s</label>
+      <label>End <input type="number" id="samplerEndSecInput" step="0.001" min="0" style="width:76px" title="exact sample end, in seconds">s</label>
+    </div>
+    <div class="sampler-row">
       <label>Source <select id="samplerSourceSelect" title="which Source Sample this instrument plays"></select></label>
       <label>Root note <select id="samplerRootNote" title="the note this sample plays at its original recorded speed/pitch"></select></label>
       <label class="tint-toggle"><input type="checkbox" id="samplerLoopToggle" title="loop the trimmed region while the note is held"> Loop</label>
     </div>
+    <canvas id="samplerADSRCanvas" class="sampler-adsr-canvas" width="480" height="50" title="attack/decay/sustain/release shape (sustain segment shown at a fixed nominal width — actual hold time depends on the note)"></canvas>
     <div class="sampler-row sampler-adsr">
       <label>Attack <input type="range" id="samplerAttack" min="0" max="1" step="0.005"><span class="sampler-val" id="samplerAttackVal"></span></label>
       <label>Decay <input type="range" id="samplerDecay" min="0" max="1" step="0.005"><span class="sampler-val" id="samplerDecayVal"></span></label>
@@ -352,11 +432,24 @@
       <b>Project JSON</b>
       <button type="button" id="projectModalClose" title="close">✕</button>
     </div>
-    <p class="project-modal-hint">This is the current Sampler setup (instrument assignments, trims, ADSR, uploaded samples). Copy it to save. To restore an earlier one, paste it here and click Confirm.</p>
+    <p class="project-modal-hint">This is the current Sampler setup (instrument assignments, trims, ADSR, mixer levels, Source Sample comments) plus page metadata (title, artist, album, comments, licenses, links, theme). Source Samples are referenced by file path, not embedded — the actual files must exist under ASSETS/SourceSamples/. Copy this to save. To restore an earlier one, paste it here and click Confirm. Saving it as <code>ASSETS/lmp-default-proj.json</code> makes it load automatically next time.</p>
     <textarea id="projectJsonText" class="project-json-text" rows="12" spellcheck="false"></textarea>
     <div class="sampler-row">
       <button type="button" id="projectJsonConfirm">Confirm</button>
       <span class="project-io-status" id="projectIOStatus"></span>
+    </div>
+  </div>
+</div>
+
+<div class="sampler-modal-backdrop" id="sampleCommentsModalBackdrop" style="display:none">
+  <div class="sampler-modal" id="sampleCommentsModal">
+    <div class="sampler-modal-head">
+      <b id="sampleCommentsModalTitle">Sample Comments</b>
+      <button type="button" id="sampleCommentsModalClose" title="close">✕</button>
+    </div>
+    <textarea id="sampleCommentsText" class="project-json-text" rows="6" spellcheck="true" placeholder="Notes about this sample — where it came from, licensing, how it's used, anything worth remembering later."></textarea>
+    <div class="sampler-row">
+      <button type="button" id="sampleCommentsSave">Save</button>
     </div>
   </div>
 </div>
@@ -511,6 +604,12 @@
   // audio-engine section of the script runs. ---
   var SOURCE_SAMPLE_SLOTS = 6;
   var sourceSamples = new Array(SOURCE_SAMPLE_SLOTS).fill(null); // {name, url, buffer(AudioBuffer), duration}
+  // Declared here too (not down with the rest of the sampler-engine state)
+  // for the same reason as sourceSamples above: songFieldHTML() reads it
+  // while building the Song panel's initial HTML, well before that section
+  // of the script runs.
+  var samplerModeEnabled = true;
+  var themeMode = 'system'; // 'system' | 'light' | 'dark' — see setTheme() further down
   song.instruments.forEach(function(ins){
     ins.sampler = {
       sourceIndex: null,       // 0..5 into sourceSamples[], or null = silent in Sampler Mode
@@ -665,8 +764,8 @@
       '<div class="field-body"><div class="song-line">'+
         '<b>'+esc(m.name||'(untitled)')+'</b> — '+esc(m.author||'')+
         (m.album ? ' · '+esc(m.album) : '')+
-        ' · '+esc(m.system||'')+
-        ' · tuning '+m.tuning+'Hz · format v'+m.formatVersion+
+        (samplerModeEnabled ? ' · SAMPLER MODE' :
+          ' · '+esc(m.system||'')+' · tuning '+m.tuning+'Hz · format v'+m.formatVersion)+
       '</div></div>'+
     '</div>';
   }
@@ -742,10 +841,6 @@
         '<td>'+i+'</td><td>'+esc(ins.name||'(unnamed)')+'</td>'+
         '<td>'+waveCell+'</td>'+
         '<td>'+(gb.envVol!==undefined?gb.envVol:'')+'</td>'+
-        '<td>'+(gb.envDir!==undefined?(gb.envDir?'up':'down'):'')+'</td>'+
-        '<td>'+(gb.envLen!==undefined?gb.envLen:'')+'</td>'+
-        '<td>'+(gb.soundLen!==undefined?gb.soundLen:'')+'</td>'+
-        '<td>'+(gb.softEnv?'yes':'no')+'</td>'+
         '<td>'+((ins.macros||[]).length?(ins.macros.length+' macro(s)'):'')+'</td>'+
         '<td>'+samplerButtonHTML(i)+'</td>'+
       '</tr>';
@@ -756,7 +851,7 @@
         '<span class="field-summary">'+song.instruments.length+'</span>'+
         '<span class="collapse-arrow">▾</span>'+
       '</div>'+
-      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th>Color</th><th>#</th><th>Name</th><th data-explain="wavetables" title="which wavetable this instrument\'s Wave channel points at, if any">Wave</th><th>Env</th><th>Dir</th><th>Len</th><th>SndLen</th><th>SoftEnv</th><th>Macros</th><th title="assign/edit this instrument\'s Sampler settings for Sampler Mode">Sampler</th></tr></thead>'+
+      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th>Color</th><th>#</th><th>Name</th><th data-explain="wavetables" title="which wavetable this instrument\'s Wave channel points at, if any">Wave</th><th title="GB hardware envelope starting volume — hover a row for the full envelope details (direction, step length, sound length, software envelope)">Env</th><th>Macros</th><th data-explain="sampler-col" title="assign/edit this instrument\'s Sampler settings for Sampler Mode">Sampler</th></tr></thead>'+
       '<tbody>'+rows+'</tbody></table></div></div>'+
     '</div>';
   }
@@ -788,11 +883,22 @@
   }
   function sourceSamplesFieldHTML(){
     var slots = sourceSamples.map(function(s, i){
-      if(!s) return '<div class="src-sample-slot empty"><span class="src-sample-label">Slot '+i+' — empty</span>'+
-        '<input type="file" accept="audio/*" class="src-sample-upload" data-upload-slot="'+i+'" title="upload a short (~5s) source sample into this slot"></div>';
-      return '<div class="src-sample-slot"><span class="src-sample-label">'+esc(s.name)+' ('+s.duration.toFixed(2)+'s)</span>'+
-        '<button type="button" class="src-sample-play" data-play-slot="'+i+'" title="play this source sample in full">▶</button>'+
-        '<canvas class="src-sample-canvas" data-slot="'+i+'" width="480" height="60"></canvas></div>';
+      if(!s) return '<div class="src-sample-slot empty"><span class="src-sample-label">Slot '+i+' — empty (list a filename for it in ASSETS/SourceSamples/manifest.json)</span></div>';
+      var commentPreview = s.comments && s.comments.trim() ?
+        '<div class="src-sample-comment-preview">'+esc(s.comments.trim().slice(0,80))+(s.comments.trim().length>80?'…':'')+'</div>' : '';
+      // Vertically stacked (title, comment preview, buttons, waveform) so
+      // this panel doesn't force the page wider than the pattern grid next
+      // to it — the old single-row layout pushed a 480px canvas plus label
+      // plus two buttons all onto one line.
+      return '<div class="src-sample-slot">'+
+        '<div class="src-sample-title">'+esc(s.name)+' <span class="src-sample-dur">('+s.duration.toFixed(2)+'s)</span></div>'+
+        commentPreview+
+        '<div class="src-sample-slot-buttons">'+
+          '<button type="button" class="src-sample-play" data-play-slot="'+i+'" data-explain="sample-preview-play" title="play this source sample in full">▶</button>'+
+          '<button type="button" class="src-sample-comments-btn" data-comments-slot="'+i+'" data-explain="sample-comments" title="add notes about this sample">Comments</button>'+
+        '</div>'+
+        '<canvas class="src-sample-canvas" data-slot="'+i+'" width="480" height="60"></canvas>'+
+      '</div>';
     }).join('');
     return '<div class="field" id="field-source-samples">'+
       '<div class="field-header" data-toggle="source-samples" data-explain="source-samples">'+
@@ -923,12 +1029,16 @@
     var arrow = el.querySelector('.collapse-arrow');
     if(arrow) arrow.textContent = collapsed ? '▸' : '▾';
   }
-  document.querySelectorAll('.field-header').forEach(function(header){
-    header.addEventListener('click', function(){
-      var id = header.getAttribute('data-toggle');
-      var el = document.getElementById('field-'+id);
-      setCollapsed(id, !el.classList.contains('collapsed'));
-    });
+  // Delegated on document (rather than bound per-header once at load) so
+  // panels that get their outerHTML replaced later — Source Samples on
+  // upload, Song/Comments on a Project JSON import — keep working without
+  // needing their own re-bind call.
+  document.addEventListener('click', function(e){
+    var header = e.target.closest('.field-header');
+    if(!header) return;
+    var id = header.getAttribute('data-toggle');
+    var el = document.getElementById('field-'+id);
+    if(el) setCollapsed(id, !el.classList.contains('collapsed'));
   });
 
   // --- Patterns card: all 4 GB channels rendered side by side for one
@@ -1298,8 +1408,44 @@
     },
     'source-samples': function(){
       return { title:'Source Samples — Sampler Mode\'s raw material',
-        html: P('Up to '+N(SOURCE_SAMPLE_SLOTS)+' short (~5s) audio clips, either the preset one bundled with this track or your own upload. Click ▶ to hear a slot in full.') +
-          P('An instrument becomes a sampler by pointing at one of these slots (see the "Sampler src" column in the Instruments table) — Sampler Mode then plays that clip, pitched to the note being played, instead of this song\'s original Furnace-rendered stem.') };
+        html: P('Up to '+N(SOURCE_SAMPLE_SLOTS)+' short audio clips, loaded from '+VR('ASSETS/SourceSamples/manifest.json')+' — an ordered list of filenames, one per slot, each expected to already exist in that folder. There\'s no upload button on purpose: listing a file there is how you confirm it\'s actually in place before the app tries to use it.') +
+          P('Each slot shows its title, any comment notes (click '+KW('Comments')+' to add or read them), and its full waveform — click ▶ to hear it in full. A colored, numbered line spawns over the waveform every time an instrument (or the ▶ button itself) actually plays a snippet of it, fading out with that voice\'s real volume envelope.') +
+          P('An instrument becomes a sampler by pointing at one of these slots via its own '+KW('Sampler')+' button in the Instruments table below — Sampler Mode then plays that clip, pitched to the note being played, instead of this song\'s original Furnace-rendered stem.') };
+    },
+    'sampler-col': function(){
+      return { title:'Sampler — turn an instrument into a sample player',
+        html: P('Opens that instrument\'s Sampler editor: which Source Sample slot it plays, an exact Start/End trim (drag the waveform\'s handles or type exact seconds), root note, loop toggle, an ADSR envelope (with a live preview of the shape), Polyphonic on/off with a voice cap, and a '+KW('▶ Preview')+' button to hear it at its root note with the current settings.') +
+          P('The label next to the button shows which Source Sample (if any) this instrument currently points at — '+esc('(none)')+' means it stays silent in Sampler Mode until you assign one.') };
+    },
+    'sample-preview-play': function(){
+      return { title:'Preview — hear the raw Source Sample',
+        html: P('Plays this clip in full, start to finish, at its original pitch/speed — independent of any instrument\'s trim, root note, or ADSR. Click again while it\'s playing (the button turns into '+KW('■')+') to stop it early.') };
+    },
+    'sample-comments': function(){
+      return { title:'Comments — notes about this sample',
+        html: P('Free-text notes about this specific Source Sample — where it came from, licensing, how it\'s meant to be used, anything worth remembering later. Saved into this sample\'s own entry and included in Project JSON, so it travels with the rest of the setup. The first 80 characters show as a preview line under the sample\'s title.') };
+    },
+    'sampler-mode': function(){
+      return { title:'Sampler Mode — which engine is actually playing',
+        html: P('ON: instruments with a Source Sample assigned play through the sample-based engine below — real-time triggered playback of the Source Samples, following this song\'s own note/pattern data (pitch-shifted, ADSR-shaped, polyphonic/monophonic per instrument).') +
+          P('OFF: falls back to the original behavior this page started with — the 4 pre-rendered Furnace stems, playing back exactly as exported. Toggling mid-playback re-syncs to the same position in whichever engine you switch to.') +
+          P('This also changes what the '+KW('⇩ WAV')+' button exports, and what the Song panel\'s summary line reads (Game Boy/tuning/format details, or '+esc('SAMPLER MODE')+').') };
+    },
+    'project-json': function(){
+      return { title:'Project JSON — save and restore the whole Sampler setup',
+        html: P('Opens a text box pre-filled with the current setup as JSON: every instrument\'s Sampler config (source/trim/ADSR/loop/polyphony), mixer levels and mute state, Source Sample comments, page metadata (title/artist/album/comments/licenses/links), and the Theme setting.') +
+          P('Copy it out to save. To restore an earlier one, paste it over the text and click '+KW('Confirm')+' — it re-parses whatever\'s currently in the box, so pasting and editing by hand both work the same way.') +
+          P('Source Samples are always referenced by file path here, never embedded as data — the actual audio files still need to exist under '+VR('ASSETS/SourceSamples/')+'. Saving this as '+VR('ASSETS/lmp-default-proj.json')+' makes it load automatically the next time the page opens.') };
+    },
+    'theme': function(){
+      return { title:'Theme — Light, Dark, or follow System',
+        html: P(KW('System')+' follows your OS/browser\'s light-or-dark preference automatically. '+KW('Light')+'/'+KW('Dark')+' override that regardless of what your system is set to.') +
+          P('Saved in Project JSON, so a saved setup reopens in the theme it was left in. Most of the page follows the theme, including this Explainer, the panels, and the pattern grid — the Piano Roll and Cover Art visualizations intentionally stay dark in both themes, the same way most audio tools keep waveform/meter displays dark regardless of app-wide theme.') };
+    },
+    'download-wav': function(){
+      return { title:'⇩ WAV — export the mix',
+        html: P('With Sampler Mode ON: renders a fresh offline mixdown of the current Sampler setup (one full loop, honoring every instrument\'s trim/ADSR/polyphony and the current mixer levels/mute state) and downloads it as a '+esc('.wav')+' file. This can take a few seconds for a longer song — the button shows '+esc('Rendering…')+' while it works.') +
+          P('With Sampler Mode OFF: downloads the original Furnace-rendered '+esc('.wav')+' bundled with this track instead, unchanged.') };
     },
     'piano-roll': function(){
       return { title:'Piano Roll — what\'s sounding right now',
@@ -1370,8 +1516,18 @@
     document.getElementById('explainTitle').textContent = e.title;
     document.getElementById('explainBody').innerHTML = e.html;
   }
-  document.querySelectorAll('[data-explain]').forEach(function(el){
-    el.addEventListener('mouseenter', function(){ showExplain(el.getAttribute('data-explain')); });
+  // Delegated on document, same reasoning as the .field-header collapse fix
+  // above: several data-explain elements (Source Samples' ▶/Comments
+  // buttons, Instruments rows) only exist after a later outerHTML
+  // re-render, so a one-time per-element bind at load would silently miss
+  // them. mouseover (not mouseenter) is used specifically because it
+  // bubbles — mouseenter doesn't, so it can't be delegated at all. It'll
+  // re-fire showExplain redundantly as the pointer moves across child
+  // elements within the same data-explain container, which is harmless
+  // (just re-renders the same explain content each time).
+  document.addEventListener('mouseover', function(e){
+    var el = e.target.closest('[data-explain]');
+    if(el) showExplain(el.getAttribute('data-explain'));
   });
 
   // ============================================================
@@ -1459,30 +1615,56 @@
   // --- Source Samples: shared decoded buffers, referenced by offset (never
   // duplicated) — sourceSamples[] array itself is declared earlier, up with
   // the rest of the sampler data model, since instrumentsFieldHTML needs it
-  // before this section of the script even runs. ---
-  function loadPresetSourceSample(){
-    ensureAudioContext();
-    return fetch('ASSETS/SourceSamples/flowing-synthesis-pads-dreamlike-new-age-2.ogg')
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
-      .then(function(buf){ return ac.decodeAudioData(buf); })
-      .then(function(audioBuf){
-        sourceSamples[0] = { name:'flowing-synthesis-pads-dreamlike-new-age-2', url:'ASSETS/SourceSamples/flowing-synthesis-pads-dreamlike-new-age-2.ogg', buffer:audioBuf, duration:audioBuf.duration };
-        renderSourceSamplesPanel();
-      }).catch(function(err){ console.error('Failed to load preset source sample:', err); });
+  // before this section of the script even runs.
+  //
+  // No upload/browse control: a static HTML page can't write files or list
+  // a folder's contents (no server-side directory listing, and that
+  // wouldn't work once this is deployed on GitHub Pages anyway), so the 6
+  // slots are populated by reading ASSETS/SourceSamples/manifest.json — a
+  // plain ordered array of up to 6 filenames (or null for an empty slot),
+  // each expected to already exist under ASSETS/SourceSamples/. This makes
+  // "add a sample" a two-step, unambiguous process: drop the file in that
+  // folder, then list it in the manifest — matching how the manifest is the
+  // single source of truth for what's actually available, rather than
+  // letting the browser hand the app an arbitrary local file that may or
+  // may not ever end up on disk in the right place. ---
+  function loadSourceSamplesFromManifest(){
+    return fetch('ASSETS/SourceSamples/manifest.json')
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(list){
+        ensureAudioContext();
+        var loaders = (list||[]).slice(0, SOURCE_SAMPLE_SLOTS).map(function(filename, i){
+          if(!filename) return null;
+          var url = 'ASSETS/SourceSamples/'+filename;
+          return fetch(url)
+            .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status+' for '+filename); return r.arrayBuffer(); })
+            .then(function(buf){ return ac.decodeAudioData(buf); })
+            .then(function(audioBuf){
+              sourceSamples[i] = { name:filename.replace(/\.[^.]+$/,''), url:url, buffer:audioBuf, duration:audioBuf.duration, waveformCache:computeWaveformCache(audioBuf), comments:'' };
+            }).catch(function(err){ console.warn('Could not load Source Sample slot '+i+' ('+filename+'):', err.message); });
+        });
+        return Promise.all(loaders);
+      })
+      .then(function(){ renderSourceSamplesPanel(); })
+      .catch(function(err){ console.warn('No Source Samples manifest loaded (ASSETS/SourceSamples/manifest.json):', err.message); });
   }
-  var sourceSamplesLoadingPromise = loadPresetSourceSample();
+  var sourceSamplesLoadingPromise = loadSourceSamplesFromManifest();
 
-  // Uploads are ephemeral, same as every other in-browser edit on this page
-  // (instrument color tweaks, etc.) — a reload discards them, there's no
-  // localStorage/save path anywhere in this file.
-  function handleSourceSampleUpload(slotIndex, file){
-    ensureAudioContext();
-    file.arrayBuffer().then(function(buf){ return ac.decodeAudioData(buf); })
-      .then(function(audioBuf){
-        sourceSamples[slotIndex] = { name:file.name.replace(/\.[^.]+$/,''), url:null, buffer:audioBuf, duration:audioBuf.duration };
-        renderSourceSamplesPanel();
-      }).catch(function(err){ console.error('Failed to decode uploaded sample:', err); alert('Could not decode that audio file.'); });
+  // Default Project JSON: an optional ASSETS/lmp-default-proj.json, applied
+  // automatically on load via the same applyProjectState() the Project
+  // JSON modal's Confirm button uses — so a shrine's whole Sampler setup
+  // (instrument assignments/trims/ADSR, mixer levels, and now page
+  // metadata/licensing) ships as one file instead of needing a manual
+  // paste-and-Confirm every time the page loads. Entirely optional: a
+  // missing or invalid file just leaves the built-in Furnace-derived
+  // defaults in place, same as before this existed.
+  function loadDefaultProjectFile(){
+    return fetch('ASSETS/lmp-default-proj.json')
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(project){ return applyProjectState(project); })
+      .catch(function(err){ console.warn('No default Project JSON loaded (this is optional):', err.message); });
   }
+  var defaultProjectLoadingPromise = loadDefaultProjectFile();
 
   // --- transport: 4 sources started in one batch at the same time/offset,
   // so they stay sample-locked for the whole playthrough with no need for
@@ -1608,11 +1790,17 @@
   var SAMPLER_SCHED_AHEAD_SEC = 0.15;
   var SAMPLER_SCHED_INTERVAL_MS = 25;
   var SAMPLER_STEAL_FADE_SEC = 0.008; // near-instant cutoff for voice-steal/mono-kill, independent of the musical Release knob
-  var samplerModeEnabled = true;
+  // samplerModeEnabled is declared up with sourceSamples (songFieldHTML needs it earlier than this section runs)
   var samplerSchedTimer = null;
   var samplerSchedNextAbsRow = 0;
   var samplerVoicesByIns = {};
   var samplerLastVoiceByChannel = [null,null,null,null];
+  // Visual-only: one entry per live voice that's actually sounding a Source
+  // Sample, read every frame by drawSourceSamplePlayheads() to paint a
+  // fading line over that sample's waveform in the Source Samples panel.
+  // Kept separate from the voice-management structures above — this array
+  // only describes what to draw, never what to play.
+  var activeSourcePlayheads = [];
 
   // currentSongTime() wraps at songDuration (for display/highlighting), but
   // samplerSchedNextAbsRow*rowDurationSec() is an ever-growing absolute
@@ -1627,7 +1815,24 @@
   }
   function startSamplerScheduler(){
     stopSamplerScheduler();
-    samplerSchedNextAbsRow = Math.floor(samplerUnwrappedSongTime()/rowDurationSec());
+    // beginTransportAt() anchors songStartCtxTime slightly AHEAD of
+    // ac.currentTime (a +0.05s buffer, so the audio graph has time to spin
+    // up before anything's actually due to play) — read right here, before
+    // ac.currentTime has caught up to that anchor, samplerUnwrappedSongTime()
+    // is briefly NEGATIVE relative to songStartOffset, which would floor to
+    // a row BEFORE the real starting row (even a negative absRow on a fresh
+    // start from row 0) and hand scheduleAbsRow a negative, nonsensical
+    // whenCtx — Web Audio throws outright on a negative scheduled time,
+    // which broke Play entirely the moment ac.currentTime was still near 0
+    // (a real browser's normal first-Play state; my own earlier testing
+    // used a flag that skipped autoplay suspension entirely and never hit
+    // this). Clamping to the row songStartOffset itself maps to is the
+    // correct floor regardless — never start earlier than where playback
+    // actually begins.
+    samplerSchedNextAbsRow = Math.max(
+      Math.floor(songStartOffset/rowDurationSec()),
+      Math.floor(samplerUnwrappedSongTime()/rowDurationSec())
+    );
     samplerSchedulerTick();
     samplerSchedTimer = setInterval(samplerSchedulerTick, SAMPLER_SCHED_INTERVAL_MS);
   }
@@ -1693,7 +1898,7 @@
     if(sp.loop){ node.loop=true; node.loopStart=sp.startSec; node.loopEnd=sp.endSec; node.start(whenCtx, sp.startSec); }
     else node.start(whenCtx, sp.startSec, dur); // one-shot ends naturally; sustain/release above only matter if cut short first
 
-    var voice = { channel:ch, insIndex:insIndex, source:node, gainNode:gainNode, sustainLevel:sustainLevel, releaseSec:sp.release, finished:false };
+    var voice = { channel:ch, insIndex:insIndex, source:node, gainNode:gainNode, sustainLevel:sustainLevel, releaseSec:sp.release, startCtxTime:whenCtx, finished:false };
     node.onended = function(){
       voice.finished = true;
       if(sp.polyphonic){
@@ -1706,6 +1911,12 @@
     };
     if(sp.polyphonic) samplerVoicesByIns[insIndex].push(voice);
     samplerLastVoiceByChannel[ch] = voice;
+
+    activeSourcePlayheads.push({
+      kind: 'voice', sourceIndex: sp.sourceIndex, voice: voice, ctxRef: ac, startedAtCtx: whenCtx,
+      offsetSec: sp.startSec, rate: node.playbackRate.value,
+      loop: sp.loop, loopStart: sp.startSec, loopEnd: sp.endSec
+    });
   }
   // fadeSec, when omitted, defaults to the voice's own musical Release —
   // that's the natural-NOTE_OFF case. Voice-steal/mono-kill callers pass
@@ -1719,8 +1930,13 @@
       // Ramp down from the sustain level rather than sampling the gain's
       // true instantaneous value: Web Audio schedules ahead of real time,
       // so there's nothing meaningful to read yet at the moment this runs.
-      // Inaudible in practice since attack/decay are typically tens of ms.
-      var fromLevel = voice.sustainLevel!==undefined ? voice.sustainLevel : voice.gainNode.gain.value;
+      // Inaudible in practice since attack/decay are typically tens of ms —
+      // EXCEPT when this voice's own start() time hasn't even arrived yet
+      // (killed within the scheduler's lookahead window, before it ever
+      // made a sound): there, "sustain level" would be pure fiction, so
+      // drop straight to 0 instead. Otherwise the fading-playhead overlay
+      // would show a ghost line for a voice nobody ever heard.
+      var fromLevel = whenCtx <= voice.startCtxTime ? 0 : (voice.sustainLevel!==undefined ? voice.sustainLevel : voice.gainNode.gain.value);
       voice.gainNode.gain.setValueAtTime(fromLevel, whenCtx);
       voice.gainNode.gain.linearRampToValueAtTime(0, whenCtx+fadeSec);
       voice.source.stop(whenCtx+fadeSec+0.02);
@@ -1730,11 +1946,17 @@
     if(samplerLastVoiceByChannel[ch]) forceStopVoice(samplerLastVoiceByChannel[ch], whenCtx); // default fade = this voice's musical Release
   }
   function killAllSamplerVoices(){
+    // +0.01 safety margin rather than literal ac.currentTime: scheduling an
+    // AudioParam/stop() event at exactly "now" risks the audio thread
+    // having already moved past that instant by the time it processes the
+    // command (main-thread ac.currentTime reads are already slightly
+    // stale), which can cause the event to be silently skipped.
+    var kt = ac.currentTime + 0.01;
     Object.keys(samplerVoicesByIns).forEach(function(k){
-      samplerVoicesByIns[k].slice().forEach(function(v){ forceStopVoice(v, ac.currentTime, SAMPLER_STEAL_FADE_SEC); });
+      samplerVoicesByIns[k].slice().forEach(function(v){ forceStopVoice(v, kt, SAMPLER_STEAL_FADE_SEC); });
       samplerVoicesByIns[k] = [];
     });
-    samplerLastVoiceByChannel.forEach(function(v){ if(v) forceStopVoice(v, ac.currentTime, SAMPLER_STEAL_FADE_SEC); });
+    samplerLastVoiceByChannel.forEach(function(v){ if(v) forceStopVoice(v, kt, SAMPLER_STEAL_FADE_SEC); });
     samplerLastVoiceByChannel = [null,null,null,null];
   }
   function stopSamplerEngine(){ stopSamplerScheduler(); killAllSamplerVoices(); }
@@ -1744,11 +1966,24 @@
     ensureAudioContext();
     if(!stemsReady){ playRequested = true; return; } // resolved by stemsLoadingPromise below
     playRequested = false;
+    var wasSuspended = ac.state!=='running';
     if(!songStarted){
-      if(samplerModeEnabled) startSamplerAt(songStartOffset); else startStemsAt(songStartOffset);
+      if(samplerModeEnabled) startSamplerAt(songStartOffset); else startStemsAt(songStartOffset); // starts the sampler scheduler itself — see below
+    } else if(samplerModeEnabled && wasSuspended){
+      // Resuming from Pause specifically (not a fresh start, and not a
+      // redundant click while already playing): doPause() stopped the JS
+      // lookahead timer but left already-scheduled voices correctly frozen
+      // via ac.suspend(), so only the timer needs restarting here.
+      // Gating on wasSuspended (rather than "if songStarted", which is also
+      // true immediately after startSamplerAt just above) matters — without
+      // it, this ran a SECOND time on every fresh Play using the exact same
+      // songStartCtxTime/songStartOffset startSamplerAt had just set,
+      // re-scheduling the same initial lookahead-window rows twice at
+      // identical whenCtx values and leaving some voices stuck (killed by
+      // their own duplicate before ever sounding, or never released).
+      startSamplerScheduler();
     }
-    if(ac.state!=='running') ac.resume();
-    if(samplerModeEnabled && songStarted) startSamplerScheduler();
+    if(wasSuspended) ac.resume();
     updateTransportUI();
   }
   function doPause(){
@@ -1823,8 +2058,23 @@
   document.getElementById('samplerModeToggle').addEventListener('change', function(e){
     samplerModeEnabled = e.target.checked;
     doSeek(currentSongTime()); // reuses doSeek's stop-both/restart-the-right-one logic verbatim
+    document.getElementById('field-song').outerHTML = songFieldHTML(); // swaps the Game Boy/tuning/format tail for "SAMPLER MODE" (or back)
   });
   updateTransportUI();
+
+  // Theme: 'system' removes the override attribute entirely, so the
+  // prefers-color-scheme media query in the CSS decides; 'light'/'dark'
+  // force it regardless of OS setting. Persisted via Project JSON (see
+  // buildProjectExportJSON/applyProjectState) rather than localStorage,
+  // consistent with everything else on this page.
+  function setTheme(mode){
+    themeMode = mode;
+    if(mode==='light' || mode==='dark') document.documentElement.setAttribute('data-theme', mode);
+    else document.documentElement.removeAttribute('data-theme');
+    var sel = document.getElementById('themeSelect');
+    if(sel) sel.value = mode;
+  }
+  document.getElementById('themeSelect').addEventListener('change', function(e){ setTheme(e.target.value); });
 
   // Mixer: fixed 4-channel + master markup (this song always has exactly
   // 4 GB channels), so it's plain static HTML wired once here — no
@@ -2460,41 +2710,65 @@
   });
 
   // --- Project JSON: everything about the Sampler setup that lives only
-  // in-browser (no localStorage anywhere on this page, see the Source
-  // Samples loader comments) — instrument sampler configs, mixer levels,
-  // and uploaded Source Samples themselves (re-embedded as WAV data URLs,
-  // since decodeAudioData discards the original file bytes; the bundled
-  // preset sample just re-fetches by its known ASSETS/ URL instead, to
-  // keep a typical export small). Round-trips via the clipboard rather
-  // than a file, per how this page already prefers copy/paste-free
-  // ASSETS/-relative downloads over anything requiring a save dialog. ---
-  function blobToDataURL(blob){
-    return new Promise(function(resolve, reject){
-      var reader = new FileReader();
-      reader.onload = function(){ resolve(reader.result); };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }
+  // in-browser (no localStorage anywhere on this page) — instrument
+  // sampler configs, mixer levels, page metadata, and which Source Samples
+  // are loaded. Source Samples are always a FILE REFERENCE (name + a path
+  // under ASSETS/SourceSamples/), never the audio data itself: the actual
+  // files are expected to live on disk there (same as the bundled preset),
+  // managed like any other project asset rather than round-tripped through
+  // JSON. That also keeps this file small and genuinely readable — it's
+  // meant to be hand-editable, so it's pretty-printed rather than
+  // minified. Round-trips via the clipboard/modal rather than a real file,
+  // per how this page already prefers copy/paste-free ASSETS/-relative
+  // downloads over anything requiring a save dialog. ---
   function buildProjectExportJSON(){
-    return Promise.all(sourceSamples.map(function(s){
+    var sourceSamplesOut = sourceSamples.map(function(s){
       if(!s) return null;
-      if(s.url) return { name:s.name, url:s.url };
-      return blobToDataURL(audioBufferToWavBlob(s.buffer)).then(function(dataUrl){
-        return { name:s.name, dataUrl:dataUrl };
-      });
-    })).then(function(sourceSamplesOut){
-      return JSON.stringify({
-        version: 1,
-        samplerModeEnabled: samplerModeEnabled,
-        channelVolume: channelVolume.slice(),
-        masterVolume: masterVolume,
-        mutedChannels: mutedChannels.slice(),
-        sourceSamples: sourceSamplesOut,
-        instruments: song.instruments.map(function(ins){ return ins.sampler; })
-      });
+      return { name: s.name, url: s.url, comments: s.comments||'' };
     });
+    return Promise.resolve(JSON.stringify({
+      version: 1,
+      samplerModeEnabled: samplerModeEnabled,
+      channelVolume: channelVolume.slice(),
+      masterVolume: masterVolume,
+      mutedChannels: mutedChannels.slice(),
+      sourceSamples: sourceSamplesOut,
+      instruments: song.instruments.map(function(ins){ return ins.sampler; }),
+      // Page metadata — kept here too (rather than only in the Furnace
+      // JSON / hardcoded HTML) so a shrine's own Project JSON is a single
+      // self-contained file that can set/override title, credits, and
+      // licensing without hand-editing the page.
+      songTitle: song.meta.name,
+      artist: song.meta.author,
+      album: song.meta.album,
+      comments: song.meta.comments,
+      musicLicense: document.getElementById('footerMusicLicense').textContent,
+      codeLicense: document.getElementById('footerCodeLicense').textContent,
+      viewSourceLink: document.getElementById('footerViewSourceLink').href,
+      websiteLink: document.getElementById('footerWebsiteLink').href,
+      theme: themeMode
+    }, null, 2));
   }
+  // Song/Comments panels are plain functions of song.meta.* — re-rendering
+  // them after a metadata change reuses those exact render functions rather
+  // than duplicating field layout here. Comments is conditionally rendered
+  // in the first place (commentsFieldHTML returns '' when there's nothing
+  // to show), so this handles all three cases: update, newly-added, and
+  // removed-down-to-empty.
+  function renderProjectMetaPanels(){
+    document.getElementById('field-song').outerHTML = songFieldHTML();
+    var existingComments = document.getElementById('field-comments');
+    var commentsHtml = commentsFieldHTML();
+    if(existingComments){
+      if(commentsHtml) existingComments.outerHTML = commentsHtml; else existingComments.remove();
+    } else if(commentsHtml){
+      document.getElementById('sideLegend').insertAdjacentHTML('afterbegin', commentsHtml);
+    }
+    var titleEl = document.getElementById('pageTitleSongName');
+    if(titleEl) titleEl.textContent = song.meta.name;
+    if(song.meta.name) document.title = song.meta.name + ' — shrines of SPIRIT';
+  }
+  function urlDisplayText(url){ return url.replace(/^https?:\/\//,''); }
   function applyProjectState(project){
     if(!project || typeof project!=='object' || !Array.isArray(project.instruments)){
       return Promise.reject(new Error('Not a recognizable Project JSON'));
@@ -2502,6 +2776,7 @@
     ensureAudioContext();
     samplerModeEnabled = !!project.samplerModeEnabled;
     document.getElementById('samplerModeToggle').checked = samplerModeEnabled;
+    document.getElementById('field-song').outerHTML = songFieldHTML(); // Song panel's tail reads "SAMPLER MODE" instead of Game Boy/tuning/format while this is on
     (project.mutedChannels||[]).forEach(function(m,c){ mutedChannels[c]=!!m; setChannelMute(c,!!m); });
     (project.channelVolume||[]).forEach(function(v,c){
       channelVolume[c]=v; setChannelVolume(c,v);
@@ -2511,6 +2786,24 @@
       setMasterVolume(project.masterVolume);
       document.getElementById('mixerMasterVol').value = project.masterVolume;
     }
+    // Page metadata — every field optional/backward-compatible, so a
+    // Project JSON exported before these existed (or hand-written without
+    // them) still applies cleanly and just leaves the current values alone.
+    var metaChanged = false;
+    if(typeof project.songTitle==='string'){ song.meta.name = project.songTitle; metaChanged=true; }
+    if(typeof project.artist==='string'){ song.meta.author = project.artist; metaChanged=true; }
+    if(typeof project.album==='string'){ song.meta.album = project.album; metaChanged=true; }
+    if(typeof project.comments==='string'){ song.meta.comments = project.comments; metaChanged=true; }
+    if(metaChanged) renderProjectMetaPanels();
+    if(typeof project.musicLicense==='string') document.getElementById('footerMusicLicense').textContent = project.musicLicense;
+    if(typeof project.codeLicense==='string') document.getElementById('footerCodeLicense').textContent = project.codeLicense;
+    if(typeof project.viewSourceLink==='string') document.getElementById('footerViewSourceLink').href = project.viewSourceLink;
+    if(typeof project.websiteLink==='string'){
+      var websiteEl = document.getElementById('footerWebsiteLink');
+      websiteEl.href = project.websiteLink;
+      websiteEl.textContent = urlDisplayText(project.websiteLink);
+    }
+    if(project.theme==='system' || project.theme==='light' || project.theme==='dark') setTheme(project.theme);
     var loaders = (project.sourceSamples||[]).map(function(s, i){
       if(!s) { sourceSamples[i]=null; return Promise.resolve(); }
       var src = s.url || s.dataUrl;
@@ -2518,7 +2811,7 @@
       return fetch(src).then(function(r){ return r.arrayBuffer(); })
         .then(function(buf){ return ac.decodeAudioData(buf); })
         .then(function(audioBuf){
-          sourceSamples[i] = { name:s.name, url:s.url||null, buffer:audioBuf, duration:audioBuf.duration };
+          sourceSamples[i] = { name:s.name, url:s.url||null, buffer:audioBuf, duration:audioBuf.duration, waveformCache:computeWaveformCache(audioBuf), comments:s.comments||'' };
         });
     });
     return Promise.all(loaders).then(function(){
@@ -2569,6 +2862,35 @@
       console.error('Project import failed:', err);
       flashProjectIOStatus('Import failed — see console');
     });
+  });
+
+  // --- Sample Comments: free-text notes per Source Sample slot (where it
+  // came from, licensing, how it's used) — saved into that slot's own
+  // .comments field, exported/restored via Project JSON alongside
+  // everything else, and previewed (first 80 chars) right in the panel. ---
+  var sampleCommentsModalSlot = null;
+  function openSampleCommentsModal(slot){
+    var s = sourceSamples[slot];
+    if(!s) return;
+    sampleCommentsModalSlot = slot;
+    document.getElementById('sampleCommentsModalTitle').textContent = 'Comments — '+s.name;
+    document.getElementById('sampleCommentsText').value = s.comments || '';
+    document.getElementById('sampleCommentsModalBackdrop').style.display = 'flex';
+  }
+  function closeSampleCommentsModal(){
+    document.getElementById('sampleCommentsModalBackdrop').style.display = 'none';
+    sampleCommentsModalSlot = null;
+  }
+  document.getElementById('sampleCommentsModalClose').addEventListener('click', closeSampleCommentsModal);
+  document.getElementById('sampleCommentsModalBackdrop').addEventListener('mousedown', function(e){
+    if(e.target.id==='sampleCommentsModalBackdrop') closeSampleCommentsModal();
+  });
+  document.getElementById('sampleCommentsSave').addEventListener('click', function(){
+    if(sampleCommentsModalSlot!==null && sourceSamples[sampleCommentsModalSlot]){
+      sourceSamples[sampleCommentsModalSlot].comments = document.getElementById('sampleCommentsText').value;
+      renderSourceSamplesPanel();
+    }
+    closeSampleCommentsModal();
   });
 
 
@@ -2649,25 +2971,119 @@
       ctx.globalAlpha = 1;
     });
   }
-  // --- Source Samples panel: static min/max-per-pixel waveform (fast even
-  // for a several-second buffer) — draggable trim handles are a later
-  // stage, this is just enough to see and preview the sample. ---
-  function drawWaveformOnCanvas(canvas, buffer){
-    var ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
-    ctx.fillStyle = '#08080a'; ctx.fillRect(0,0,w,h);
-    var data = buffer.getChannelData(0), step = Math.ceil(data.length/w), amp = h/2;
-    ctx.strokeStyle = '#8fd0a0'; ctx.beginPath();
-    for(var x=0;x<w;x++){
+  // --- Source Samples waveform: the min/max-per-pixel reduction is O(the
+  // whole buffer's sample count), so it's computed ONCE per sample here and
+  // cached (computeWaveformCache), not redone on every draw. That matters
+  // because drawSourceSamplePlayheads() below redraws every populated
+  // canvas EVERY ANIMATION FRAME to keep playhead lines live — recomputing
+  // a several-second buffer's full min/max at 60fps per visible sample
+  // would be real, needless CPU cost. drawWaveformFromCache just walks the
+  // small cached array (fixed at WAVEFORM_CACHE_WIDTH columns) instead, and
+  // scales to whatever the target canvas size is (the panel's small strip
+  // vs. the Sampler modal's larger view) via scaleX/scaleY. ---
+  var WAVEFORM_CACHE_WIDTH = 480;
+  function computeWaveformCache(buffer){
+    var data = buffer.getChannelData(0);
+    var step = Math.ceil(data.length/WAVEFORM_CACHE_WIDTH);
+    var mins = new Float32Array(WAVEFORM_CACHE_WIDTH), maxs = new Float32Array(WAVEFORM_CACHE_WIDTH);
+    for(var x=0;x<WAVEFORM_CACHE_WIDTH;x++){
       var min=1, max=-1;
       for(var i=0;i<step;i++){ var v=data[x*step+i]||0; if(v<min)min=v; if(v>max)max=v; }
-      ctx.moveTo(x, amp+min*amp); ctx.lineTo(x, amp+max*amp);
+      mins[x]=min; maxs[x]=max;
+    }
+    return { mins:mins, maxs:maxs };
+  }
+  // Reads a CSS custom property's live computed value — used by the few
+  // canvas draws simple enough to reasonably follow the Light/Dark theme
+  // (Source Sample waveforms/playheads, the ADSR curve). The piano roll and
+  // cover art stay deliberately dark regardless of theme, same as most
+  // audio tools keep waveform/meter displays dark independent of app chrome.
+  function getThemeColor(varName){
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  }
+  function drawWaveformFromCache(canvas, cache){
+    var ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height, amp = h/2;
+    ctx.fillStyle = getThemeColor('--surface-deep'); ctx.fillRect(0,0,w,h);
+    ctx.strokeStyle = '#8fd0a0'; ctx.beginPath();
+    var scaleX = w/WAVEFORM_CACHE_WIDTH;
+    for(var x=0;x<WAVEFORM_CACHE_WIDTH;x++){
+      var px = x*scaleX;
+      ctx.moveTo(px, amp+cache.mins[x]*amp);
+      ctx.lineTo(px, amp+cache.maxs[x]*amp);
     }
     ctx.stroke();
   }
   function drawAllSourceSampleWaveforms(){
     document.querySelectorAll('.src-sample-canvas').forEach(function(c){
       var s = sourceSamples[parseInt(c.getAttribute('data-slot'),10)];
-      if(s) drawWaveformOnCanvas(c, s.buffer);
+      if(s) drawWaveformFromCache(c, s.waveformCache);
+    });
+  }
+  // Redraws every populated Source Sample canvas each frame: the static
+  // waveform underneath, then one fading vertical line per live voice
+  // currently playing a snippet of that sample. Position follows the
+  // voice's own elapsed time/playbackRate/loop settings; opacity reads the
+  // voice's REAL gainNode.gain value (a scheduled AudioParam, so this is
+  // its true interpolated level at ac.currentTime) — the line fades
+  // exactly in step with attack/decay/sustain/release/steal, whichever
+  // actually happens to it. Unconditional every-frame redraw (rather than
+  // only-when-something's-playing) is the same pattern drawCoverArtFrame
+  // already uses, and cheap at this canvas size — it's also what clears a
+  // finished voice's line without needing a separate "erase" pass.
+  function hexToRgba(hex, alpha){
+    var r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    return 'rgba('+r+','+g+','+b+','+alpha+')';
+  }
+  // Two kinds of playhead share this one array: 'voice' entries come from
+  // triggerSamplerVoice (real Sampler-Mode playback, tied to an instrument
+  // and its live ADSR gain), 'preview' entries come from the panel's own
+  // ▶ button (a plain, envelope-less full-sample playback with no
+  // instrument attached — full solid opacity for as long as it plays).
+  // They run on DIFFERENT AudioContexts (ac vs previewAc), so each entry
+  // carries its own clock reference rather than assuming ac throughout.
+  function drawSourceSamplePlayheads(){
+    if(!ac) return;
+    activeSourcePlayheads = activeSourcePlayheads.filter(function(p){
+      return p.kind==='voice' ? !p.voice.finished : !p.finished;
+    });
+    document.querySelectorAll('.src-sample-canvas').forEach(function(canvas){
+      var slot = parseInt(canvas.getAttribute('data-slot'), 10);
+      var s = sourceSamples[slot];
+      if(!s) return;
+      drawWaveformFromCache(canvas, s.waveformCache);
+      var ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+      activeSourcePlayheads.forEach(function(p){
+        if(p.sourceIndex!==slot) return;
+        var nowCtx = p.ctxRef.currentTime;
+        var elapsed = (nowCtx - p.startedAtCtx) * p.rate;
+        var posSec = p.offsetSec + elapsed;
+        if(p.loop && p.loopEnd>p.loopStart) posSec = p.loopStart + ((posSec-p.loopStart) % (p.loopEnd-p.loopStart));
+        if(posSec<0 || posSec>s.buffer.duration) return; // scheduled ahead but not actually started yet
+        var x = (posSec/s.buffer.duration) * w;
+        var alpha, color, label;
+        if(p.kind==='voice'){
+          alpha = Math.max(0, Math.min(1, p.voice.gainNode.gain.value));
+          var ins = song.instruments[p.voice.insIndex];
+          color = ins ? ins.color : '#c9973a';
+          label = String(p.voice.insIndex);
+        } else {
+          alpha = 1;
+          color = '#e7e7e7';
+          label = null;
+        }
+        ctx.strokeStyle = hexToRgba(color, alpha);
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+        if(label!==null){
+          // Right-aligned just to the left of the line (rather than centered
+          // on it) so a 2-digit index never overlaps the line it belongs to.
+          var lx = Math.max(16, x-4); // 16px reserves room for 2 digits even when the line sits near the canvas's left edge
+          ctx.font = 'bold 9px monospace';
+          ctx.textAlign = 'right';
+          ctx.fillStyle = hexToRgba(color, alpha);
+          ctx.fillText(label, lx, 9);
+        }
+      });
     });
   }
   // Re-render the panel after a sample loads/uploads. #legend's own
@@ -2705,7 +3121,14 @@
     var src = previewAc.createBufferSource();
     src.buffer = s.buffer;
     src.connect(previewAc.destination);
+    // No instrument/envelope involved in a raw preview — a plain playhead
+    // at full opacity for as long as it plays, on previewAc's own clock
+    // (drawSourceSamplePlayheads reads ctxRef.currentTime for 'preview'
+    // entries instead of assuming the main ac).
+    var playhead = { kind:'preview', sourceIndex:slotIndex, ctxRef:previewAc, startedAtCtx:previewAc.currentTime, offsetSec:0, rate:1, loop:false, loopStart:0, loopEnd:0, finished:false };
+    activeSourcePlayheads.push(playhead);
     src.onended = function(){
+      playhead.finished = true;
       delete sourceSamplePreviewNodes[slotIndex];
       var liveBtn = document.querySelector('[data-play-slot="'+slotIndex+'"]'); // re-query: the panel may have re-rendered (a new upload) since this started
       if(liveBtn){ liveBtn.textContent = '▶'; liveBtn.title = 'play this source sample in full'; }
@@ -2772,15 +3195,48 @@
       positionSamplerHandles(0,0,0);
       return;
     }
-    drawWaveformOnCanvas(canvas, s.buffer);
+    drawWaveformFromCache(canvas, s.waveformCache);
     var sp = song.instruments[samplerModalInsIndex].sampler;
     positionSamplerHandles(s.buffer.duration, sp.startSec, sp.endSec);
+    document.getElementById('samplerStartSecInput').value = sp.startSec.toFixed(3);
+    document.getElementById('samplerEndSecInput').value = sp.endSec.toFixed(3);
   }
   function updateSamplerADSRLabels(){
     document.getElementById('samplerAttackVal').textContent = parseFloat(document.getElementById('samplerAttack').value).toFixed(3)+'s';
     document.getElementById('samplerDecayVal').textContent = parseFloat(document.getElementById('samplerDecay').value).toFixed(3)+'s';
     document.getElementById('samplerSustainVal').textContent = Math.round(parseFloat(document.getElementById('samplerSustain').value)*100)+'%';
     document.getElementById('samplerReleaseVal').textContent = parseFloat(document.getElementById('samplerRelease').value).toFixed(2)+'s';
+  }
+  // Sustain has no fixed duration of its own (a real note holds it for as
+  // long as the pattern keeps the note down) — drawn here at a fixed
+  // nominal width purely so the plateau is visible at all, not because
+  // that width means anything.
+  var SAMPLER_ADSR_NOMINAL_HOLD_SEC = 0.3;
+  function drawADSRCurve(){
+    var canvas = document.getElementById('samplerADSRCanvas');
+    if(!canvas) return;
+    var ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+    ctx.fillStyle = getThemeColor('--surface-deep'); ctx.fillRect(0,0,w,h);
+    var a = parseFloat(document.getElementById('samplerAttack').value)||0;
+    var d = parseFloat(document.getElementById('samplerDecay').value)||0;
+    var s = parseFloat(document.getElementById('samplerSustain').value)||0;
+    var r = parseFloat(document.getElementById('samplerRelease').value)||0;
+    var totalSec = Math.max(0.05, a+d+SAMPLER_ADSR_NOMINAL_HOLD_SEC+r);
+    function xAt(t){ return (t/totalSec)*w; }
+    function yAt(level){ return (h-4) - level*(h-8); }
+    ctx.beginPath();
+    ctx.moveTo(xAt(0), yAt(0));
+    ctx.lineTo(xAt(a), yAt(1));
+    ctx.lineTo(xAt(a+d), yAt(s));
+    ctx.lineTo(xAt(a+d+SAMPLER_ADSR_NOMINAL_HOLD_SEC), yAt(s));
+    ctx.lineTo(xAt(a+d+SAMPLER_ADSR_NOMINAL_HOLD_SEC+r), yAt(0));
+    ctx.strokeStyle = '#c9973a';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.lineTo(xAt(0), yAt(0));
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(201,151,58,.15)';
+    ctx.fill();
   }
   function openSamplerModal(insIndex){
     samplerModalInsIndex = insIndex;
@@ -2796,6 +3252,7 @@
     document.getElementById('samplerPolyToggle').checked = sp.polyphonic;
     document.getElementById('samplerVoiceCap').value = sp.voiceCap;
     updateSamplerADSRLabels();
+    drawADSRCurve();
     redrawSamplerModalWave();
     document.getElementById('samplerModalBackdrop').style.display = 'flex';
   }
@@ -2811,6 +3268,7 @@
     if(e.key!=='Escape') return;
     if(samplerModalInsIndex!==null) closeSamplerModal();
     if(document.getElementById('projectModalBackdrop').style.display!=='none') closeProjectModal();
+    if(document.getElementById('sampleCommentsModalBackdrop').style.display!=='none') closeSampleCommentsModal();
   });
 
   document.getElementById('samplerSourceSelect').addEventListener('change', function(e){
@@ -2832,7 +3290,68 @@
     document.getElementById(id).addEventListener('input', function(e){
       song.instruments[samplerModalInsIndex].sampler[SAMPLER_ADSR_FIELDS[id]] = parseFloat(e.target.value);
       updateSamplerADSRLabels();
+      drawADSRCurve();
     });
+  });
+  // Sample-exact Start/End: typing a value here is equivalent to dragging
+  // its handle to that exact position — same clamping (min 0.01s apart),
+  // same redraw, just keyboard-precise instead of mouse-precise.
+  document.getElementById('samplerStartSecInput').addEventListener('input', function(e){
+    var sp = song.instruments[samplerModalInsIndex].sampler;
+    var v = parseFloat(e.target.value);
+    if(isNaN(v)) return;
+    sp.startSec = Math.max(0, Math.min(v, sp.endSec-0.01));
+    redrawSamplerModalWave();
+  });
+  document.getElementById('samplerEndSecInput').addEventListener('input', function(e){
+    var sp = song.instruments[samplerModalInsIndex].sampler;
+    var s = currentSamplerModalSample();
+    var v = parseFloat(e.target.value);
+    if(isNaN(v)) return;
+    var maxEnd = s ? s.buffer.duration : v;
+    sp.endSec = Math.min(maxEnd, Math.max(v, sp.startSec+0.01));
+    redrawSamplerModalWave();
+  });
+  // Preview: a one-shot at the instrument's own root note (no transposition)
+  // through the current trim/ADSR/loop settings — hear exactly what's
+  // configured, on the dedicated previewAc so it never disturbs the real
+  // transport. A looping sample previews for a fixed, reasonable hold
+  // length rather than ringing forever.
+  function previewSamplerInstrument(insIndex){
+    var ins = song.instruments[insIndex], sp = ins.sampler;
+    var srcSample = sourceSamples[sp.sourceIndex];
+    if(!srcSample) return;
+    ensureAudioContext();
+    if(!previewAc) previewAc = new (window.AudioContext||window.webkitAudioContext)();
+    if(previewAc.state!=='running') previewAc.resume();
+    var when = previewAc.currentTime;
+    var node = previewAc.createBufferSource();
+    node.buffer = srcSample.buffer;
+    var gainNode = previewAc.createGain();
+    var sustainLevel = sp.sustain;
+    gainNode.gain.setValueAtTime(0, when);
+    gainNode.gain.linearRampToValueAtTime(1, when+Math.max(sp.attack,0.003));
+    gainNode.gain.linearRampToValueAtTime(sustainLevel, when+sp.attack+sp.decay);
+    node.connect(gainNode); gainNode.connect(previewAc.destination);
+    var fakeVoice = { gainNode:gainNode, finished:false, insIndex:insIndex };
+    if(sp.loop){
+      node.loop = true; node.loopStart = sp.startSec; node.loopEnd = sp.endSec;
+      node.start(when, sp.startSec);
+      var holdSec = 1.5;
+      gainNode.gain.setValueAtTime(sustainLevel, when+holdSec);
+      gainNode.gain.linearRampToValueAtTime(0, when+holdSec+sp.release);
+      node.stop(when+holdSec+sp.release+0.05);
+    } else {
+      node.start(when, sp.startSec, sp.endSec-sp.startSec);
+    }
+    node.onended = function(){ fakeVoice.finished = true; };
+    activeSourcePlayheads.push({
+      kind:'voice', sourceIndex: sp.sourceIndex, voice: fakeVoice, ctxRef: previewAc, startedAtCtx: when,
+      offsetSec: sp.startSec, rate: 1, loop: sp.loop, loopStart: sp.startSec, loopEnd: sp.endSec
+    });
+  }
+  document.getElementById('samplerPreviewBtn').addEventListener('click', function(){
+    if(samplerModalInsIndex!==null) previewSamplerInstrument(samplerModalInsIndex);
   });
   document.getElementById('samplerPolyToggle').addEventListener('change', function(e){
     song.instruments[samplerModalInsIndex].sampler.polyphonic = e.target.checked;
@@ -2859,6 +3378,8 @@
     if(samplerDragTarget==='start') sp.startSec = Math.min(sec, sp.endSec-0.01);
     else sp.endSec = Math.max(sec, sp.startSec+0.01);
     positionSamplerHandles(s.buffer.duration, sp.startSec, sp.endSec);
+    document.getElementById('samplerStartSecInput').value = sp.startSec.toFixed(3);
+    document.getElementById('samplerEndSecInput').value = sp.endSec.toFixed(3);
   });
   document.addEventListener('mouseup', function(){ samplerDragTarget = null; });
   // Transient highlight for a preview click — independent of playback
@@ -2982,6 +3503,7 @@
     coverLastFrameSec = nowSec;
     drawCoverArtFrame(coverDt);
     updateMixerMeters(); // also runs every frame regardless of transport state — meters should read 0 and settle, not freeze, once nothing's sounding
+    drawSourceSamplePlayheads(); // same reasoning — a voice can be sounding from a preview click even with the transport stopped
     requestAnimationFrame(playbackRAF);
   }
   requestAnimationFrame(playbackRAF);
@@ -3048,12 +3570,8 @@
     if(playSlotBtn) previewSourceSampleFull(parseInt(playSlotBtn.getAttribute('data-play-slot'), 10));
     var samplerBtn = e.target.closest('[data-sampler-ins]');
     if(samplerBtn) openSamplerModal(parseInt(samplerBtn.getAttribute('data-sampler-ins'), 10));
-  });
-  document.getElementById('legend').addEventListener('change', function(e){
-    var uploadInput = e.target.closest('[data-upload-slot]');
-    if(uploadInput && uploadInput.files && uploadInput.files[0]){
-      handleSourceSampleUpload(parseInt(uploadInput.getAttribute('data-upload-slot'), 10), uploadInput.files[0]);
-    }
+    var commentsBtn = e.target.closest('[data-comments-slot]');
+    if(commentsBtn) openSampleCommentsModal(parseInt(commentsBtn.getAttribute('data-comments-slot'), 10));
   });
 
 
