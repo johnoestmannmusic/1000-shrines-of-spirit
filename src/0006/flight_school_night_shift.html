@@ -167,6 +167,10 @@
      table — only Wave-channel instruments get one (empty td otherwise). */
   .ins-wave-canvas{display:block;background:var(--surface-deep);border:1px solid var(--edge);
     image-rendering:pixelated;width:64px;height:16px;cursor:default;}
+  /* On-brand green (same #6cd73c as SAMPLER MODE's own on-state) so a
+     glance down the Instruments table shows which rows have a Spectral
+     Fusion result actually feeding the tracker right now. */
+  .spectral-btn.fusion-on{background:#6cd73c;color:#0b0b0d;border-color:#6cd73c;}
   .sampler-btn{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);cursor:pointer;
     font-family:var(--mono);font-size:14px;padding:2px 8px;}
   .sampler-btn:hover{border-color:var(--edge-hover);}
@@ -257,10 +261,40 @@
   .sampler-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;
     display:flex;align-items:center;justify-content:center;}
   .sampler-modal{background:var(--panel);border:2px solid var(--edge);border-radius:2px;padding:16px;
-    width:650px;max-width:92vw;display:flex;flex-direction:column;gap:10px;font-size:15px;color:var(--ink);}
-  .sampler-modal-head{display:flex;align-items:center;justify-content:space-between;font-size:17px;}
+    width:650px;max-width:92vw;max-height:88vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;font-size:15px;color:var(--ink);}
+  .sampler-modal-head{display:flex;align-items:center;justify-content:space-between;font-size:17px;flex-wrap:wrap;gap:8px;}
   .sampler-modal-head button{background:var(--surface-deep);color:var(--ink);border:1px solid var(--edge);cursor:pointer;padding:2px 8px;}
   .sampler-modal-head-actions{display:flex;align-items:center;gap:8px;}
+  /* Only tab strip in this file — everywhere else is either an
+     independently-collapsible .field card or a binary .mode-switch, never
+     an N-way exclusive strip, so this is a small new component rather than
+     a reuse of something existing. */
+  .sampler-tab-strip{display:flex;gap:4px;flex-basis:100%;order:3;}
+  .sampler-tab-btn{background:var(--surface-deep);color:var(--dim);border:1px solid var(--edge);cursor:pointer;padding:3px 10px;font-size:14px;}
+  .sampler-tab-btn.active{color:var(--ink);box-shadow:inset 0 -2px 0 var(--amber);}
+  .sampler-fusion-io{display:flex;flex-direction:column;gap:4px;}
+  .sampler-fusion-io label{color:var(--dim);font-size:13px;}
+  /* Narrower than the Sampler tab's own 100px canvas — these three share
+     the tab with the algorithm list on the right, so .sampler-wave-canvas's
+     shared 100px height would look oversized stacked three times here. */
+  .sampler-wave-canvas.fusion-wave-sm{height:56px;}
+  .sampler-fusion-body{display:flex;gap:14px;}
+  .sampler-fusion-waves{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;}
+  .sampler-fusion-algos{flex:none;width:150px;display:flex;flex-direction:column;gap:12px;}
+  .fusion-algo-list{display:flex;flex-direction:column;gap:4px;}
+  .fusion-algo-item{background:var(--surface-deep);color:var(--dim);border:1px solid var(--edge);
+    cursor:pointer;padding:6px 8px;text-align:left;font-family:var(--mono);font-size:13px;}
+  .fusion-algo-item.active{color:var(--ink);border-color:var(--amber);box-shadow:inset 0 0 0 1px var(--amber);}
+  .sampler-fusion-amount{display:flex;flex-direction:column;align-items:flex-start;gap:2px;color:var(--dim);font-size:13px;}
+  .sampler-fusion-amount input[type=range]{width:100%;}
+  /* Off = "using the plain sample, nothing here is live" — greyed and
+     inert rather than just visually dim, so there's no temptation to tweak
+     settings that won't do anything (or trigger a render) until it's on. */
+  .sampler-fusion-body.fusion-off{opacity:.4;pointer-events:none;}
+  /* Fusion's own pill starts grey, not SAMPLER MODE's sky blue — off here
+     just means "not in use" (no second real engine the way CHIP MODE is),
+     so it shouldn't visually compete with that other switch's blue. */
+  .mode-switch-fusion .mode-switch-track{background:var(--edge-hover);}
   .sampler-wave-wrap{position:relative;user-select:none;}
   .sampler-wave-canvas{display:block;width:100%;height:100px;background:var(--surface-deep);border:1px solid var(--edge);}
   .sampler-trim-shade{position:absolute;top:1px;bottom:1px;left:1px;background:rgba(0,0,0,.55);pointer-events:none;}
@@ -463,7 +497,12 @@
         <button type="button" id="samplerPreviewBtn" title="preview this instrument at a neutral reference pitch, using the current trim/ADSR/loop/Transpose settings">▶ Preview</button>
         <button type="button" id="samplerModalClose" title="close">✕</button>
       </div>
+      <div class="sampler-tab-strip">
+        <button type="button" class="sampler-tab-btn active" data-sampler-tab="sampler">Sampler</button>
+        <button type="button" class="sampler-tab-btn" data-sampler-tab="fusion" data-explain="spectral-fusion-tab">Spectral Fusion</button>
+      </div>
     </div>
+    <div id="samplerTabPaneSampler">
     <div class="sampler-wave-wrap">
       <canvas id="samplerWaveCanvas" class="sampler-wave-canvas" width="600" height="100"></canvas>
       <div class="sampler-trim-shade" id="samplerTrimShadeLeft" style="width:0"></div>
@@ -491,6 +530,43 @@
     <div class="sampler-row">
       <label class="tint-toggle"><input type="checkbox" id="samplerPolyToggle" title="ON: rapid retriggers layer new voices, each cleaned up after it finishes. OFF: each retrigger kills the previous voice on this channel."> Polyphonic</label>
       <label>Voice cap <input type="number" id="samplerVoiceCap" min="1" max="32" style="width:44px" title="max simultaneous voices for this instrument before the oldest is stolen (polyphonic only)"></label>
+    </div>
+    </div>
+    <div id="samplerTabPaneFusion" style="display:none">
+      <div class="sampler-row">
+        <label class="mode-switch mode-switch-fusion" title="ON: this instrument plays the fused result below instead of its plain Source Sample — everywhere (tracker playback, preview, WAV export). Start/End resets to the fused sample's full length; your plain-sample trim is restored automatically when you turn this back off.">
+          <input type="checkbox" id="samplerFusionEnableToggle">
+          <span class="mode-switch-track"><span class="mode-switch-thumb"></span></span>
+          <span class="mode-switch-label" id="samplerFusionEnableLabel" style="min-width:4ch">OFF</span>
+        </label>
+      </div>
+      <div class="sampler-fusion-body fusion-off" id="samplerFusionBody">
+        <div class="sampler-fusion-waves">
+          <div class="sampler-fusion-io">
+            <label>Sample A (from Sampler tab)</label>
+            <canvas id="samplerFusionWaveA" class="sampler-wave-canvas fusion-wave-sm" width="420" height="56"></canvas>
+          </div>
+          <div class="sampler-fusion-io">
+            <label>Sample B <select id="samplerFusionSourceSelect" title="the second Source Sample to morph in — re-renders automatically once picked"></select></label>
+            <canvas id="samplerFusionWaveB" class="sampler-wave-canvas fusion-wave-sm" width="420" height="56"></canvas>
+          </div>
+          <div class="sampler-fusion-io">
+            <label>Result</label>
+            <canvas id="samplerFusionResultWave" class="sampler-wave-canvas fusion-wave-sm" width="420" height="56"></canvas>
+          </div>
+          <div class="sampler-row">
+            <span id="samplerFusionStatus" style="color:var(--dim)">Not rendered yet</span>
+          </div>
+        </div>
+        <div class="sampler-fusion-algos">
+          <div class="fusion-algo-list" id="samplerFusionAlgoList" data-explain="fusion-algorithm">
+            <button type="button" class="fusion-algo-item" data-algo="spectral-blend" title="Crossfades Sample B's frequency content onto Sample A's own phase/timing — a true spectral cross-synthesis, not a plain crossfade.">Spectral Blend</button>
+            <button type="button" class="fusion-algo-item" data-algo="convolve" title="Runs Sample A through Sample B as an impulse response (native Web Audio convolution) — a smeared, textural cross-synthesis.">Convolve</button>
+            <button type="button" class="fusion-algo-item" data-algo="ring-mod" title="Multiplies Sample A and Sample B together, sample-by-sample — metallic, robotic tones.">Ring Modulate</button>
+          </div>
+          <label id="samplerFusionAmountLabel" class="sampler-fusion-amount">Blend Amount <input type="range" id="samplerFusionAmount" min="0" max="100" step="1"><span class="sampler-val" id="samplerFusionAmountVal"></span></label>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -717,9 +793,28 @@
       transpose: 0,            // semitones (decimals = cents) to pitch-shift the raw sample by; editable via the Sampler modal
       loop: false,
       attack: 0.005, decay: 0.08, sustain: 0.7, release: 0.15,
-      polyphonic: false, voiceCap: 8
+      polyphonic: false, voiceCap: 8,
+      // Spectral Fusion: morphs this sample (A) with a second Source Sample
+      // (B) into a brand-new in-memory sample this instrument plays instead
+      // — see spectralFusionCache/getEffectiveSource below. Plain JSON, so
+      // it rides along in ins.sampler's existing Project JSON export/import
+      // for free; the rendered AudioBuffer itself can't serialize and lives
+      // only in spectralFusionCache.
+      spectralFusion: {
+        enabled: false,
+        sourceIndex2: null,           // secondary sample slot, or null
+        algorithm: 'spectral-blend',  // 'spectral-blend' | 'convolve' | 'ring-mod'
+        amount: 50,                   // 0-100, meaning depends on algorithm
+        savedStartSec: 0, savedEndSec: 0 // plain-sample trim, stashed while enabled, restored on disable
+      }
     };
   });
+  // Runtime-only (never serialized) — the actual rendered fusion result per
+  // instrument. Parallel array to sourceSamples, but keyed by instrument
+  // since two instruments sharing the same primary sample can fuse it with
+  // different secondaries/algorithms and get different results.
+  // spectralFusionCache[i] = { buffer, waveformCache, dirty:false } | null
+  var spectralFusionCache = new Array(song.instruments.length).fill(null);
 
   // --- per-channel instrument timeline: which instrument is "active" at
   // every row across the WHOLE song's play order (not just whatever pattern
@@ -970,25 +1065,31 @@
   // Options for a Source select — shared by the Sampler modal's own select
   // and each Instruments-row select below, so the two never drift apart in
   // what they list.
-  function samplerSourceOptionsHTML(insIndex){
+  function samplerSourceOptionsHTML(insIndex, selectedOverride){
     var sp = song.instruments[insIndex].sampler;
+    var selected = selectedOverride!==undefined ? selectedOverride : sp.sourceIndex;
     return '<option value="">(none)</option>' + sourceSamples.map(function(s, si){
       if(!s) return '';
-      return '<option value="'+si+'"'+(sp.sourceIndex===si?' selected':'')+'>'+esc(s.name)+'</option>';
+      return '<option value="'+si+'"'+(selected===si?' selected':'')+'>'+esc(s.name)+'</option>';
     }).join('');
   }
   function samplerButtonHTML(insIndex){
+    var fusionOn = song.instruments[insIndex].sampler.spectralFusion.enabled;
     return '<button type="button" class="sampler-btn" data-sampler-ins="'+insIndex+'" title="open the full sampler settings (trim, ADSR, loop, polyphony) for this instrument">Sampler</button> '+
+      '<button type="button" class="sampler-btn spectral-btn'+(fusionOn?' fusion-on':'')+'" data-spectral-ins="'+insIndex+'" title="open the Spectral Fusion tab for this instrument — green means it\'s currently on and feeding the tracker">Spectral</button> '+
       '<select class="ins-sampler-source-select" data-ins="'+insIndex+'" title="which Source Sample this instrument plays — changing it resets Start/End to the new sample\'s full length">'+samplerSourceOptionsHTML(insIndex)+'</select>';
   }
-  // Refresh just the per-row Source selects after something elsewhere
-  // changes a sample's name or which slots exist (Info edit, Load, Clear
-  // Samples, initial probeSourceSample load) — cheaper than re-rendering
-  // the whole table and doesn't disturb any other row state.
+  // Refresh just the per-row Source selects + Spectral button highlight
+  // after something elsewhere changes a sample's name/slots or a Fusion
+  // enabled state (Info edit, Load, Clear Samples, initial
+  // probeSourceSample load, Fusion on/off toggle) — cheaper than
+  // re-rendering the whole table and doesn't disturb any other row state.
   function refreshInstrumentSamplerButtons(){
     song.instruments.forEach(function(ins, i){
       var sel = document.querySelector('.ins-sampler-source-select[data-ins="'+i+'"]');
       if(sel) sel.innerHTML = samplerSourceOptionsHTML(i);
+      var spectralBtn = document.querySelector('.spectral-btn[data-spectral-ins="'+i+'"]');
+      if(spectralBtn) spectralBtn.classList.toggle('fusion-on', ins.sampler.spectralFusion.enabled);
     });
   }
   function sourceSamplesFieldHTML(){
@@ -1154,8 +1255,12 @@
       var i = parseInt(sel.getAttribute('data-ins'), 10);
       var sp = song.instruments[i].sampler;
       sp.sourceIndex = sel.value==='' ? null : parseInt(sel.value, 10);
-      sp.startSec = 0;
-      sp.endSec = sp.sourceIndex!==null ? sourceSamples[sp.sourceIndex].duration : 0;
+      if(!sp.spectralFusion.enabled){
+        sp.startSec = 0;
+        sp.endSec = sp.sourceIndex!==null ? sourceSamples[sp.sourceIndex].duration : 0;
+      } else {
+        autoRenderFusion(i);
+      }
     });
   });
 
@@ -1391,8 +1496,7 @@
     if(th){
       var c = parseInt(th.getAttribute('data-chan-mute'), 10);
       mutedChannels[c] = !mutedChannels[c];
-      th.classList.toggle('muted', mutedChannels[c]);
-      setChannelMute(c, mutedChannels[c]); // just a gain toggle on that stem — see below
+      setChannelMute(c, mutedChannels[c]); // gain toggle + header strikethrough — see below
       renderPatternTable(); // reflect the mute in the currently-visible cells (see chan-muted)
       return;
     }
@@ -1623,6 +1727,15 @@
         html: P(KW('SAMPLER MODE')+' (green): assigned instruments play via the sample engine — pitch-shifted, ADSR-shaped, per-instrument poly/mono.') +
           P(KW('CHIP MODE')+' (blue): falls back to the 4 original Furnace stems. Also changes what '+KW('⇩ WAV')+' exports and the Song summary line.') };
     },
+    'spectral-fusion-tab': function(){
+      return { title:'Spectral Fusion — morph two samples into one',
+        html: P('Pick Sample B and an algorithm, then '+KW('Render')+' — this instrument then plays the fused result everywhere (tracker, preview, export) instead of its plain sample.') +
+          P('Start/End resets to the fused sample; turning this off restores your old trim.') };
+    },
+    'fusion-algorithm': function(){
+      return { title:'Morphing algorithm',
+        html: P(KW('Spectral Blend')+' crossfades B\'s frequency content onto A\'s phase/timing. '+KW('Convolve')+' runs A through B as an impulse response. '+KW('Ring Modulate')+' multiplies them sample-by-sample.') };
+    },
     'project-json': function(){
       return { title:'Project JSON — save and restore the whole Sampler setup',
         html: P('JSON dump of the whole setup: Sampler configs, mixer levels/mutes, sample comments, page metadata, and Theme.') +
@@ -1768,10 +1881,17 @@
     return ac;
   }
 
-  // Mute just toggles that stem's own gain — no scheduler to coordinate
-  // with, so this takes effect on literally the next audio sample.
+  // Mute toggles that stem's own gain (no scheduler to coordinate with, so
+  // it takes effect on literally the next audio sample) AND the channel
+  // header's strikethrough — kept together here, rather than left to each
+  // caller, so a restore path (Project JSON import) can't apply the gain
+  // change while silently forgetting the visual: the header th is only
+  // ever built once (patternsFieldHTML, at page load) and never
+  // rebuilt/re-synced afterward, so nothing else keeps it honest.
   function setChannelMute(c, muted){
     if(channelGain[c]) channelGain[c].gain.setValueAtTime(muted ? 0 : channelVolume[c], ac ? ac.currentTime : 0);
+    var th = document.querySelector('[data-chan-mute="'+c+'"]');
+    if(th) th.classList.toggle('muted', muted);
   }
   function setChannelVolume(c, vol){
     channelVolume[c] = vol;
@@ -1864,7 +1984,15 @@
       .then(function(project){ return applyProjectState(project); })
       .catch(function(err){ console.warn('No default Project JSON loaded (this is optional):', err.message); });
   }
-  var defaultProjectLoadingPromise = loadDefaultProjectFile();
+  // Chained after sourceSamplesLoadingPromise (not fired in parallel with
+  // it) — both this and the plain auto-probe fetch+decode the exact same
+  // ASSETS/SourceSamples/*.ogg files and write into the same sourceSamples
+  // slots, so running them concurrently was a genuine race: whichever
+  // finished decoding last for a given slot silently won, regardless of
+  // which one actually had the right name/comments. Letting the probe
+  // settle every slot first, then applying the default project on top,
+  // makes the outcome deterministic.
+  var defaultProjectLoadingPromise = sourceSamplesLoadingPromise.then(loadDefaultProjectFile);
 
   // --- transport: 4 sources started in one batch at the same time/offset,
   // so they stay sample-locked for the whole playthrough with no need for
@@ -2066,7 +2194,7 @@
   function triggerSamplerVoice(ch, insIndex, noteNum, whenCtx, volCell){
     if(mutedInstruments[insIndex]) return; // real silencing lives here — no voice ever gets created for a muted instrument
     var ins = song.instruments[insIndex], sp = ins.sampler;
-    var srcSample = sourceSamples[sp.sourceIndex];
+    var srcSample = getEffectiveSource(insIndex); // plain Source Sample, or the Spectral Fusion result if enabled+rendered
     if(!srcSample) return;
 
     if(!sp.polyphonic){
@@ -2116,7 +2244,8 @@
     activeSourcePlayheads.push({
       kind: 'voice', sourceIndex: sp.sourceIndex, voice: voice, ctxRef: ac, startedAtCtx: whenCtx,
       offsetSec: sp.startSec, rate: node.playbackRate.value,
-      loop: sp.loop, loopStart: sp.startSec, loopEnd: sp.endSec
+      loop: sp.loop, loopStart: sp.startSec, loopEnd: sp.endSec,
+      fused: isFusionActive(insIndex)
     });
   }
   // fadeSec, when omitted, defaults to the voice's own musical Release —
@@ -3025,6 +3154,192 @@
     });
   });
 
+  // --- Spectral Fusion: morphs an instrument's primary Source Sample (A)
+  // with a second Source Sample (B) into a brand-new in-memory AudioBuffer,
+  // via one of three algorithms. The result is cached per-instrument
+  // (spectralFusionCache, declared with ins.sampler's defaults above) and
+  // substituted for the plain sample everywhere playback reads one — see
+  // getEffectiveSource below, and its call sites: triggerSamplerVoice, the
+  // offline WAV-export trigger(), previewSamplerInstrument,
+  // previewSamplerNote, and currentSamplerModalSample further up. No
+  // external DSP library (this file stays dependency-free throughout, e.g.
+  // its own hand-rolled ZIP writer elsewhere for the same reason) — Convolve
+  // is the one algorithm that gets to lean on a native Web Audio node
+  // (ConvolverNode); the other two are hand-rolled. ---
+  var FUSION_FFT_SIZE = 2048, FUSION_HOP = 1024; // 50% overlap
+
+  // In-place iterative radix-2 Cooley-Tukey FFT, real+imag Float64Arrays,
+  // length must be a power of 2 (always FUSION_FFT_SIZE here). invert=true
+  // runs the inverse transform (and divides by n). Validated standalone
+  // (round-trip + full OLA reconstruction) before being wired in here.
+  function fftRadix2(re, im, invert){
+    var n = re.length;
+    for(var i=1, j=0; i<n; i++){
+      var bit = n>>1;
+      for(; j&bit; bit>>=1) j ^= bit;
+      j ^= bit;
+      if(i<j){ var tr=re[i]; re[i]=re[j]; re[j]=tr; var ti=im[i]; im[i]=im[j]; im[j]=ti; }
+    }
+    for(var len=2; len<=n; len<<=1){
+      var ang = (invert?1:-1) * 2*Math.PI/len;
+      var wr = Math.cos(ang), wi = Math.sin(ang);
+      for(var s=0; s<n; s+=len){
+        var curWr=1, curWi=0;
+        for(var k=0;k<len/2;k++){
+          var ur=re[s+k], ui=im[s+k];
+          var vr=re[s+k+len/2]*curWr - im[s+k+len/2]*curWi;
+          var vi=re[s+k+len/2]*curWi + im[s+k+len/2]*curWr;
+          re[s+k]=ur+vr; im[s+k]=ui+vi;
+          re[s+k+len/2]=ur-vr; im[s+k+len/2]=ui-vi;
+          var nwr=curWr*wr-curWi*wi, nwi=curWr*wi+curWi*wr;
+          curWr=nwr; curWi=nwi;
+        }
+      }
+    }
+    if(invert){ for(var q=0;q<n;q++){ re[q]/=n; im[q]/=n; } }
+  }
+  // Sine window (not Hann) at both analysis and synthesis stages: applying
+  // Hann twice effectively overlap-adds Hann², which is NOT flat at 50%
+  // hop (oscillates 0.5..1, audible as amplitude ripple — verified
+  // numerically while building this). sin(pi*n/N)² === periodic Hann(n)
+  // exactly, and plain (unsquared) Hann IS flat-constant at 50% hop — so
+  // windowing with sin(pi*n/N) on both ends reconstructs with unity gain
+  // and no extra compensation needed (verified: OLA sum settles to exactly
+  // 1.0, and an unmodified round trip reconstructs the input to float
+  // precision).
+  var FUSION_SINE_WINDOW = (function(){
+    var w = new Float32Array(FUSION_FFT_SIZE);
+    for(var n=0;n<FUSION_FFT_SIZE;n++) w[n] = Math.sin(Math.PI*n/FUSION_FFT_SIZE);
+    return w;
+  })();
+
+  // B's data for output channel ch, falling back to B's own channel 0 if it
+  // has fewer channels than A (A's channel count always wins the output).
+  function fusionChannelData(buf, ch){
+    return buf.getChannelData(Math.min(ch, buf.numberOfChannels-1));
+  }
+
+  // The flagship algorithm: STFT magnitude of A is blended toward B's
+  // (Amount 0-100%) while A's phase is kept throughout — a cross-synthesis
+  // where B's spectral colour rides A's own timing/pitch, rather than a
+  // plain time-domain crossfade. Operates on the FULL buffers (not the
+  // instrument's trim range — trim is applied afterward, on the fused
+  // result, same as any other sample).
+  function renderSpectralBlend(bufA, bufB, amount){
+    ensureAudioContext();
+    var len = Math.min(bufA.length, bufB.length);
+    var out = ac.createBuffer(bufA.numberOfChannels, len, bufA.sampleRate);
+    var t = amount/100;
+    for(var ch=0; ch<bufA.numberOfChannels; ch++){
+      var dataA = bufA.getChannelData(ch), dataB = fusionChannelData(bufB, ch);
+      var accum = new Float32Array(len + FUSION_FFT_SIZE); // padded past len so the last frame can't overrun
+      for(var pos=0; pos<len; pos+=FUSION_HOP){
+        var reA=new Float64Array(FUSION_FFT_SIZE), imA=new Float64Array(FUSION_FFT_SIZE);
+        var reB=new Float64Array(FUSION_FFT_SIZE), imB=new Float64Array(FUSION_FFT_SIZE);
+        for(var k=0;k<FUSION_FFT_SIZE;k++){
+          var idx = pos+k;
+          var sa = idx<len ? dataA[idx] : 0, sb = idx<len ? dataB[idx] : 0;
+          reA[k] = sa*FUSION_SINE_WINDOW[k];
+          reB[k] = sb*FUSION_SINE_WINDOW[k];
+        }
+        fftRadix2(reA, imA, false);
+        fftRadix2(reB, imB, false);
+        for(var b=0;b<FUSION_FFT_SIZE;b++){
+          var magA = Math.hypot(reA[b], imA[b]);
+          var magB = Math.hypot(reB[b], imB[b]);
+          var phaseA = Math.atan2(imA[b], reA[b]);
+          var magOut = magA + (magB-magA)*t;
+          reA[b] = magOut*Math.cos(phaseA);
+          imA[b] = magOut*Math.sin(phaseA);
+        }
+        fftRadix2(reA, imA, true);
+        for(var k2=0;k2<FUSION_FFT_SIZE;k2++) accum[pos+k2] += reA[k2]*FUSION_SINE_WINDOW[k2];
+      }
+      out.getChannelData(ch).set(accum.subarray(0, len));
+    }
+    return Promise.resolve(out);
+  }
+
+  // Uses B as an impulse response convolved onto A (native ConvolverNode,
+  // no hand-rolled FFT needed) — a smeared/textural cross-synthesis, mixed
+  // dry/wet by Amount. Length capped at 20s so an unusually long B can't
+  // blow up the offline render.
+  function renderConvolve(bufA, bufB, amount){
+    ensureAudioContext();
+    var sr = bufA.sampleRate;
+    var len = Math.min(bufA.length + bufB.length - 1, Math.ceil(20*sr));
+    var offlineCtx = new OfflineAudioContext(bufA.numberOfChannels, len, sr);
+    var src = offlineCtx.createBufferSource(); src.buffer = bufA;
+    var dry = offlineCtx.createGain(); dry.gain.value = 1 - amount/100;
+    var conv = offlineCtx.createConvolver(); conv.normalize = true; conv.buffer = bufB;
+    var wet = offlineCtx.createGain(); wet.gain.value = amount/100;
+    src.connect(dry); dry.connect(offlineCtx.destination);
+    src.connect(conv); conv.connect(wet); wet.connect(offlineCtx.destination);
+    src.start();
+    return offlineCtx.startRendering();
+  }
+
+  // Simple time-domain multiply (A*B), normalized back up to A's own peak
+  // (a raw product is usually much quieter, sometimes near-silent, and
+  // normalizing keeps Amount behaving like a predictable dry/wet mix rather
+  // than also being a volume knob), mixed dry/wet by Amount.
+  function renderRingModulate(bufA, bufB, amount){
+    ensureAudioContext();
+    var len = Math.min(bufA.length, bufB.length);
+    var out = ac.createBuffer(bufA.numberOfChannels, len, bufA.sampleRate);
+    var t = amount/100;
+    for(var ch=0; ch<bufA.numberOfChannels; ch++){
+      var dataA = bufA.getChannelData(ch), dataB = fusionChannelData(bufB, ch);
+      var mod = new Float32Array(len);
+      var peakA=0, peakMod=0;
+      for(var i=0;i<len;i++){
+        mod[i] = dataA[i]*dataB[i];
+        peakA = Math.max(peakA, Math.abs(dataA[i]));
+        peakMod = Math.max(peakMod, Math.abs(mod[i]));
+      }
+      var scale = peakMod>1e-9 ? peakA/peakMod : 1;
+      var outData = out.getChannelData(ch);
+      for(var i2=0;i2<len;i2++) outData[i2] = (1-t)*dataA[i2] + t*mod[i2]*scale;
+    }
+    return Promise.resolve(out);
+  }
+
+  var FUSION_ALGORITHMS = { 'spectral-blend':renderSpectralBlend, 'convolve':renderConvolve, 'ring-mod':renderRingModulate };
+
+  function isFusionActive(insIndex){
+    var sp = song.instruments[insIndex].sampler;
+    var fc = spectralFusionCache[insIndex];
+    return !!(sp.spectralFusion.enabled && fc && fc.buffer);
+  }
+  // The single integration point: every playback/preview/export/waveform
+  // site that used to read sourceSamples[sp.sourceIndex] directly now reads
+  // through here instead, so a fused instrument sounds (and displays)
+  // consistently everywhere without each call site knowing about fusion.
+  function getEffectiveSource(insIndex){
+    if(isFusionActive(insIndex)){
+      var fc = spectralFusionCache[insIndex];
+      return { buffer: fc.buffer, duration: fc.buffer.duration, waveformCache: fc.waveformCache };
+    }
+    var sp = song.instruments[insIndex].sampler;
+    return sp.sourceIndex===null ? null : sourceSamples[sp.sourceIndex];
+  }
+  // Primary sample changing elsewhere (Instruments panel, Sampler tab)
+  // while Fusion is on re-renders in place, same as any other Fusion
+  // parameter — see autoRenderFusion (tab-switch wiring, hoisted same as
+  // other forward references in this file).
+  function renderSpectralFusion(insIndex){
+    var sp = song.instruments[insIndex].sampler, fusion = sp.spectralFusion;
+    var a = sourceSamples[sp.sourceIndex], b = sourceSamples[fusion.sourceIndex2];
+    if(!a || !b) return Promise.reject(new Error('Both a primary and secondary sample are required.'));
+    var renderFn = FUSION_ALGORITHMS[fusion.algorithm];
+    return renderFn(a.buffer, b.buffer, fusion.amount).then(function(buf){
+      spectralFusionCache[insIndex] = { buffer: buf, waveformCache: computeWaveformCache(buf) };
+      sp.startSec = 0; sp.endSec = buf.duration; // same "new sample, full trim" treatment as picking a new primary source
+      if(samplerModalInsIndex===insIndex){ redrawSamplerModalWave(); refreshFusionTabUI(); }
+      return buf;
+    });
+  }
+
   // --- Sampler Mode WAV export: a from-scratch OfflineAudioContext replay
   // of one full pass through the song's own order list, deterministic and
   // decoupled from real time (so it renders far faster than realtime and
@@ -3063,7 +3378,7 @@
     function trigger(ch, insIndex, noteNum, when, volCell){
       if(mutedInstruments[insIndex]) return; // keep the exported WAV consistent with what's actually audible live — see triggerSamplerVoice's own check
       var ins = song.instruments[insIndex], sp = ins.sampler;
-      var srcSample = sourceSamples[sp.sourceIndex];
+      var srcSample = getEffectiveSource(insIndex); // keep the exported WAV consistent with a fused instrument's live playback too
       if(!srcSample) return;
       if(!sp.polyphonic){
         if(lastVoiceByChannel[ch] && !lastVoiceByChannel[ch].finished) stop(lastVoiceByChannel[ch], when, SAMPLER_STEAL_FADE_SEC);
@@ -3252,7 +3567,13 @@
     }
     if(project.theme==='system' || project.theme==='light' || project.theme==='dark') setTheme(project.theme);
     var loaders = (project.sourceSamples||[]).map(function(s, i){
-      if(!s) { sourceSamples[i]=null; return Promise.resolve(); }
+      // A slot this project doesn't mention is left exactly as the plain
+      // auto-probe (ASSETS/SourceSamples/i.ogg) already found it, rather
+      // than forced to null — a project saved before a slot existed (or
+      // that simply never bothered recording it) shouldn't erase a sample
+      // that's genuinely sitting on disk. Explicit clearing is Clear
+      // Samples' job, not an absent/null project entry's.
+      if(!s) return Promise.resolve();
       var src = s.url || s.dataUrl;
       if(!src) return Promise.resolve();
       return fetch(src).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
@@ -3289,6 +3610,23 @@
         if(transposeEl) transposeEl.textContent = formatTranspose(song.instruments[i].sampler.transpose);
       });
       renderSourceSamplesPanel(); // also refreshes each instrument row's "current source" label
+      // Re-render any restored Spectral Fusion instruments now that their
+      // source samples have loaded — the rendered AudioBuffer itself never
+      // travels through JSON (see spectralFusionCache), so it has to be
+      // rebuilt here for the tracker to actually have something to play.
+      // One instrument's fusion failing to render (e.g. its secondary
+      // sample also failed to load) shouldn't block the rest of the
+      // restore, same reasoning as the per-slot sample-load catch above.
+      var fusionRenders = song.instruments.map(function(ins, i){
+        var sp = ins.sampler;
+        if(!sp.spectralFusion || !sp.spectralFusion.enabled || sp.spectralFusion.sourceIndex2===null) return Promise.resolve();
+        return renderSpectralFusion(i).catch(function(err){
+          console.warn('Could not re-render Spectral Fusion for instrument '+i+':', err.message);
+        });
+      });
+      return Promise.all(fusionRenders).then(function(){
+        refreshInstrumentSamplerButtons(); // Spectral button highlight reflects restored enabled state
+      });
     });
   }
   // elId-parameterized so the same fade-after-3s status-line behaviour can
@@ -3554,6 +3892,7 @@
       drawWaveformFromCache(canvas, s.waveformCache);
       var ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
       activeSourcePlayheads.forEach(function(p){
+        if(p.fused) return; // a fused voice's timebase is the fused buffer's, not this raw slot's — never belongs on this panel
         if(p.sourceIndex!==slot) return;
         var nowCtx = p.ctxRef.currentTime;
         var elapsed = (nowCtx - p.startedAtCtx) * p.rate;
@@ -3645,10 +3984,15 @@
   var samplerDragTarget = null; // 'start' | 'end' | null, while a trim handle is being dragged
   var samplerAdsrDragTarget = null; // 'attack' | 'decay' | 'release' | null, while an ADSR graph point is being dragged
 
+  // Returns whatever's ACTUALLY effective for this instrument right now —
+  // the fused Spectral Fusion result if one's enabled and rendered,
+  // otherwise its plain Source Sample. Every waveform draw/trim/playhead
+  // site in this modal reads through here (see getEffectiveSource further
+  // down, defined alongside the Spectral Fusion engine) so none of them
+  // need their own fused/plain branch.
   function currentSamplerModalSample(){
     if(samplerModalInsIndex===null) return null;
-    var sp = song.instruments[samplerModalInsIndex].sampler;
-    return sp.sourceIndex===null ? null : sourceSamples[sp.sourceIndex];
+    return getEffectiveSource(samplerModalInsIndex);
   }
   function positionSamplerHandles(duration, startSec, endSec){
     var canvas = document.getElementById('samplerWaveCanvas');
@@ -3691,8 +4035,10 @@
     var canvas = document.getElementById('samplerWaveCanvas');
     drawWaveformFromCache(canvas, s.waveformCache);
     var sp = song.instruments[samplerModalInsIndex].sampler;
+    var modalFused = isFusionActive(samplerModalInsIndex);
     var ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
     activeSourcePlayheads.forEach(function(p){
+      if(!!p.fused!==modalFused) return; // only match playheads on the same timebase (fused result vs. plain sample) as what's currently shown
       if(p.sourceIndex!==sp.sourceIndex) return;
       var nowCtx = p.ctxRef.currentTime;
       var elapsed = (nowCtx - p.startedAtCtx) * p.rate;
@@ -3709,6 +4055,33 @@
         alpha = 1; color = '#e7e7e7';
       }
       ctx.strokeStyle = hexToRgba(color, alpha);
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
+    });
+  }
+  // Same technique again, but for the Spectral Fusion tab's own Result
+  // waveform — matched by voice.insIndex rather than sourceIndex/fused
+  // (drawSamplerModalPlayhead's own match) because two different
+  // instruments can fuse the same primary sample into two totally
+  // different results, so sourceIndex alone isn't precise enough here.
+  function drawFusionResultPlayhead(){
+    if(samplerModalInsIndex===null) return;
+    var fc = spectralFusionCache[samplerModalInsIndex];
+    if(!fc || !fc.buffer) return; // refreshFusionTabUI already painted the blank state
+    var canvas = document.getElementById('samplerFusionResultWave');
+    drawWaveformFromCache(canvas, fc.waveformCache);
+    var ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+    activeSourcePlayheads.forEach(function(p){
+      if(!p.fused || p.kind!=='voice' || p.voice.insIndex!==samplerModalInsIndex) return;
+      var nowCtx = p.ctxRef.currentTime;
+      var elapsed = (nowCtx - p.startedAtCtx) * p.rate;
+      var posSec = p.offsetSec + elapsed;
+      if(p.loop && p.loopEnd>p.loopStart) posSec = p.loopStart + ((posSec-p.loopStart) % (p.loopEnd-p.loopStart));
+      if(posSec<0 || posSec>fc.buffer.duration) return;
+      var x = (posSec/fc.buffer.duration) * w;
+      var alpha = Math.max(0, Math.min(1, p.voice.gainNode.gain.value));
+      var ins = song.instruments[p.voice.insIndex];
+      ctx.strokeStyle = hexToRgba(ins ? ins.color : '#c9973a', alpha);
       ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke();
     });
@@ -3791,7 +4164,10 @@
       ctx.stroke();
     });
   }
-  function openSamplerModal(insIndex){
+  // tab: 'sampler' (default) or 'fusion' — the Instruments panel's own
+  // Spectral button (data-spectral-ins) opens straight to 'fusion' instead
+  // of always landing on the Sampler tab first.
+  function openSamplerModal(insIndex, tab){
     samplerModalInsIndex = insIndex;
     var ins = song.instruments[insIndex], sp = ins.sampler;
     document.getElementById('samplerModalTitle').textContent = 'Sampler — '+esc(ins.name||('#'+insIndex));
@@ -3807,6 +4183,8 @@
     updateSamplerADSRLabels();
     drawADSRCurve();
     redrawSamplerModalWave();
+    syncSamplerPreviewBtnLabel(); // usually already ▶ Preview, but avoids a stale ■ Stop for one frame if a voice from another instrument just ended
+    switchSamplerModalTab(tab==='fusion' ? 'fusion' : 'sampler');
     document.getElementById('samplerModalBackdrop').style.display = 'flex';
   }
   function closeSamplerModal(){
@@ -3828,10 +4206,15 @@
     var sp = song.instruments[samplerModalInsIndex].sampler;
     var val = e.target.value;
     sp.sourceIndex = val==='' ? null : parseInt(val,10);
-    sp.startSec = 0;
-    sp.endSec = sp.sourceIndex!==null ? sourceSamples[sp.sourceIndex].duration : 0;
+    if(!sp.spectralFusion.enabled){
+      sp.startSec = 0;
+      sp.endSec = sp.sourceIndex!==null ? sourceSamples[sp.sourceIndex].duration : 0;
+    } else {
+      autoRenderFusion(samplerModalInsIndex);
+    }
     redrawSamplerModalWave();
     refreshInstrumentSamplerButtons();
+    refreshFusionTabUI();
   });
   document.getElementById('samplerTranspose').addEventListener('input', function(e){
     var v = parseFloat(e.target.value);
@@ -3848,6 +4231,115 @@
   });
   document.getElementById('samplerLoopToggle').addEventListener('change', function(e){
     song.instruments[samplerModalInsIndex].sampler.loop = e.target.checked;
+  });
+
+  // --- Spectral Fusion tab wiring ---
+  // Shared by the tab-strip's own click handler below and openSamplerModal
+  // (so the Instruments panel's Spectral button can jump straight to this
+  // tab instead of always landing on Sampler first).
+  function switchSamplerModalTab(tab){
+    document.querySelectorAll('.sampler-tab-btn').forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-sampler-tab')===tab); });
+    document.getElementById('samplerTabPaneSampler').style.display = tab==='sampler' ? '' : 'none';
+    document.getElementById('samplerTabPaneFusion').style.display = tab==='fusion' ? '' : 'none';
+    if(tab==='fusion') refreshFusionTabUI();
+  }
+  document.querySelectorAll('.sampler-tab-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){ switchSamplerModalTab(btn.getAttribute('data-sampler-tab')); });
+  });
+  var FUSION_AMOUNT_LABELS = { 'spectral-blend':'Blend Amount', 'convolve':'Mix', 'ring-mod':'Mix' };
+  // Repaints the whole Fusion pane from current state — called on modal
+  // open, tab switch, and after anything that changes what it should show
+  // (render completing, a parameter edit, primary sample changing
+  // elsewhere). Also greys out + disables everything below the pill
+  // whenever Fusion is off, so there's nothing to tweak (or accidentally
+  // trigger a render from) until it's on.
+  function refreshFusionTabUI(){
+    if(samplerModalInsIndex===null) return;
+    var sp = song.instruments[samplerModalInsIndex].sampler, fusion = sp.spectralFusion;
+    var fc = spectralFusionCache[samplerModalInsIndex];
+    document.getElementById('samplerFusionEnableToggle').checked = fusion.enabled;
+    document.getElementById('samplerFusionEnableLabel').textContent = fusion.enabled ? 'ON' : 'OFF';
+    document.getElementById('samplerFusionBody').classList.toggle('fusion-off', !fusion.enabled);
+    document.getElementById('samplerFusionSourceSelect').innerHTML = samplerSourceOptionsHTML(samplerModalInsIndex, fusion.sourceIndex2);
+    document.getElementById('samplerFusionSourceSelect').disabled = !fusion.enabled;
+    document.querySelectorAll('.fusion-algo-item').forEach(function(btn){
+      btn.classList.toggle('active', btn.getAttribute('data-algo')===fusion.algorithm);
+      btn.disabled = !fusion.enabled;
+    });
+    document.getElementById('samplerFusionAmountLabel').firstChild.textContent = FUSION_AMOUNT_LABELS[fusion.algorithm]+' ';
+    document.getElementById('samplerFusionAmount').value = fusion.amount;
+    document.getElementById('samplerFusionAmount').disabled = !fusion.enabled;
+    document.getElementById('samplerFusionAmountVal').textContent = fusion.amount+'%';
+    var waveA = document.getElementById('samplerFusionWaveA'), waveB = document.getElementById('samplerFusionWaveB'), waveR = document.getElementById('samplerFusionResultWave');
+    var a = sp.sourceIndex!==null ? sourceSamples[sp.sourceIndex] : null;
+    var b = fusion.sourceIndex2!==null ? sourceSamples[fusion.sourceIndex2] : null;
+    var blankCtxA = waveA.getContext('2d'); blankCtxA.fillStyle = '#08080a'; blankCtxA.fillRect(0,0,waveA.width,waveA.height);
+    if(a) drawWaveformFromCache(waveA, a.waveformCache);
+    var blankCtxB = waveB.getContext('2d'); blankCtxB.fillStyle = '#08080a'; blankCtxB.fillRect(0,0,waveB.width,waveB.height);
+    if(b) drawWaveformFromCache(waveB, b.waveformCache);
+    var blankCtxR = waveR.getContext('2d'); blankCtxR.fillStyle = '#08080a'; blankCtxR.fillRect(0,0,waveR.width,waveR.height);
+    var statusEl = document.getElementById('samplerFusionStatus');
+    if(fc && fc.buffer){
+      drawWaveformFromCache(waveR, fc.waveformCache);
+      statusEl.textContent = 'Ready';
+    } else {
+      statusEl.textContent = 'Not rendered yet';
+    }
+  }
+  // Renders right away whenever Fusion is on and B is picked — there's no
+  // separate Render button any more, so "letting go" of a parameter (a
+  // select's change, a slider's release) IS the trigger. No-ops quietly
+  // while Fusion is off or B isn't picked yet (nothing to render toward).
+  function autoRenderFusion(insIndex){
+    var sp = song.instruments[insIndex].sampler;
+    if(!sp.spectralFusion.enabled || sp.spectralFusion.sourceIndex2===null) return;
+    if(samplerModalInsIndex===insIndex) document.getElementById('samplerFusionStatus').textContent = 'Rendering…';
+    renderSpectralFusion(insIndex).catch(function(err){
+      console.error('Spectral Fusion render failed:', err);
+      if(samplerModalInsIndex===insIndex) document.getElementById('samplerFusionStatus').textContent = 'Render failed — see console';
+    });
+  }
+  document.getElementById('samplerFusionEnableToggle').addEventListener('change', function(e){
+    var i = samplerModalInsIndex;
+    var sp = song.instruments[i].sampler, fusion = sp.spectralFusion;
+    var fc = spectralFusionCache[i];
+    if(e.target.checked){
+      fusion.savedStartSec = sp.startSec; fusion.savedEndSec = sp.endSec;
+      fusion.enabled = true;
+      if(fc && fc.buffer){ sp.startSec = 0; sp.endSec = fc.buffer.duration; }
+      else autoRenderFusion(i); // no-ops cleanly if B isn't picked yet
+    } else {
+      fusion.enabled = false;
+      sp.startSec = fusion.savedStartSec; sp.endSec = fusion.savedEndSec;
+    }
+    redrawSamplerModalWave();
+    refreshFusionTabUI();
+    refreshInstrumentSamplerButtons();
+  });
+  document.getElementById('samplerFusionSourceSelect').addEventListener('change', function(e){
+    var i = samplerModalInsIndex;
+    song.instruments[i].sampler.spectralFusion.sourceIndex2 = e.target.value==='' ? null : parseInt(e.target.value,10);
+    refreshFusionTabUI();
+    autoRenderFusion(i);
+  });
+  document.querySelectorAll('.fusion-algo-item').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var i = samplerModalInsIndex;
+      song.instruments[i].sampler.spectralFusion.algorithm = btn.getAttribute('data-algo');
+      refreshFusionTabUI();
+      autoRenderFusion(i);
+    });
+  });
+  document.getElementById('samplerFusionAmount').addEventListener('input', function(e){
+    var i = samplerModalInsIndex;
+    song.instruments[i].sampler.spectralFusion.amount = parseInt(e.target.value,10);
+    document.getElementById('samplerFusionAmountVal').textContent = e.target.value+'%';
+  });
+  // 'change' (not 'input') — fires once on release/commit, same reasoning
+  // as samplerTranspose's own split input/change handlers above, so a
+  // render doesn't fire on every intermediate value while dragging.
+  document.getElementById('samplerFusionAmount').addEventListener('change', function(){
+    autoRenderFusion(samplerModalInsIndex);
   });
   var SAMPLER_ADSR_FIELDS = { samplerAttack:'attack', samplerDecay:'decay', samplerSustain:'sustain', samplerRelease:'release' };
   Object.keys(SAMPLER_ADSR_FIELDS).forEach(function(id){
@@ -3987,7 +4479,7 @@
   // than guessing a fixed length.
   function previewSamplerInstrument(insIndex){
     var ins = song.instruments[insIndex], sp = ins.sampler;
-    var srcSample = sourceSamples[sp.sourceIndex];
+    var srcSample = getEffectiveSource(insIndex);
     if(!srcSample) return null;
     ensureAudioContext();
     if(!previewAc) previewAc = new (window.AudioContext||window.webkitAudioContext)();
@@ -4021,7 +4513,8 @@
     samplerPreviewVoice = fakeVoice;
     activeSourcePlayheads.push({
       kind:'voice', sourceIndex: sp.sourceIndex, voice: fakeVoice, ctxRef: previewAc, startedAtCtx: when,
-      offsetSec: sp.startSec, rate: 1, loop: sp.loop, loopStart: sp.startSec, loopEnd: sp.endSec
+      offsetSec: sp.startSec, rate: 1, loop: sp.loop, loopStart: sp.startSec, loopEnd: sp.endSec,
+      fused: isFusionActive(insIndex)
     });
     return totalDur;
   }
@@ -4064,9 +4557,24 @@
     var durationSec = previewSamplerInstrument(insIndex);
     if(durationSec!==null && document.getElementById('samplerRefPitchToggle').checked) playReferencePitchTone(durationSec);
   }
+  // Read every frame by the RAF loop below (same technique as the various
+  // playhead redraws) rather than only right after a click — the voice
+  // ends on its own schedule (attack/decay/sustain/release, or a loop's
+  // fixed hold length), not from anything that fires an event this button
+  // could listen for.
+  function syncSamplerPreviewBtnLabel(){
+    var btn = document.getElementById('samplerPreviewBtn');
+    var playing = samplerPreviewVoice && !samplerPreviewVoice.finished;
+    btn.textContent = playing ? '■ Stop' : '▶ Preview';
+  }
   document.getElementById('samplerPreviewBtn').addEventListener('click', function(){
     if(samplerModalInsIndex===null) return;
-    triggerSamplerPreviewWithRefTone(samplerModalInsIndex);
+    if(samplerPreviewVoice && !samplerPreviewVoice.finished){
+      stopSamplerPreviewVoice();
+    } else {
+      triggerSamplerPreviewWithRefTone(samplerModalInsIndex);
+    }
+    syncSamplerPreviewBtnLabel();
   });
   document.getElementById('samplerPolyToggle').addEventListener('change', function(e){
     song.instruments[samplerModalInsIndex].sampler.polyphonic = e.target.checked;
@@ -4220,6 +4728,8 @@
     updateMixerMeters(); // also runs every frame regardless of transport state — meters should read 0 and settle, not freeze, once nothing's sounding
     drawSourceSamplePlayheads(); // same reasoning — a voice can be sounding from a preview click even with the transport stopped
     if(samplerModalInsIndex!==null) drawSamplerModalPlayhead(); // ditto, but for the Sampler modal's own larger waveform while it's open
+    if(samplerModalInsIndex!==null) drawFusionResultPlayhead(); // ditto, but for the Spectral Fusion tab's Result waveform
+    if(samplerModalInsIndex!==null) syncSamplerPreviewBtnLabel(); // ditto — flips back to ▶ Preview once the voice ends on its own
     requestAnimationFrame(playbackRAF);
   }
   requestAnimationFrame(playbackRAF);
@@ -4286,7 +4796,7 @@
     if(mutedInstruments[insIndex]) return;
     var ins = song.instruments[insIndex]; if(!ins) return;
     var sp = ins.sampler;
-    var srcSample = sourceSamples[sp.sourceIndex];
+    var srcSample = getEffectiveSource(insIndex); // match what triggerSamplerVoice would actually play for real, fused or not
     if(!srcSample) return;
     ensureAudioContext(); // still needed: sourceSamples buffers are decoded via the main context
     if(!previewAc) previewAc = new (window.AudioContext||window.webkitAudioContext)();
@@ -4323,7 +4833,8 @@
     activeSourcePlayheads.push({
       kind:'voice', sourceIndex: sp.sourceIndex, voice: fakeVoice,
       ctxRef: previewAc, startedAtCtx: when, offsetSec: sp.startSec, rate: node.playbackRate.value,
-      loop: sp.loop, loopStart: sp.startSec, loopEnd: sp.endSec
+      loop: sp.loop, loopStart: sp.startSec, loopEnd: sp.endSec,
+      fused: isFusionActive(insIndex)
     });
   }
   // Shared dispatcher for the Patterns panel's own preview clicks
@@ -4378,6 +4889,8 @@
     if(playSlotBtn) previewSourceSampleFull(parseInt(playSlotBtn.getAttribute('data-play-slot'), 10));
     var samplerBtn = e.target.closest('[data-sampler-ins]');
     if(samplerBtn) openSamplerModal(parseInt(samplerBtn.getAttribute('data-sampler-ins'), 10));
+    var spectralBtn = e.target.closest('[data-spectral-ins]');
+    if(spectralBtn) openSamplerModal(parseInt(spectralBtn.getAttribute('data-spectral-ins'), 10), 'fusion');
     var commentsBtn = e.target.closest('[data-comments-slot]');
     if(commentsBtn) openSampleCommentsModal(parseInt(commentsBtn.getAttribute('data-comments-slot'), 10));
     var packageBtn = e.target.closest('#packageSamplesBtn');
@@ -4407,6 +4920,8 @@
     instrumentPreviewSpots: instrumentPreviewSpots,
     mutedChannels: mutedChannels,
     mutedInstruments: mutedInstruments,
+    spectralFusionCache: function(){ return spectralFusionCache; },
+    activeSourcePlayheads: function(){ return activeSourcePlayheads; },
     pianoRoll: function(){ return { active: pianoRollActiveNotes, flashes: pianoRollFlashes, range: pianoRollRange }; },
     noiseBox: function(){ return { active: noiseActive, flash: noiseFlash }; },
     coverArt: function(){ return { jets: jets.map(function(j){ return {spread0:j.spread0,age:j.age,maxAge:j.maxAge,width:j.width,length:j.length}; }), cloudPuffs: cloudPuffs.length, driftT: coverDriftT, overallVol: coverOverallVol, sourceWobble: currentJetSourceOffset(), curveScale: currentJetCurveScale() }; },

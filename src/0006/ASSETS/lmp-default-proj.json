@@ -12,7 +12,7 @@
     false,
     false,
     false,
-    false
+    true
   ],
   "mutedInstruments": [
     false,
@@ -26,14 +26,23 @@
     false,
     false
   ],
+  "refPitchEnabled": false,
   "sourceSamples": [
     {
-      "name": "flowing-synthesis-pads-dreamlike-new-age-2",
+      "name": "flowing",
       "url": "ASSETS/SourceSamples/0.ogg",
-      "comments": "5-sec sample generated with AceStep 1.5 local GenAI"
+      "comments": "5-sec sample generated with AceStep 1.5 local GenAI\n[Instrumental] Prompt: flowing synthesis pads dreamlike new age"
     },
-    null,
-    null,
+    {
+      "name": "windfarm",
+      "url": "ASSETS/SourceSamples/1.ogg",
+      "comments": "5-sec sample generated with AceStep 1.5 local GenAI\n[Instrumental] Prompt: pink noise wind farm soothing glittery"
+    },
+    {
+      "name": "cellos",
+      "url": "ASSETS/SourceSamples/2.ogg",
+      "comments": "5-sec sample generated with AceStep 1.5 local GenAI\n[Instrumental] Prompt: requiem classical cellos beyond sunset "
+    },
     null,
     null,
     null
@@ -41,8 +50,8 @@
   "instruments": [
     {
       "sourceIndex": 0,
-      "startSec": 0.3702479338842975,
-      "endSec": 1.1636363636363636,
+      "startSec": 1.2758306188925082,
+      "endSec": 2.935244299674267,
       "transpose": 0,
       "loop": false,
       "attack": 0.005,
@@ -50,7 +59,15 @@
       "sustain": 0.7,
       "release": 0.15,
       "polyphonic": false,
-      "voiceCap": 8
+      "voiceCap": 8,
+      "spectralFusion": {
+        "enabled": true,
+        "sourceIndex2": 1,
+        "algorithm": "ring-mod",
+        "amount": 48,
+        "savedStartSec": 0.3702479338842975,
+        "savedEndSec": 1.1636363636363636
+      }
     },
     {
       "sourceIndex": 0,
@@ -63,7 +80,15 @@
       "sustain": 0.7,
       "release": 0.15,
       "polyphonic": false,
-      "voiceCap": 8
+      "voiceCap": 8,
+      "spectralFusion": {
+        "enabled": false,
+        "sourceIndex2": null,
+        "algorithm": "spectral-blend",
+        "amount": 50,
+        "savedStartSec": 0,
+        "savedEndSec": 0
+      }
     },
     {
       "sourceIndex": 0,
@@ -76,7 +101,15 @@
       "sustain": 0.7,
       "release": 0.15,
       "polyphonic": false,
-      "voiceCap": 8
+      "voiceCap": 8,
+      "spectralFusion": {
+        "enabled": false,
+        "sourceIndex2": null,
+        "algorithm": "spectral-blend",
+        "amount": 50,
+        "savedStartSec": 0,
+        "savedEndSec": 0
+      }
     },
     {
       "sourceIndex": null,
@@ -89,7 +122,15 @@
       "sustain": 0.7,
       "release": 0.15,
       "polyphonic": false,
-      "voiceCap": 8
+      "voiceCap": 8,
+      "spectralFusion": {
+        "enabled": false,
+        "sourceIndex2": null,
+        "algorithm": "spectral-blend",
+        "amount": 50,
+        "savedStartSec": 0,
+        "savedEndSec": 0
+      }
     },
     {
       "sourceIndex": 0,
@@ -102,7 +143,15 @@
       "sustain": 0.7,
       "release": 0.15,
       "polyphonic": false,
-      "voiceCap": 8
+      "voiceCap": 8,
+      "spectralFusion": {
+        "enabled": false,
+        "sourceIndex2": null,
+        "algorithm": "spectral-blend",
+        "amount": 50,
+        "savedStartSec": 0,
+        "savedEndSec": 0
+      }
     },
     {
       "sourceIndex": null,
@@ -115,7 +164,15 @@
       "sustain": 0.7,
       "release": 0.15,
       "polyphonic": false,
-      "voiceCap": 8
+      "voiceCap": 8,
+      "spectralFusion": {
+        "enabled": false,
+        "sourceIndex2": null,
+        "algorithm": "spectral-blend",
+        "amount": 50,
+        "savedStartSec": 0,
+        "savedEndSec": 0
+      }
     },
     {
       "sourceIndex": null,
@@ -128,7 +185,15 @@
       "sustain": 0.7,
       "release": 0.15,
       "polyphonic": false,
-      "voiceCap": 8
+      "voiceCap": 8,
+      "spectralFusion": {
+        "enabled": false,
+        "sourceIndex2": null,
+        "algorithm": "spectral-blend",
+        "amount": 50,
+        "savedStartSec": 0,
+        "savedEndSec": 0
+      }
     },
     {
       "sourceIndex": null,
@@ -141,7 +206,15 @@
       "sustain": 0.7,
       "release": 0.15,
       "polyphonic": false,
-      "voiceCap": 8
+      "voiceCap": 8,
+      "spectralFusion": {
+        "enabled": false,
+        "sourceIndex2": null,
+        "algorithm": "spectral-blend",
+        "amount": 50,
+        "savedStartSec": 0,
+        "savedEndSec": 0
+      }
     },
     {
       "sourceIndex": null,
@@ -154,7 +227,15 @@
       "sustain": 0.7,
       "release": 0.15,
       "polyphonic": false,
-      "voiceCap": 8
+      "voiceCap": 8,
+      "spectralFusion": {
+        "enabled": false,
+        "sourceIndex2": null,
+        "algorithm": "spectral-blend",
+        "amount": 50,
+        "savedStartSec": 0,
+        "savedEndSec": 0
+      }
     },
     {
       "sourceIndex": 0,
@@ -167,13 +248,21 @@
       "sustain": 0.7,
       "release": 0.15,
       "polyphonic": false,
-      "voiceCap": 8
+      "voiceCap": 8,
+      "spectralFusion": {
+        "enabled": false,
+        "sourceIndex2": null,
+        "algorithm": "spectral-blend",
+        "amount": 50,
+        "savedStartSec": 0,
+        "savedEndSec": 0
+      }
     }
   ],
   "songTitle": "0006-alpha",
   "artist": "John Oestmann",
   "album": "1000 - shrines - /of/ - SPIRIT",
-  "comments": "Sample-based re-play of flight_school_night_shift\"\n\nMusic License: CC0 / Public Domain\nCode License: MIT",
+  "comments": "Sample-based re-play of flight_school_night_shift\n\nMusic License: CC0 / Public Domain\nCode License: MIT",
   "musicLicense": "CC0 / Public Domain",
   "codeLicense": "MIT",
   "viewSourceLink": "https://github.com/johnoestmannmusic/1000-shrines-of-spirit",
