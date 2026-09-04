@@ -136,6 +136,9 @@
   table.ins-table th{color:var(--dim);font-weight:400;text-transform:uppercase;font-size:13px;letter-spacing:.04em;}
   table.ins-table td{color:var(--ink);}
   table.ins-table tr[data-explain]{cursor:default;}
+  table.ins-table input.ins-mute-toggle{cursor:pointer;}
+  table.ins-table tr.ins-muted{opacity:.5;}
+  table.ins-table tr.ins-muted .ins-name{text-decoration:line-through;}
   input.ins-color-input{width:22px;height:16px;padding:0;border:1px solid var(--edge);background:none;cursor:pointer;}
   /* Flash an instrument row the instant it's actually triggered during
      playback — instant snap-in (no transition while .firing is applied),
@@ -154,8 +157,8 @@
   .sampler-btn:hover{border-color:var(--edge-hover);}
   .sampler-src-label{font-size:14px;color:var(--dim);}
 
-  /* Source Samples panel: one slot per manifest entry, each a playable
-     waveform preview (or an "empty — list it in manifest.json" note). */
+  /* Source Samples panel: one slot per fixed filename (0.ogg, 1.ogg, …),
+     each a playable waveform preview (or an "empty — drop a file in" note). */
   .src-sample-slot{display:flex;flex-direction:column;gap:4px;padding:8px 0;border-bottom:1px solid var(--edge);}
   .src-sample-slot:last-child{border-bottom:none;}
   .src-sample-title{font-size:15px;font-weight:600;color:var(--ink);}
@@ -209,6 +212,29 @@
   .tint-toggle{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none;}
   .tint-toggle input{margin:0;cursor:pointer;}
 
+  /* Sampler Mode's own switch — a visual on/off rather than a plain
+     checkbox, since the two states are really two different engines (real
+     Sampler playback vs. the original Game Boy stems), not just a setting.
+     Green = SAMPLER MODE (on), sky blue = CHIP MODE (off) — colour alone
+     tells you which one's live at a glance, same as an amp's power light.
+     The real <input> stays in the DOM (just visually hidden) so every
+     existing .checked read/write and 'change' listener keeps working
+     untouched — only its presentation changed. */
+  .mode-switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none;position:relative;}
+  .mode-switch input{position:absolute;width:1px;height:1px;opacity:0;margin:0;}
+  .mode-switch-track{position:relative;flex:none;width:38px;height:20px;border-radius:10px;
+    background:#38bdf8;border:1px solid var(--edge);transition:background-color .15s ease-out;}
+  .mode-switch-thumb{position:absolute;top:1px;left:1px;width:16px;height:16px;border-radius:50%;
+    background:#0b0b0d;box-shadow:0 1px 2px rgba(0,0,0,.4);transition:left .15s ease-out;}
+  .mode-switch input:checked + .mode-switch-track{background:#6cd73c;}
+  .mode-switch input:checked + .mode-switch-track .mode-switch-thumb{left:20px;}
+  .mode-switch input:focus-visible + .mode-switch-track{outline:2px solid var(--amber);outline-offset:2px;}
+  /* Fixed width sized to the longer of the two labels ("SAMPLER MODE") so
+     toggling between it and "CHIP MODE" never changes the switch's own
+     rendered width — otherwise every button after it in the row would
+     shift sideways each time this one's text got shorter/longer. */
+  .mode-switch-label{display:inline-block;min-width:12ch;font-size:15px;letter-spacing:.02em;}
+
   /* Sampler modal — first true modal dialog in this file (everything else
      is an inline collapsible field or the order-picker's small dropdown). */
   .sampler-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:50;
@@ -246,6 +272,7 @@
   .meter-fill{position:absolute;left:0;top:0;bottom:0;width:0%;background:#6cbf6c;}
   .meter-fill.clip{background:#e05252;}
   .mixer-master{border-top:1px solid var(--edge);margin-top:4px;padding-top:8px;}
+  .sample-info-name-label{display:flex;flex-direction:column;gap:4px;color:var(--dim);font-size:14px;}
   .project-io-status{font-size:14px;color:var(--dim);}
   .project-modal-hint{margin:0;color:var(--dim);font-size:14px;}
   .project-json-text{width:100%;box-sizing:border-box;background:var(--surface-deep);color:var(--ink);
@@ -265,6 +292,11 @@
   table.pat-table th.chan-head:hover{color:var(--ink);}
   table.pat-table th.chan-head.muted{color:var(--muted-ink);text-decoration:line-through;background:rgba(180,60,60,.1);}
   table.pat-table td.chan-muted{opacity:.32;}
+  /* A muted instrument's own cells — distinct from chan-muted (whole
+     channel silenced) since this can apply to just some cells on an
+     otherwise-live channel, wherever that instrument happens to be holding.
+     text-decoration survives the ins-tint background sitting underneath. */
+  table.pat-table td.ins-muted-cell{opacity:.32;text-decoration:line-through;}
   table.pat-table thead tr:first-child th{top:0;}
   table.pat-table thead tr:last-child th{top:16px;}
   table.pat-table td.row-idx, table.pat-table th.row-idx-head{color:var(--dim);position:sticky;left:0;background:var(--panel);z-index:1;}
@@ -341,7 +373,6 @@
     <button id="downloadFurBtn" type="button" title="download the original Furnace module (.fur)">⇩ .FUR</button>
     <button id="exportMidiBtn" type="button" title="download this composition as a Standard MIDI File, for use in a DAW">⇩ .MIDI</button>
     <button id="downloadWavBtn" type="button" data-explain="download-wav" title="Sampler Mode ON: render and download the current Sampler mix as .wav. OFF: download the original Furnace-rendered .wav.">⇩ .WAV</button>
-    <label class="tint-toggle" data-explain="sampler-mode" title="ON: instruments with a Source Sample assigned play through the new sampler engine. OFF: falls back to the original pre-rendered stem playback."><input type="checkbox" id="samplerModeToggle" checked> SAMPLER MODE</label>
     <button type="button" id="projectJsonBtn" data-explain="project-json" title="view/copy this project's Sampler settings as JSON, or paste in a previously copied one to restore it">Project JSON</button>
     <label class="tint-toggle" data-explain="theme" title="Theme: System follows your OS/browser setting; Light and Dark override it. Saved in Project JSON.">Theme
       <select id="themeSelect">
@@ -349,6 +380,11 @@
         <option value="light">Light</option>
         <option value="dark">Dark</option>
       </select>
+    </label>
+    <label class="mode-switch" data-explain="sampler-mode" title="ON (green, SAMPLER MODE): instruments with a Source Sample assigned play through the new sampler engine. OFF (blue, CHIP MODE): falls back to the original pre-rendered Game Boy stem playback.">
+      <input type="checkbox" id="samplerModeToggle" checked>
+      <span class="mode-switch-track"><span class="mode-switch-thumb"></span></span>
+      <span class="mode-switch-label" id="samplerModeLabel">SAMPLER MODE</span>
     </label>
   </div>
 
@@ -401,7 +437,7 @@
     <div class="sampler-modal-head">
       <b id="samplerModalTitle">Sampler</b>
       <div class="sampler-modal-head-actions">
-        <button type="button" id="samplerPreviewBtn" title="preview this instrument at its root note, using the current trim/ADSR/loop settings">▶ Preview</button>
+        <button type="button" id="samplerPreviewBtn" title="preview this instrument at a neutral reference pitch, using the current trim/ADSR/loop/Transpose settings">▶ Preview</button>
         <button type="button" id="samplerModalClose" title="close">✕</button>
       </div>
     </div>
@@ -418,7 +454,7 @@
     </div>
     <div class="sampler-row">
       <label>Source <select id="samplerSourceSelect" title="which Source Sample this instrument plays"></select></label>
-      <label>Root note <select id="samplerRootNote" title="the note this sample plays at its original recorded speed/pitch"></select></label>
+      <label>Transpose <input type="number" id="samplerTranspose" step="0.01" min="-24" max="24" style="width:64px" title="pitch-shift the sample by this many semitones (decimals = cents, e.g. 3.50 = 3 semitones + 50 cents up) — for correcting a sample that isn't naturally at this song's reference pitch">st</label>
       <label class="tint-toggle"><input type="checkbox" id="samplerLoopToggle" title="loop the trimmed region while the note is held"> Loop</label>
     </div>
     <canvas id="samplerADSRCanvas" class="sampler-adsr-canvas" width="600" height="100" title="attack/decay/sustain/release shape — drag the amber points to adjust (sustain segment shown at a fixed nominal width — actual hold time depends on the note)"></canvas>
@@ -444,6 +480,7 @@
     <p class="project-modal-hint">This is the current Sampler setup (instrument assignments, trims, ADSR, mixer levels, Source Sample comments) plus page metadata (title, artist, album, comments, licenses, links, theme). Source Samples are referenced by file path, not embedded — the actual files must exist under ASSETS/SourceSamples/. Copy this to save. To restore an earlier one, paste it here and click Confirm. Saving it as <code>ASSETS/lmp-default-proj.json</code> makes it load automatically next time.</p>
     <textarea id="projectJsonText" class="project-json-text" rows="12" spellcheck="false"></textarea>
     <div class="sampler-row">
+      <button type="button" id="projectJsonCopy" title="copy the text above to the clipboard">Copy</button>
       <button type="button" id="projectJsonConfirm">Confirm</button>
       <span class="project-io-status" id="projectIOStatus"></span>
     </div>
@@ -453,9 +490,12 @@
 <div class="sampler-modal-backdrop" id="sampleCommentsModalBackdrop" style="display:none">
   <div class="sampler-modal" id="sampleCommentsModal">
     <div class="sampler-modal-head">
-      <b id="sampleCommentsModalTitle">Sample Comments</b>
+      <b id="sampleCommentsModalTitle">Sample Info</b>
       <button type="button" id="sampleCommentsModalClose" title="close">✕</button>
     </div>
+    <label class="sample-info-name-label">Name
+      <input type="text" id="sampleCommentsName" class="project-json-text" placeholder="e.g. flowing-synthesis-pads" title="shown as this sample's title in the Source Samples panel and the Sampler modal's Source dropdown">
+    </label>
     <textarea id="sampleCommentsText" class="project-json-text" rows="6" spellcheck="true" placeholder="Notes about this sample — where it came from, licensing, how it's used, anything worth remembering later."></textarea>
     <div class="sampler-row">
       <button type="button" id="sampleCommentsSave">Save</button>
@@ -519,6 +559,16 @@
   function noteToFreq(n, tuning){
     if(n===null || n===undefined || n===NOTE_OFF) return null;
     return tuning * Math.pow(2, (n - A_REF_NOTE)/12);
+  }
+  // Sampler playback rate for a given pattern note + an instrument's own
+  // Transpose (semitones, decimals = cents): the note-relative part treats
+  // A_REF_NOTE as the sample's assumed native pitch, same as this song's own
+  // note/frequency math elsewhere; Transpose is then a flat multiplier on
+  // top, shifting that whole mapping up/down uniformly — for a sample whose
+  // real recorded pitch doesn't happen to sit at A_REF_NOTE. transpose=0
+  // reproduces the old fixed-root-note behaviour exactly.
+  function samplerPlaybackRate(noteNum, tuning, transpose){
+    return (noteToFreq(noteNum, tuning) / noteToFreq(A_REF_NOTE, tuning)) * Math.pow(2, transpose/12);
   }
   // Human-readable meaning of the core tracker effect codes — for the
   // Patterns panel's explainer only. The real audio comes from Furnace's
@@ -605,7 +655,7 @@
   });
 
   // --- Sampler Mode: per-instrument sampler config, defaulted inert. Only
-  // sourceIndex/startSec/endSec/rootNote actually do anything yet (stage 2
+  // sourceIndex/startSec/endSec/transpose actually do anything yet (stage 2
   // engine); loop/polyphonic/voiceCap are fixed defaults until the Sampler
   // modal (a later stage) makes them editable. Declared here (rather than
   // down with the rest of the audio-engine state) because instrumentsFieldHTML
@@ -619,11 +669,21 @@
   // of the script runs.
   var samplerModeEnabled = true;
   var themeMode = 'system'; // 'system' | 'light' | 'dark' — see setTheme() further down
+  // Per-instrument mute — declared here too, for the same reason as
+  // sourceSamples/samplerModeEnabled above: instrumentsFieldHTML() reads it
+  // while building the Instruments table's initial HTML (that table is
+  // rendered once, not rebuilt later, so its checked/unchecked state has to
+  // be right the first time). Only truly silences audio in Sampler Mode
+  // (triggerSamplerVoice below skips a muted instrument entirely) — plain
+  // stem playback can't selectively silence one instrument out of a
+  // channel's single pre-rendered recording, so there it's a visual-only
+  // marker (see renderPatternTable's ins-muted-cell).
+  var mutedInstruments = new Array(song.instruments.length).fill(false);
   song.instruments.forEach(function(ins){
     ins.sampler = {
       sourceIndex: null,       // 0..5 into sourceSamples[], or null = silent in Sampler Mode
       startSec: 0, endSec: 0,  // set to full buffer length when a source is first assigned
-      rootNote: A_REF_NOTE,    // default pitch reference; editable via the Sampler modal
+      transpose: 0,            // semitones (decimals = cents) to pitch-shift the raw sample by; editable via the Sampler modal
       loop: false,
       attack: 0.005, decay: 0.08, sustain: 0.7, release: 0.15,
       polyphonic: false, voiceCap: 8
@@ -834,7 +894,7 @@
   function instrumentsFieldHTML(){
     var rows = song.instruments.map(function(ins, i){
       var gb = ins.gb || {};
-      var previewBtn = '<button type="button" class="preview-btn" data-preview-ins="'+i+'" title="preview 2 rows of this instrument, from its first appearance in the song">▶</button>';
+      var previewBtn = '<button type="button" class="preview-btn" data-preview-ins="'+i+'" title="preview this instrument — same neutral-pitch preview as its Sampler modal when Sampler Mode is on, otherwise a 2-row stem slice from its first appearance in the song">▶</button>';
       // Mini bar-graph of the raw wavetable this instrument points at —
       // only Wave-channel instruments have one; the canvas is empty here
       // and gets its pixels drawn in right after this HTML is inserted
@@ -844,10 +904,11 @@
         var w = song.wavetables[ins.waveSynth.wave1];
         if(w) waveCell = '<canvas class="ins-wave-canvas" width="'+w.len+'" height="16" data-explain="wave-'+ins.waveSynth.wave1+'" data-wave-idx="'+ins.waveSynth.wave1+'" title="wavetable '+ins.waveSynth.wave1+'"></canvas>';
       }
-      return '<tr data-explain="ins-'+i+'" data-ins-row="'+i+'">'+
+      return '<tr data-explain="ins-'+i+'" data-ins-row="'+i+'"'+(mutedInstruments[i]?' class="ins-muted"':'')+'>'+
         '<td>'+previewBtn+'</td>'+
+        '<td><input type="checkbox" class="ins-mute-toggle" data-ins-mute="'+i+'"'+(mutedInstruments[i]?' checked':'')+' title="mute this instrument — silences it for real in Sampler Mode; in stem playback (Sampler Mode off) a whole channel\'s audio can\'t be selectively unmixed, so this only marks its cells below"></td>'+
         '<td><input type="color" class="ins-color-input" data-ins="'+i+'" value="'+ins.color+'" title="pattern-grid tint for this instrument"></td>'+
-        '<td>'+i+'</td><td>'+esc(ins.name||'(unnamed)')+'</td>'+
+        '<td>'+i+'</td><td class="ins-name">'+esc(ins.name||'(unnamed)')+'</td>'+
         '<td>'+waveCell+'</td>'+
         '<td>'+(gb.envVol!==undefined?gb.envVol:'')+'</td>'+
         '<td>'+((ins.macros||[]).length?(ins.macros.length+' macro(s)'):'')+'</td>'+
@@ -860,7 +921,7 @@
         '<span class="field-summary">'+song.instruments.length+'</span>'+
         '<span class="collapse-arrow">▾</span>'+
       '</div>'+
-      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th>Color</th><th>#</th><th>Name</th><th data-explain="wavetables" title="which wavetable this instrument\'s Wave channel points at, if any">Wave</th><th title="GB hardware envelope starting volume — hover a row for the full envelope details (direction, step length, sound length, software envelope)">Env</th><th>Macros</th><th data-explain="sampler-col" title="assign/edit this instrument\'s Sampler settings for Sampler Mode">Sampler</th></tr></thead>'+
+      '<div class="field-body"><div class="table-scroll"><table class="ins-table"><thead><tr><th></th><th title="mute this instrument">Mute</th><th>Color</th><th>#</th><th>Name</th><th data-explain="wavetables" title="which wavetable this instrument\'s Wave channel points at, if any">Wave</th><th title="GB hardware envelope starting volume — hover a row for the full envelope details (direction, step length, sound length, software envelope)">Env</th><th>Macros</th><th data-explain="sampler-col" title="assign/edit this instrument\'s Sampler settings for Sampler Mode">Sampler</th></tr></thead>'+
       '<tbody>'+rows+'</tbody></table></div></div>'+
     '</div>';
   }
@@ -892,7 +953,7 @@
   }
   function sourceSamplesFieldHTML(){
     var slots = sourceSamples.map(function(s, i){
-      if(!s) return '<div class="src-sample-slot empty"><span class="src-sample-label">Slot '+i+' — empty (list a filename for it in ASSETS/SourceSamples/manifest.json)</span></div>';
+      if(!s) return '<div class="src-sample-slot empty"><span class="src-sample-label">Slot '+i+' — empty (drop a file at ASSETS/SourceSamples/'+i+'.ogg)</span></div>';
       var commentPreview = s.comments && s.comments.trim() ?
         '<div class="src-sample-comment-preview">'+esc(s.comments.trim().slice(0,80))+(s.comments.trim().length>80?'…':'')+'</div>' : '';
       // Vertically stacked (title, comment preview, buttons, waveform) so
@@ -904,7 +965,7 @@
         commentPreview+
         '<div class="src-sample-slot-buttons">'+
           '<button type="button" class="src-sample-play" data-play-slot="'+i+'" data-explain="sample-preview-play" title="play this source sample in full">▶</button>'+
-          '<button type="button" class="src-sample-comments-btn" data-comments-slot="'+i+'" data-explain="sample-comments" title="add notes about this sample">Comments</button>'+
+          '<button type="button" class="src-sample-comments-btn" data-comments-slot="'+i+'" data-explain="sample-comments" title="edit this sample\'s name and notes">Info</button>'+
         '</div>'+
         '<canvas class="src-sample-canvas" data-slot="'+i+'" width="480" height="60"></canvas>'+
       '</div>';
@@ -1001,6 +1062,20 @@
     });
   });
 
+  // Per-instrument mute — killSamplerVoicesForInstrument/renderPatternTable
+  // are defined further down but hoisted, same as the color-input handler
+  // above.
+  document.querySelectorAll('.ins-mute-toggle').forEach(function(inp){
+    inp.addEventListener('change', function(){
+      var i = parseInt(inp.getAttribute('data-ins-mute'), 10);
+      mutedInstruments[i] = inp.checked;
+      var row = document.querySelector('.ins-table [data-ins-row="'+i+'"]');
+      if(row) row.classList.toggle('ins-muted', mutedInstruments[i]);
+      if(mutedInstruments[i]) killSamplerVoicesForInstrument(i); // real, immediate silence in Sampler Mode — see its own comment
+      renderPatternTable(); // reflect the mute in the currently-visible cells (see ins-muted-cell)
+    });
+  });
+
   // --- wavetables: drawn as tiny bar graphs of the raw 4-bit sample
   // values, inline in the Instruments table (see instrumentsFieldHTML's
   // waveCell) rather than as their own card — a wavetable only matters in
@@ -1088,18 +1163,23 @@
       var rowLineClass = linesEnabled ? ((highlight2 && r%highlight2===0) ? 'bar-line' : ((highlight1 && r%highlight1===0) ? 'beat-line' : '')) : '';
       var rowBgClass = (highlight2 && r%highlight2===0) ? 'hl2' : ((highlight1 && r%highlight1===0) ? 'hl1' : '');
       html += '<tr class="'+rowBgClass+'" data-row="'+r+'">'+
-        '<td class="row-idx '+rowLineClass+'" data-ch="-1" data-row="'+r+'" data-field="rowidx" title="click to jump playback here (and preview all unmuted stems at this row)">'+(r<16?'0':'')+r.toString(16).toUpperCase()+'</td>';
+        '<td class="row-idx '+rowLineClass+'" data-ch="-1" data-row="'+r+'" data-field="rowidx" title="click to jump playback here (and preview every unmuted channel at this row)">'+(r<16?'0':'')+r.toString(16).toUpperCase()+'</td>';
       for(var c=0;c<perChan.length;c++){
         var cell = normalizeCell(perChan[c].rows[r], perChan[c].effectColumns);
         var noteClass = cell.noteName===null ? 'empty' : (cell.noteName==='OFF' ? 'off' : '');
         var attrs = ' data-ch="'+c+'" data-row="'+r+'"';
-        // Colour-tint: which instrument is "active" on this channel at this
-        // row (per the whole-song timeline, not just this pattern) — tints
-        // NOTE/INS/VOL/FX together so a switch or an OFF is visible at a
-        // glance without reading every cell. Toggleable via the checkbox.
-        var activeIns = (tintEnabled && song.channels[c].insTimeline[currentOrderPos][r]!==null) ? song.channels[c].insTimeline[currentOrderPos][r] : null;
+        // Which instrument is "active" on this channel at this row (per the
+        // whole-song timeline, not just this pattern) — computed regardless
+        // of the tint toggle below, since a muted instrument's cells need
+        // marking whether or not colour-tinting happens to be on.
+        var holdingIns = song.channels[c].insTimeline[currentOrderPos][r];
+        // Colour-tint: tints NOTE/INS/VOL/FX together so a switch or an OFF
+        // is visible at a glance without reading every cell. Toggleable via
+        // the checkbox.
+        var activeIns = (tintEnabled && holdingIns!==null) ? holdingIns : null;
         var tintStyle = activeIns!==null ? ' style="--ic:'+song.instruments[activeIns].color+'"' : '';
         var tintClass = activeIns!==null ? ' ins-tint' : '';
+        var mutedInsClass = (holdingIns!==null && mutedInstruments[holdingIns]) ? ' ins-muted-cell' : '';
         // A real new note takes priority over the beat/bar line — it's the
         // more locally useful signal, and marking it this way (rather than
         // just relying on the row grid) is what makes consecutive notes on
@@ -1116,12 +1196,12 @@
         var endClass = (linesEnabled && nextRaw && nextRaw.note===NOTE_OFF) ? ' note-end' : '';
         var mutedClass = mutedChannels[c] ? ' chan-muted' : '';
         var previewTitle = ' title="click to preview CH'+c+' at this row"';
-        html += '<td class="note '+noteClass+tintClass+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="note"'+previewTitle+'>'+(cell.noteName===null?'...':cell.noteName)+'</td>'+
-          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="ins"'+previewTitle+'>'+hex2(cell.instrument)+'</td>'+
-          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="vol"'+previewTitle+'>'+hex2(cell.volume)+'</td>';
+        html += '<td class="note '+noteClass+tintClass+' '+lineClass+endClass+mutedClass+mutedInsClass+'"'+attrs+tintStyle+' data-field="note"'+previewTitle+'>'+(cell.noteName===null?'...':cell.noteName)+'</td>'+
+          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+mutedInsClass+'"'+attrs+tintStyle+' data-field="ins"'+previewTitle+'>'+hex2(cell.instrument)+'</td>'+
+          '<td class="'+tintClass.trim()+' '+lineClass+endClass+mutedClass+mutedInsClass+'"'+attrs+tintStyle+' data-field="vol"'+previewTitle+'>'+hex2(cell.volume)+'</td>';
         for(var fc=0;fc<cell.effects.length;fc++){
           var e = cell.effects[fc];
-          html += '<td class="fx'+tintClass+' '+lineClass+endClass+mutedClass+'"'+attrs+tintStyle+' data-field="fx" data-fxcol="'+fc+'"'+previewTitle+'>'+(e?(hex2(e.code)+hex2(e.value)):'....')+'</td>';
+          html += '<td class="fx'+tintClass+' '+lineClass+endClass+mutedClass+mutedInsClass+'"'+attrs+tintStyle+' data-field="fx" data-fxcol="'+fc+'"'+previewTitle+'>'+(e?(hex2(e.code)+hex2(e.value)):'....')+'</td>';
         }
       }
       html += '</tr>';
@@ -1239,10 +1319,12 @@
       seekToPosition(currentOrderPos, row);
       // Extra audio feedback beyond the seek itself: seeking alone is
       // silent unless the track is already playing, so also preview every
-      // unmuted stem at that row — same "audition this instant" purpose
+      // unmuted channel at that row — same "audition this instant" purpose
       // as the per-cell preview below, just across all channels at once.
+      // previewChannelsAt picks the engine (stem slice or real Sampler
+      // voice) to match whatever Sampler Mode is actually set to.
       var unmutedChannels = [0,1,2,3].filter(function(c){ return !mutedChannels[c]; });
-      previewAtTime(unmutedChannels, (currentOrderPos*song.meta.patternLength + row) * rowDurationSec());
+      previewChannelsAt(unmutedChannels, currentOrderPos, row);
       flashPianoForChannelsAt(unmutedChannels, currentOrderPos, row);
       unmutedChannels.forEach(function(c){ spawnJetForCell(c, currentOrderPos, row); });
       return;
@@ -1252,7 +1334,7 @@
       var ch = parseInt(chCell.getAttribute('data-ch'), 10);
       var chRow = parseInt(chCell.getAttribute('data-row'), 10);
       if(ch>=0){
-        previewAtTime([ch], (currentOrderPos*song.meta.patternLength + chRow) * rowDurationSec());
+        previewChannelsAt([ch], currentOrderPos, chRow);
         flashPianoForChannelsAt([ch], currentOrderPos, chRow);
         spawnJetForCell(ch, currentOrderPos, chRow);
       }
@@ -1417,12 +1499,12 @@
     },
     'source-samples': function(){
       return { title:'Source Samples — Sampler Mode\'s raw material',
-        html: P('Up to '+N(SOURCE_SAMPLE_SLOTS)+' clips from '+VR('ASSETS/SourceSamples/manifest.json')+'. No upload button — listing a file there is how you confirm it exists first.') +
+        html: P('Up to '+N(SOURCE_SAMPLE_SLOTS)+' clips. No manifest — slot '+N('i')+' is just '+VR('ASSETS/SourceSamples/i.ogg')+'; drop or swap that exact file to fill it.') +
           P('Click ▶ to preview. An instrument points at a slot via its own '+KW('Sampler')+' button below to play it, pitched to the note.') };
     },
     'sampler-col': function(){
       return { title:'Sampler — turn an instrument into a sample player',
-        html: P('Opens the Sampler editor: source slot, Start/End trim, root note, loop, ADSR (live preview), Polyphonic + voice cap, and '+KW('▶ Preview')+'.') +
+        html: P('Opens the Sampler editor: source slot, Start/End trim, Transpose, loop, ADSR (live preview), Polyphonic + voice cap, and '+KW('▶ Preview')+'.') +
           P('Label shows the assigned Source Sample — '+esc('(none)')+' means silent in Sampler Mode until set.') };
     },
     'sample-preview-play': function(){
@@ -1430,13 +1512,13 @@
         html: P('Plays this clip in full at its original pitch/speed, independent of any instrument\'s settings. Click again ('+KW('■')+') to stop early.') };
     },
     'sample-comments': function(){
-      return { title:'Comments — notes about this sample',
-        html: P('Free-text notes on this sample — origin, licensing, usage. Saved with it and included in Project JSON; first 80 characters preview under the title.') };
+      return { title:'Info — name and notes for this sample',
+        html: P('Editable name (shown as its title here and in the Sampler modal\'s Source list) plus free-text notes — origin, licensing, usage. Both saved and included in Project JSON; notes preview (80 chars) under the title.') };
     },
     'sampler-mode': function(){
       return { title:'Sampler Mode — which engine is actually playing',
-        html: P(KW('ON')+': assigned instruments play via the sample engine — pitch-shifted, ADSR-shaped, per-instrument poly/mono.') +
-          P(KW('OFF')+': falls back to the 4 original Furnace stems. Also changes what '+KW('⇩ WAV')+' exports and the Song summary line.') };
+        html: P(KW('SAMPLER MODE')+' (green): assigned instruments play via the sample engine — pitch-shifted, ADSR-shaped, per-instrument poly/mono.') +
+          P(KW('CHIP MODE')+' (blue): falls back to the 4 original Furnace stems. Also changes what '+KW('⇩ WAV')+' exports and the Song summary line.') };
     },
     'project-json': function(){
       return { title:'Project JSON — save and restore the whole Sampler setup',
@@ -1519,7 +1601,7 @@
     document.getElementById('explainBody').innerHTML = e.html;
   }
   // Delegated on document, same reasoning as the .field-header collapse fix
-  // above: several data-explain elements (Source Samples' ▶/Comments
+  // above: several data-explain elements (Source Samples' ▶/Info
   // buttons, Instruments rows) only exist after a later outerHTML
   // re-render, so a one-time per-element bind at load would silently miss
   // them. mouseover (not mouseenter) is used specifically because it
@@ -1619,38 +1701,36 @@
   // the rest of the sampler data model, since instrumentsFieldHTML needs it
   // before this section of the script even runs.
   //
-  // No upload/browse control: a static HTML page can't write files or list
-  // a folder's contents (no server-side directory listing, and that
-  // wouldn't work once this is deployed on GitHub Pages anyway), so the 6
-  // slots are populated by reading ASSETS/SourceSamples/manifest.json — a
-  // plain ordered array of up to 6 filenames (or null for an empty slot),
-  // each expected to already exist under ASSETS/SourceSamples/. This makes
-  // "add a sample" a two-step, unambiguous process: drop the file in that
-  // folder, then list it in the manifest — matching how the manifest is the
-  // single source of truth for what's actually available, rather than
-  // letting the browser hand the app an arbitrary local file that may or
-  // may not ever end up on disk in the right place. ---
-  function loadSourceSamplesFromManifest(){
-    return fetch('ASSETS/SourceSamples/manifest.json')
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-      .then(function(list){
-        ensureAudioContext();
-        var loaders = (list||[]).slice(0, SOURCE_SAMPLE_SLOTS).map(function(filename, i){
-          if(!filename) return null;
-          var url = 'ASSETS/SourceSamples/'+filename;
-          return fetch(url)
-            .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status+' for '+filename); return r.arrayBuffer(); })
-            .then(function(buf){ return ac.decodeAudioData(buf); })
-            .then(function(audioBuf){
-              sourceSamples[i] = { name:filename.replace(/\.[^.]+$/,''), url:url, buffer:audioBuf, duration:audioBuf.duration, waveformCache:computeWaveformCache(audioBuf), comments:'' };
-            }).catch(function(err){ console.warn('Could not load Source Sample slot '+i+' ('+filename+'):', err.message); });
-        });
-        return Promise.all(loaders);
+  // No upload/browse control, and no manifest either: a static HTML page
+  // can't list a folder's contents over plain HTTP (no server-side
+  // directory listing — and that wouldn't work once this is deployed
+  // somewhere like GitHub Pages or a WordPress media folder anyway), so
+  // there's no way to discover an arbitrary filename. Instead each of the 6
+  // slots maps to one fixed filename — slot i is exactly
+  // ASSETS/SourceSamples/i.ogg — and the app just tries fetching each one
+  // directly. A missing file is the normal "empty slot" state (not an
+  // error): "add/swap a sample" is just dropping (or replacing) that exact
+  // file, nothing else to edit. The display name defaults to the slot
+  // number; give a sample a real title via its own Info button (see
+  // openSampleCommentsModal further down) — that's saved into Project JSON
+  // same as everything else. ---
+  function probeSourceSample(i){
+    var url = 'ASSETS/SourceSamples/'+i+'.ogg';
+    return fetch(url)
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
+      .then(function(buf){ return ac.decodeAudioData(buf); })
+      .then(function(audioBuf){
+        sourceSamples[i] = { name:String(i), url:url, buffer:audioBuf, duration:audioBuf.duration, waveformCache:computeWaveformCache(audioBuf), comments:'' };
       })
-      .then(function(){ renderSourceSamplesPanel(); })
-      .catch(function(err){ console.warn('No Source Samples manifest loaded (ASSETS/SourceSamples/manifest.json):', err.message); });
+      .catch(function(){}); // no file at this slot — that's just an empty slot, not worth logging
   }
-  var sourceSamplesLoadingPromise = loadSourceSamplesFromManifest();
+  function loadSourceSamples(){
+    ensureAudioContext();
+    var loaders = [];
+    for(var i=0;i<SOURCE_SAMPLE_SLOTS;i++) loaders.push(probeSourceSample(i));
+    return Promise.all(loaders).then(function(){ renderSourceSamplesPanel(); });
+  }
+  var sourceSamplesLoadingPromise = loadSourceSamples();
 
   // Default Project JSON: an optional ASSETS/lmp-default-proj.json, applied
   // automatically on load via the same applyProjectState() the Project
@@ -1866,6 +1946,7 @@
     }
   }
   function triggerSamplerVoice(ch, insIndex, noteNum, whenCtx, volCell){
+    if(mutedInstruments[insIndex]) return; // real silencing lives here — no voice ever gets created for a muted instrument
     var ins = song.instruments[insIndex], sp = ins.sampler;
     var srcSample = sourceSamples[sp.sourceIndex];
     if(!srcSample) return;
@@ -1887,7 +1968,7 @@
 
     var node = ac.createBufferSource();
     node.buffer = srcSample.buffer;
-    node.playbackRate.value = noteToFreq(noteNum, song.meta.tuning) / noteToFreq(sp.rootNote, song.meta.tuning);
+    node.playbackRate.value = samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose);
     var gainNode = ac.createGain();
     var vol = (volCell!==null && volCell!==undefined) ? volCell/15 : 1; // matches the existing default-to-15 convention elsewhere in this file
     var sustainLevel = vol*sp.sustain;
@@ -1960,6 +2041,18 @@
     });
     samplerLastVoiceByChannel.forEach(function(v){ if(v) forceStopVoice(v, kt, SAMPLER_STEAL_FADE_SEC); });
     samplerLastVoiceByChannel = [null,null,null,null];
+  }
+  // Same idea as killAllSamplerVoices, scoped to one instrument — called the
+  // instant it's muted, so an already-sounding note doesn't keep ringing
+  // through its full Release after the mute toggle says otherwise.
+  function killSamplerVoicesForInstrument(insIndex){
+    if(!ac) return; // nothing has ever played, nothing to stop
+    var kt = ac.currentTime + 0.01;
+    (samplerVoicesByIns[insIndex]||[]).slice().forEach(function(v){ forceStopVoice(v, kt, SAMPLER_STEAL_FADE_SEC); });
+    samplerVoicesByIns[insIndex] = [];
+    samplerLastVoiceByChannel.forEach(function(v, ch){
+      if(v && v.insIndex===insIndex){ forceStopVoice(v, kt, SAMPLER_STEAL_FADE_SEC); samplerLastVoiceByChannel[ch] = null; }
+    });
   }
   function stopSamplerEngine(){ stopSamplerScheduler(); killAllSamplerVoices(); }
   function startSamplerAt(offset){ beginTransportAt(offset); startSamplerScheduler(); }
@@ -2057,8 +2150,17 @@
   playBtn.addEventListener('click', doPlay);
   pauseBtn.addEventListener('click', doPause);
   stopBtn.addEventListener('click', doStop);
+  // Keeps the switch's own text label in sync with its checked state —
+  // called on every change plus the couple of places elsewhere that flip
+  // .checked programmatically (Project JSON restore) rather than via a
+  // real user click.
+  function syncSamplerModeLabel(){
+    document.getElementById('samplerModeLabel').textContent =
+      document.getElementById('samplerModeToggle').checked ? 'SAMPLER MODE' : 'CHIP MODE';
+  }
   document.getElementById('samplerModeToggle').addEventListener('change', function(e){
     samplerModeEnabled = e.target.checked;
+    syncSamplerModeLabel();
     doSeek(currentSongTime()); // reuses doSeek's stop-both/restart-the-right-one logic verbatim
     document.getElementById('field-song').outerHTML = songFieldHTML(); // swaps the Game Boy/tuning/format tail for "SAMPLER MODE" (or back)
   });
@@ -2633,6 +2735,7 @@
       }catch(e){}
     }
     function trigger(ch, insIndex, noteNum, when, volCell){
+      if(mutedInstruments[insIndex]) return; // keep the exported WAV consistent with what's actually audible live — see triggerSamplerVoice's own check
       var ins = song.instruments[insIndex], sp = ins.sampler;
       var srcSample = sourceSamples[sp.sourceIndex];
       if(!srcSample) return;
@@ -2644,7 +2747,7 @@
       }
       var node = offlineCtx.createBufferSource();
       node.buffer = srcSample.buffer;
-      node.playbackRate.value = noteToFreq(noteNum, song.meta.tuning) / noteToFreq(sp.rootNote, song.meta.tuning);
+      node.playbackRate.value = samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose);
       var gainNode = offlineCtx.createGain();
       var vol = (volCell!==null && volCell!==undefined) ? volCell/15 : 1;
       var sustainLevel = vol*sp.sustain;
@@ -2734,6 +2837,7 @@
       channelVolume: channelVolume.slice(),
       masterVolume: masterVolume,
       mutedChannels: mutedChannels.slice(),
+      mutedInstruments: mutedInstruments.slice(),
       sourceSamples: sourceSamplesOut,
       instruments: song.instruments.map(function(ins){ return ins.sampler; }),
       // Page metadata — kept here too (rather than only in the Furnace
@@ -2778,8 +2882,18 @@
     ensureAudioContext();
     samplerModeEnabled = !!project.samplerModeEnabled;
     document.getElementById('samplerModeToggle').checked = samplerModeEnabled;
+    syncSamplerModeLabel();
     document.getElementById('field-song').outerHTML = songFieldHTML(); // Song panel's tail reads "SAMPLER MODE" instead of Game Boy/tuning/format while this is on
     (project.mutedChannels||[]).forEach(function(m,c){ mutedChannels[c]=!!m; setChannelMute(c,!!m); });
+    (project.mutedInstruments||[]).forEach(function(m,i){
+      mutedInstruments[i] = !!m;
+      var cb = document.querySelector('.ins-mute-toggle[data-ins-mute="'+i+'"]');
+      if(cb) cb.checked = mutedInstruments[i];
+      var row = document.querySelector('.ins-table [data-ins-row="'+i+'"]');
+      if(row) row.classList.toggle('ins-muted', mutedInstruments[i]);
+      if(mutedInstruments[i]) killSamplerVoicesForInstrument(i);
+    });
+    renderPatternTable(); // reflect any restored mutedInstruments in the currently-visible cells
     (project.channelVolume||[]).forEach(function(v,c){
       channelVolume[c]=v; setChannelVolume(c,v);
       var sl = document.querySelector('.mixer-vol[data-mixer-chan="'+c+'"]'); if(sl) sl.value=v;
@@ -2810,15 +2924,31 @@
       if(!s) { sourceSamples[i]=null; return Promise.resolve(); }
       var src = s.url || s.dataUrl;
       if(!src) return Promise.resolve();
-      return fetch(src).then(function(r){ return r.arrayBuffer(); })
+      return fetch(src).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
         .then(function(buf){ return ac.decodeAudioData(buf); })
         .then(function(audioBuf){
           sourceSamples[i] = { name:s.name, url:s.url||null, buffer:audioBuf, duration:audioBuf.duration, waveformCache:computeWaveformCache(audioBuf), comments:s.comments||'' };
-        });
+        })
+        // One slot's sample failing to load (moved/renamed/missing file)
+        // shouldn't take the rest of the restore down with it via
+        // Promise.all below — that used to also skip applying every
+        // instrument's sampler settings (trim/ADSR/Transpose) just because
+        // one sample URL 404'd, which is a much worse failure than one
+        // empty slot.
+        .catch(function(err){ console.warn('Could not load Source Sample slot '+i+' from Project JSON ('+src+'):', err.message); sourceSamples[i] = null; });
     });
     return Promise.all(loaders).then(function(){
       project.instruments.forEach(function(sp, i){
-        if(sp && song.instruments[i]) song.instruments[i].sampler = Object.assign({}, song.instruments[i].sampler, sp);
+        if(!sp || !song.instruments[i]) return;
+        // Back-compat: an older export used a "rootNote" (absolute note
+        // number the sample was assumed to natively be at) instead of
+        // today's "transpose" (semitones/cents offset) — same underlying
+        // math, see samplerPlaybackRate's own comment, just re-centered on
+        // A_REF_NOTE=0 instead of an absolute note. Converts on the fly so
+        // an old Project JSON still applies its pitch correction correctly.
+        if(sp.rootNote!==undefined && sp.transpose===undefined) sp.transpose = A_REF_NOTE - sp.rootNote;
+        delete sp.rootNote; // don't leave the old field sitting unused on the merged sampler object
+        song.instruments[i].sampler = Object.assign({}, song.instruments[i].sampler, sp);
       });
       renderSourceSamplesPanel(); // also refreshes each instrument row's "current source" label
     });
@@ -2850,6 +2980,25 @@
   }
   document.getElementById('projectJsonBtn').addEventListener('click', openProjectModal);
   document.getElementById('projectModalClose').addEventListener('click', closeProjectModal);
+  // navigator.clipboard requires a secure context (https/localhost) and can
+  // still reject (permissions, an insecure/file:// origin) — the execCommand
+  // fallback covers those cases via old-fashioned select-and-copy, same as
+  // any pre-Clipboard-API copy button.
+  document.getElementById('projectJsonCopy').addEventListener('click', function(){
+    var ta = document.getElementById('projectJsonText');
+    function fallbackCopy(){
+      ta.focus(); ta.select();
+      try{ document.execCommand('copy'); flashProjectIOStatus('Copied to clipboard'); }
+      catch(e){ flashProjectIOStatus('Copy failed — select the text and copy manually'); }
+    }
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(ta.value).then(function(){
+        flashProjectIOStatus('Copied to clipboard');
+      }).catch(fallbackCopy);
+    } else {
+      fallbackCopy();
+    }
+  });
   document.getElementById('projectModalBackdrop').addEventListener('mousedown', function(e){
     if(e.target.id==='projectModalBackdrop') closeProjectModal();
   });
@@ -2866,16 +3015,21 @@
     });
   });
 
-  // --- Sample Comments: free-text notes per Source Sample slot (where it
-  // came from, licensing, how it's used) — saved into that slot's own
-  // .comments field, exported/restored via Project JSON alongside
-  // everything else, and previewed (first 80 chars) right in the panel. ---
+  // --- Sample Info: editable name + free-text notes per Source Sample slot.
+  // Name defaults to the slot number (probeSourceSample has no filename to
+  // derive a title from anymore, see its own comment above) or whatever a
+  // loaded Project JSON set it to — this modal is now the normal way to
+  // give a sample a real title, rather than hand-editing "name" in Project
+  // JSON. Both fields save into that slot's own .name/.comments, exported/
+  // restored via Project JSON alongside everything else, and notes are
+  // previewed (first 80 chars) right in the panel. ---
   var sampleCommentsModalSlot = null;
   function openSampleCommentsModal(slot){
     var s = sourceSamples[slot];
     if(!s) return;
     sampleCommentsModalSlot = slot;
-    document.getElementById('sampleCommentsModalTitle').textContent = 'Comments — '+s.name;
+    document.getElementById('sampleCommentsModalTitle').textContent = 'Info — '+s.name;
+    document.getElementById('sampleCommentsName').value = s.name || '';
     document.getElementById('sampleCommentsText').value = s.comments || '';
     document.getElementById('sampleCommentsModalBackdrop').style.display = 'flex';
   }
@@ -2889,8 +3043,11 @@
   });
   document.getElementById('sampleCommentsSave').addEventListener('click', function(){
     if(sampleCommentsModalSlot!==null && sourceSamples[sampleCommentsModalSlot]){
-      sourceSamples[sampleCommentsModalSlot].comments = document.getElementById('sampleCommentsText').value;
-      renderSourceSamplesPanel();
+      var s = sourceSamples[sampleCommentsModalSlot];
+      var newName = document.getElementById('sampleCommentsName').value.trim();
+      s.name = newName || String(sampleCommentsModalSlot); // falls back to the slot number rather than saving a blank title
+      s.comments = document.getElementById('sampleCommentsText').value;
+      renderSourceSamplesPanel(); // also refreshes each instrument row's "current source" label
     }
     closeSampleCommentsModal();
   });
@@ -3140,35 +3297,8 @@
     src.start();
   }
 
-  // --- Sampler modal: per-instrument editor for source/trim/root
-  // note/loop/ADSR/polyphony. Root note options span this song's own used
-  // pitch range (±12 semitones of padding either side) rather than an
-  // arbitrary fixed range, so the dropdown stays relevant to this track. ---
-  function songNoteRange(){
-    var min=Infinity, max=-Infinity;
-    song.channels.forEach(function(ch){
-      ch.patterns.forEach(function(pat){
-        if(!pat) return;
-        pat.rows.forEach(function(r){
-          if(r && r.note!==undefined && r.note!==NOTE_OFF){
-            if(r.note<min) min=r.note;
-            if(r.note>max) max=r.note;
-          }
-        });
-      });
-    });
-    if(min===Infinity){ min=A_REF_NOTE-24; max=A_REF_NOTE+24; }
-    return { min: min-12, max: max+12 };
-  }
-  var SAMPLER_ROOT_NOTE_RANGE = songNoteRange();
-  function samplerRootNoteOptionsHTML(selected){
-    var out = '';
-    for(var n=SAMPLER_ROOT_NOTE_RANGE.min; n<=SAMPLER_ROOT_NOTE_RANGE.max; n++){
-      out += '<option value="'+n+'"'+(n===selected?' selected':'')+'>'+noteToName(n)+'</option>';
-    }
-    return out;
-  }
-
+  // --- Sampler modal: per-instrument editor for source/trim/transpose/
+  // loop/ADSR/polyphony. ---
   var samplerModalInsIndex = null;
   var samplerDragTarget = null; // 'start' | 'end' | null, while a trim handle is being dragged
   var samplerAdsrDragTarget = null; // 'attack' | 'decay' | 'release' | null, while an ADSR graph point is being dragged
@@ -3324,7 +3454,7 @@
     var ins = song.instruments[insIndex], sp = ins.sampler;
     document.getElementById('samplerModalTitle').textContent = 'Sampler — '+esc(ins.name||('#'+insIndex));
     document.getElementById('samplerSourceSelect').innerHTML = samplerSourceOptionsHTML(insIndex);
-    document.getElementById('samplerRootNote').innerHTML = samplerRootNoteOptionsHTML(sp.rootNote);
+    document.getElementById('samplerTranspose').value = sp.transpose;
     document.getElementById('samplerLoopToggle').checked = sp.loop;
     document.getElementById('samplerAttack').value = sp.attack;
     document.getElementById('samplerDecay').value = sp.decay;
@@ -3360,8 +3490,9 @@
     redrawSamplerModalWave();
     refreshInstrumentSamplerButtons();
   });
-  document.getElementById('samplerRootNote').addEventListener('change', function(e){
-    song.instruments[samplerModalInsIndex].sampler.rootNote = parseInt(e.target.value,10);
+  document.getElementById('samplerTranspose').addEventListener('input', function(e){
+    var v = parseFloat(e.target.value);
+    song.instruments[samplerModalInsIndex].sampler.transpose = isNaN(v) ? 0 : v;
   });
   document.getElementById('samplerLoopToggle').addEventListener('change', function(e){
     song.instruments[samplerModalInsIndex].sampler.loop = e.target.checked;
@@ -3465,11 +3596,32 @@
     sp.endSec = Math.min(maxEnd, Math.max(v, sp.startSec+0.01));
     redrawSamplerModalWave();
   });
-  // Preview: a one-shot at the instrument's own root note (no transposition)
-  // through the current trim/ADSR/loop settings — hear exactly what's
-  // configured, on the dedicated previewAc so it never disturbs the real
-  // transport. A looping sample previews for a fixed, reasonable hold
-  // length rather than ringing forever.
+  // Preview: a one-shot at a neutral reference pitch (A_REF_NOTE) through
+  // the current trim/ADSR/loop/Transpose settings — hear exactly what's
+  // configured, including the Transpose correction, on the dedicated
+  // previewAc so it never disturbs the real transport. A looping sample
+  // previews for a fixed, reasonable hold length rather than ringing
+  // forever.
+  //
+  // Single-voice on purpose: repeated clicks (or clicks after tweaking a
+  // slider) used to layer a new copy on top of whatever was still ringing
+  // from the last one, which got noisy/confusing fast for something meant
+  // as a quick settings check. Each click now stops whatever's still
+  // playing first, then starts clean.
+  var samplerPreviewVoice = null;
+  function stopSamplerPreviewVoice(){
+    if(!samplerPreviewVoice || samplerPreviewVoice.finished) return;
+    try{
+      var whenCtx = previewAc.currentTime;
+      var g = samplerPreviewVoice.gainNode.gain;
+      g.cancelScheduledValues(whenCtx);
+      g.setValueAtTime(g.value, whenCtx); // read is safe here (unlike forceStopVoice's case) — this fires synchronously on a click, not scheduled ahead of real time
+      g.linearRampToValueAtTime(0, whenCtx+SAMPLER_STEAL_FADE_SEC);
+      samplerPreviewVoice.source.stop(whenCtx+SAMPLER_STEAL_FADE_SEC+0.02);
+    }catch(e){}
+    samplerPreviewVoice.finished = true;
+    samplerPreviewVoice = null;
+  }
   function previewSamplerInstrument(insIndex){
     var ins = song.instruments[insIndex], sp = ins.sampler;
     var srcSample = sourceSamples[sp.sourceIndex];
@@ -3477,16 +3629,18 @@
     ensureAudioContext();
     if(!previewAc) previewAc = new (window.AudioContext||window.webkitAudioContext)();
     if(previewAc.state!=='running') previewAc.resume();
+    stopSamplerPreviewVoice();
     var when = previewAc.currentTime;
     var node = previewAc.createBufferSource();
     node.buffer = srcSample.buffer;
+    node.playbackRate.value = Math.pow(2, sp.transpose/12); // same Transpose math as samplerPlaybackRate, at the neutral reference note (ratio=1)
     var gainNode = previewAc.createGain();
     var sustainLevel = sp.sustain;
     gainNode.gain.setValueAtTime(0, when);
     gainNode.gain.linearRampToValueAtTime(1, when+Math.max(sp.attack,0.003));
     gainNode.gain.linearRampToValueAtTime(sustainLevel, when+sp.attack+sp.decay);
     node.connect(gainNode); gainNode.connect(previewAc.destination);
-    var fakeVoice = { gainNode:gainNode, finished:false, insIndex:insIndex };
+    var fakeVoice = { gainNode:gainNode, source:node, finished:false, insIndex:insIndex };
     if(sp.loop){
       node.loop = true; node.loopStart = sp.startSec; node.loopEnd = sp.endSec;
       node.start(when, sp.startSec);
@@ -3497,7 +3651,8 @@
     } else {
       node.start(when, sp.startSec, sp.endSec-sp.startSec);
     }
-    node.onended = function(){ fakeVoice.finished = true; };
+    node.onended = function(){ fakeVoice.finished = true; if(samplerPreviewVoice===fakeVoice) samplerPreviewVoice = null; };
+    samplerPreviewVoice = fakeVoice;
     activeSourcePlayheads.push({
       kind:'voice', sourceIndex: sp.sourceIndex, voice: fakeVoice, ctxRef: previewAc, startedAtCtx: when,
       offsetSec: sp.startSec, rate: 1, loop: sp.loop, loopStart: sp.startSec, loopEnd: sp.endSec
@@ -3694,8 +3849,9 @@
   // Shared preview primitive: plays a PREVIEW_DUR_CELLS-long slice starting
   // at `time` (song-time seconds) from each stem in `channels`, all
   // started together so a multi-channel preview (row-index click) stays
-  // in sync the same way real playback does. Used by the instrument
-  // preview buttons, per-cell pattern clicks, and row-index clicks alike.
+  // in sync the same way real playback does. The Sampler Mode equivalent is
+  // previewSamplerNote/previewChannelsAt further down — this one only runs
+  // when Sampler Mode is off.
   function previewAtTime(channels, time){
     ensureAudioContext(); // still needed: stemBuffers are decoded via the main context
     if(!previewAc) previewAc = new (window.AudioContext||window.webkitAudioContext)();
@@ -3710,10 +3866,101 @@
       src.start(startAt, time, dur);
     });
   }
+  // Sampler-Mode counterpart to previewAtTime: plays one real Sampler voice
+  // through the dedicated previewAc, same as previewAtTime never touches
+  // (or resumes) the main transport's `ac`. Pitched via samplerPlaybackRate
+  // and shaped by the instrument's own trim/ADSR/loop, same as real
+  // playback would produce — just a standalone one-shot rather than
+  // scheduled from the song's own clock, so multiple calls (e.g. a row-index
+  // click firing several channels) can freely overlap; unlike the Sampler
+  // modal's own ▶ Preview button, this is NOT single-voice, since layering
+  // several channels together on one click is the whole point here.
+  function previewSamplerNote(insIndex, noteNum, volCell){
+    if(mutedInstruments[insIndex]) return;
+    var ins = song.instruments[insIndex]; if(!ins) return;
+    var sp = ins.sampler;
+    var srcSample = sourceSamples[sp.sourceIndex];
+    if(!srcSample) return;
+    ensureAudioContext(); // still needed: sourceSamples buffers are decoded via the main context
+    if(!previewAc) previewAc = new (window.AudioContext||window.webkitAudioContext)();
+    if(previewAc.state!=='running') previewAc.resume();
+    var when = previewAc.currentTime;
+    var node = previewAc.createBufferSource();
+    node.buffer = srcSample.buffer;
+    node.playbackRate.value = samplerPlaybackRate(noteNum, song.meta.tuning, sp.transpose);
+    var gainNode = previewAc.createGain();
+    var vol = (volCell!==null && volCell!==undefined) ? volCell/15 : 1;
+    var sustainLevel = vol*sp.sustain;
+    gainNode.gain.setValueAtTime(0, when);
+    gainNode.gain.linearRampToValueAtTime(vol, when+Math.max(sp.attack,0.003));
+    gainNode.gain.linearRampToValueAtTime(sustainLevel, when+sp.attack+sp.decay);
+    node.connect(gainNode); gainNode.connect(previewAc.destination);
+    // Capped to PREVIEW_DUR_CELLS rows' worth of audition time — same
+    // budget as the stem-based preview (previewAtTime) — rather than
+    // playing out the sample's full trimmed length or ringing forever on a
+    // loop. For a one-shot shorter than that budget, the cap just no-ops
+    // (holdSec clamps down to the natural length) and it plays out as-is.
+    var holdSec = PREVIEW_DUR_CELLS * rowDurationSec();
+    if(sp.loop){
+      node.loop = true; node.loopStart = sp.startSec; node.loopEnd = sp.endSec;
+      node.start(when, sp.startSec);
+    } else {
+      holdSec = Math.min(holdSec, sp.endSec-sp.startSec);
+      node.start(when, sp.startSec, sp.endSec-sp.startSec);
+    }
+    gainNode.gain.setValueAtTime(sustainLevel, when+holdSec);
+    gainNode.gain.linearRampToValueAtTime(0, when+holdSec+sp.release);
+    node.stop(when+holdSec+sp.release+0.05);
+    var fakeVoice = { gainNode:gainNode, finished:false, insIndex:insIndex };
+    node.onended = function(){ fakeVoice.finished = true; };
+    activeSourcePlayheads.push({
+      kind:'voice', sourceIndex: sp.sourceIndex, voice: fakeVoice,
+      ctxRef: previewAc, startedAtCtx: when, offsetSec: sp.startSec, rate: node.playbackRate.value,
+      loop: sp.loop, loopStart: sp.startSec, loopEnd: sp.endSec
+    });
+  }
+  // Shared dispatcher for the Patterns panel's own preview clicks
+  // (row-index and per-cell): plays whatever the CURRENT engine would
+  // actually produce for each channel at (orderPos,row) — a raw stem slice
+  // when Sampler Mode is off, or the real per-note Sampler voice (pitched
+  // to the actual note, shaped by that instrument's own trim/ADSR/loop)
+  // when it's on — via noteTimeline/insTimeline, the same whole-song-aware
+  // "what's actually holding here" lookup flashPianoForChannelsAt already
+  // uses right alongside every call site below. The Instruments panel's own
+  // ▶ button is different: it uses this too for its Sampler-Mode-off
+  // fallback, but reuses previewSamplerInstrument directly (not this) when
+  // Sampler Mode is on — see previewInstrument's own comment.
+  function previewChannelsAt(channels, orderPos, row){
+    if(samplerModeEnabled){
+      channels.forEach(function(c){
+        var ch = song.channels[c];
+        var note = ch.noteTimeline[orderPos][row];
+        if(note===null) return;
+        var insIdx = ch.insTimeline[orderPos][row];
+        if(insIdx===null) return;
+        previewSamplerNote(insIdx, note, null);
+      });
+    } else {
+      previewAtTime(channels, (orderPos*song.meta.patternLength+row) * rowDurationSec());
+    }
+  }
+  // The Instruments panel's own ▶ button: in Sampler Mode this is now the
+  // exact same preview as the Sampler modal's ▶ Preview button
+  // (previewSamplerInstrument — a neutral reference pitch, i.e. "how does
+  // this instrument sound on its own", not pitched to wherever it happens
+  // to first appear in the song). Sampler Mode off has no such neutral
+  // reference (there's no synthesis, just recorded stems) so that case
+  // keeps the old behaviour: a short slice of the stem at this instrument's
+  // first real trigger, found via instrumentPreviewSpots.
   function previewInstrument(insIndex){
     var spot = instrumentPreviewSpots[insIndex];
+    if(samplerModeEnabled){
+      previewSamplerInstrument(insIndex);
+      if(spot){ flashPianoForChannelsAt([spot.channel], spot.orderPos, spot.row); spawnJetForCell(spot.channel, spot.orderPos, spot.row); }
+      return;
+    }
     if(!spot) return;
-    previewAtTime([spot.channel], spot.time);
+    previewChannelsAt([spot.channel], spot.orderPos, spot.row);
     flashPianoForChannelsAt([spot.channel], spot.orderPos, spot.row);
     spawnJetForCell(spot.channel, spot.orderPos, spot.row);
   }
@@ -3743,6 +3990,7 @@
     stemBuffers: function(){ return stemBuffers; },
     instrumentPreviewSpots: instrumentPreviewSpots,
     mutedChannels: mutedChannels,
+    mutedInstruments: mutedInstruments,
     pianoRoll: function(){ return { active: pianoRollActiveNotes, flashes: pianoRollFlashes, range: pianoRollRange }; },
     noiseBox: function(){ return { active: noiseActive, flash: noiseFlash }; },
     coverArt: function(){ return { jets: jets.map(function(j){ return {spread0:j.spread0,age:j.age,maxAge:j.maxAge,width:j.width,length:j.length}; }), cloudPuffs: cloudPuffs.length, driftT: coverDriftT, overallVol: coverOverallVol, sourceWobble: currentJetSourceOffset(), curveScale: currentJetCurveScale() }; },
