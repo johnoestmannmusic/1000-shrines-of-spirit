@@ -1,0 +1,16 @@
+[package]
+name = "freeze_plugin"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+# cdylib for the VST3/CLAP bundle, lib for the standalone binary target.
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "freeze_plugin_standalone"
+path = "src/main.rs"
+
+[dependencies]
+freeze_dsp = { path = "../freeze_dsp" }
+nih_plug = { workspace = true, features = ["standalone"] }
