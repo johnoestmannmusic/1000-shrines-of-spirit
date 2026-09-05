@@ -1,10 +1,18 @@
 use crate::envelope::ArEnvelope;
 use crate::render::LoopBufferData;
-use crate::resample::{playback_rate, PlaybackReader};
+use crate::resample::{playback_rate, sample_stereo_at, PlaybackReader};
+use std::sync::Arc;
 
 pub const MAX_VOICES: usize = 16;
 pub const ATTACK_MS: f32 = 10.0;
 pub const RELEASE_MS: f32 = 150.0;
+/// How long to crossfade into a freshly rendered loop buffer (e.g. after a
+/// Freeze Point / Formant Shift / Stereo Width change) instead of hard-
+/// cutting to it. Two frozen spectra generally differ in content at any
+/// given playhead position, so an instant swap is a real waveform
+/// discontinuity - audible as a click, and as stuttering when a host
+/// automates a param quickly enough to trigger several swaps in a row.
+pub const BUFFER_CROSSFADE_MS: f32 = 15.0;
 
 pub struct Voice {
     pub id: i32,
@@ -34,6 +42,9 @@ pub struct VoiceManager {
     sample_rate: f32,
     root_note: u8,
     clock: u64,
+    current_buffer: Option<Arc<LoopBufferData>>,
+    outgoing_buffer: Option<Arc<LoopBufferData>>,
+    crossfade_elapsed: usize,
 }
 
 impl VoiceManager {
@@ -43,6 +54,9 @@ impl VoiceManager {
             sample_rate,
             root_note,
             clock: 0,
+            current_buffer: None,
+            outgoing_buffer: None,
+            crossfade_elapsed: 0,
         }
     }
 
@@ -117,7 +131,13 @@ impl VoiceManager {
     /// `out_left`/`out_right`, reading both of `buffer`'s channels in
     /// lockstep per voice. If `buffer` has only one channel, that channel
     /// is duplicated to both outputs.
-    pub fn process_block(&mut self, buffer: &LoopBufferData, out_left: &mut [f32], out_right: &mut [f32]) {
+    ///
+    /// `buffer` is compared by `Arc` identity (not content) against the
+    /// previously passed buffer: a fresh `Arc` (e.g. published by a
+    /// background render triggered by a param change) starts a short
+    /// crossfade from the outgoing buffer rather than an instant swap - see
+    /// `BUFFER_CROSSFADE_MS`.
+    pub fn process_block(&mut self, buffer: &Arc<LoopBufferData>, out_left: &mut [f32], out_right: &mut [f32]) {
         debug_assert_eq!(out_left.len(), out_right.len());
         for sample in out_left.iter_mut() {
             *sample = 0.0;
@@ -126,10 +146,33 @@ impl VoiceManager {
             *sample = 0.0;
         }
 
-        let Some(left_channel) = buffer.channels.first() else {
+        let is_new_buffer = match &self.current_buffer {
+            Some(current) => !Arc::ptr_eq(current, buffer),
+            None => true,
+        };
+        if is_new_buffer {
+            if let Some(previous) = self.current_buffer.replace(buffer.clone()) {
+                self.outgoing_buffer = Some(previous);
+                self.crossfade_elapsed = 0;
+            }
+        }
+
+        let current = self.current_buffer.as_ref().expect("just set above if it was None");
+        let Some(left_channel) = current.channels.first() else {
             return;
         };
-        let right_channel = buffer.channels.get(1).unwrap_or(left_channel);
+        let right_channel = current.channels.get(1).unwrap_or(left_channel);
+
+        let crossfade_total_samples = (((BUFFER_CROSSFADE_MS / 1000.0) * self.sample_rate) as usize).max(1);
+        let crossfade = if self.crossfade_elapsed < crossfade_total_samples {
+            self.outgoing_buffer.as_ref().and_then(|outgoing| {
+                let l = outgoing.channels.first()?;
+                let r = outgoing.channels.get(1).unwrap_or(l);
+                Some((l, r))
+            })
+        } else {
+            None
+        };
 
         // Voices are summed with no per-voice headroom, so a held chord
         // clips without this. A single frozen note can already sit close to
@@ -146,7 +189,19 @@ impl VoiceManager {
         for slot in self.voices.iter_mut() {
             let Some(voice) = slot else { continue };
             for i in 0..out_left.len() {
-                let (l, r) = voice.reader.read_stereo_and_advance(left_channel, right_channel, voice.rate);
+                let pos_before_advance = voice.reader.read_pos;
+                let (mut l, mut r) = voice.reader.read_stereo_and_advance(left_channel, right_channel, voice.rate);
+
+                if let Some((outgoing_left, outgoing_right)) = crossfade {
+                    let elapsed = self.crossfade_elapsed + i;
+                    if elapsed < crossfade_total_samples {
+                        let t = elapsed as f32 / crossfade_total_samples as f32;
+                        let (old_l, old_r) = sample_stereo_at(outgoing_left, outgoing_right, pos_before_advance);
+                        l = old_l * (1.0 - t) + l * t;
+                        r = old_r * (1.0 - t) + r * t;
+                    }
+                }
+
                 let level = voice.env.advance();
                 out_left[i] += l * level * voice.gain * gain_compensation;
                 out_right[i] += r * level * voice.gain * gain_compensation;
@@ -155,6 +210,14 @@ impl VoiceManager {
                 *slot = None;
             }
         }
+
+        if self.outgoing_buffer.is_some() {
+            self.crossfade_elapsed += out_left.len();
+            if self.crossfade_elapsed >= crossfade_total_samples {
+                self.outgoing_buffer = None;
+            }
+        }
+
         self.clock += out_left.len() as u64;
     }
 }
@@ -164,12 +227,12 @@ mod tests {
     use super::*;
     use crate::render::DEFAULT_ROOT_NOTE;
 
-    fn make_buffer() -> LoopBufferData {
-        LoopBufferData {
+    fn make_buffer() -> Arc<LoopBufferData> {
+        Arc::new(LoopBufferData {
             channels: vec![vec![0.5f32; 4096], vec![0.5f32; 4096]],
             sample_rate: 48000.0,
             root_note: DEFAULT_ROOT_NOTE,
-        }
+        })
     }
 
     #[test]
@@ -248,11 +311,11 @@ mod tests {
         let mut vm = VoiceManager::new(48000.0, DEFAULT_ROOT_NOTE);
         vm.note_on(60, 0, 1.0, 1);
 
-        let buffer = LoopBufferData {
+        let buffer = Arc::new(LoopBufferData {
             channels: vec![vec![0.7f32; 4096]],
             sample_rate: 48000.0,
             root_note: DEFAULT_ROOT_NOTE,
-        };
+        });
         let mut out_left = vec![0.0f32; 4096];
         let mut out_right = vec![0.0f32; 4096];
         for _ in 0..5 {
@@ -269,11 +332,11 @@ mod tests {
         // A held chord must not clip even in the fully-correlated worst
         // case: N simultaneous identical voices should sum to the same
         // level as a single voice, not N times.
-        let buffer = LoopBufferData {
+        let buffer = Arc::new(LoopBufferData {
             channels: vec![vec![1.0f32; 8192], vec![1.0f32; 8192]],
             sample_rate: 48000.0,
             root_note: DEFAULT_ROOT_NOTE,
-        };
+        });
 
         let mut single = VoiceManager::new(48000.0, DEFAULT_ROOT_NOTE);
         single.note_on(DEFAULT_ROOT_NOTE, 0, 1.0, 1);
@@ -313,11 +376,11 @@ mod tests {
         let mut vm = VoiceManager::new(48000.0, DEFAULT_ROOT_NOTE);
         vm.note_on(60, 0, 1.0, 1);
 
-        let buffer = LoopBufferData {
+        let buffer = Arc::new(LoopBufferData {
             channels: vec![vec![1.0f32; 4096], vec![0.5f32; 4096]],
             sample_rate: 48000.0,
             root_note: DEFAULT_ROOT_NOTE,
-        };
+        });
         let mut out_left = vec![0.0f32; 4096];
         let mut out_right = vec![0.0f32; 4096];
         for _ in 0..5 {
@@ -328,6 +391,59 @@ mod tests {
         for i in tail_start..out_left.len() {
             assert!((out_left[i] - 1.0).abs() < 1e-3, "got {}", out_left[i]);
             assert!((out_right[i] - 0.5).abs() < 1e-3, "got {}", out_right[i]);
+        }
+    }
+
+    #[test]
+    fn buffer_swap_crossfades_instead_of_clicking() {
+        // Two maximally different (opposite-polarity, constant) buffers
+        // stand in for "two very different frozen spectra" - swapping
+        // between them with no crossfade would jump by 2.0 in a single
+        // sample. With the crossfade, the largest sample-to-sample delta
+        // anywhere in the transition should be far smaller than that.
+        let sample_rate = 48000.0;
+        let mut vm = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
+        vm.note_on(DEFAULT_ROOT_NOTE, 0, 1.0, 1);
+
+        let buffer_a = Arc::new(LoopBufferData {
+            channels: vec![vec![1.0f32; 4096], vec![1.0f32; 4096]],
+            sample_rate,
+            root_note: DEFAULT_ROOT_NOTE,
+        });
+        let buffer_b = Arc::new(LoopBufferData {
+            channels: vec![vec![-1.0f32; 4096], vec![-1.0f32; 4096]],
+            sample_rate,
+            root_note: DEFAULT_ROOT_NOTE,
+        });
+
+        // Run past the attack envelope on buffer_a so the swap isn't masked
+        // by the note also fading in at the same time.
+        let mut scratch_l = vec![0.0f32; 512];
+        let mut scratch_r = vec![0.0f32; 512];
+        for _ in 0..10 {
+            vm.process_block(&buffer_a, &mut scratch_l, &mut scratch_r);
+        }
+
+        // Swap to the opposite-polarity buffer and capture the transition.
+        let mut out_left = vec![0.0f32; 4096];
+        let mut out_right = vec![0.0f32; 4096];
+        vm.process_block(&buffer_b, &mut out_left, &mut out_right);
+
+        let max_delta = out_left.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        assert!(
+            max_delta < 0.5,
+            "expected the crossfade to smooth the transition (max single-sample delta far below the 2.0 hard-swap jump), got {}",
+            max_delta
+        );
+
+        // And the crossfade must actually finish: after it's well past
+        // BUFFER_CROSSFADE_MS, output should have fully settled on buffer_b.
+        for _ in 0..10 {
+            vm.process_block(&buffer_b, &mut out_left, &mut out_right);
+        }
+        let tail_start = out_left.len() - 100;
+        for i in tail_start..out_left.len() {
+            assert!((out_left[i] - -1.0).abs() < 1e-3, "expected to have settled on buffer_b, got {}", out_left[i]);
         }
     }
 }

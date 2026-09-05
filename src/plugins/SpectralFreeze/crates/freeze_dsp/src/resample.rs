@@ -4,6 +4,27 @@ pub fn playback_rate(note: u8, root_note: u8) -> f64 {
     2f64.powf((note as f64 - root_note as f64) / 12.0)
 }
 
+/// Reads `left`/`right` at an arbitrary fractional `pos` with linear
+/// interpolation, wrapping around the buffer length. Doesn't touch any
+/// `PlaybackReader` state - used both by `read_stereo_and_advance` below and
+/// by `VoiceManager`'s buffer-swap crossfade, which needs to sample an
+/// *outgoing* buffer at the same position a `PlaybackReader` is using for
+/// its current (incoming) one.
+pub fn sample_stereo_at(left: &[f32], right: &[f32], pos: f64) -> (f32, f32) {
+    let len = left.len();
+    debug_assert_eq!(len, right.len());
+    if len == 0 {
+        return (0.0, 0.0);
+    }
+    let pos = pos.rem_euclid(len as f64);
+    let i0 = pos.floor() as usize % len;
+    let i1 = (i0 + 1) % len;
+    let frac = (pos - pos.floor()) as f32;
+    let l = left[i0] * (1.0 - frac) + left[i1] * frac;
+    let r = right[i0] * (1.0 - frac) + right[i1] * frac;
+    (l, r)
+}
+
 /// Reads a loop buffer at a fractional position with linear interpolation,
 /// wrapping around the loop length so playback never reads out of bounds
 /// even if the underlying buffer is swapped out for a differently-sized one
@@ -41,13 +62,9 @@ impl PlaybackReader {
             return (0.0, 0.0);
         }
         let pos = self.read_pos.rem_euclid(len as f64);
-        let i0 = pos.floor() as usize % len;
-        let i1 = (i0 + 1) % len;
-        let frac = (pos - pos.floor()) as f32;
-        let l = left[i0] * (1.0 - frac) + left[i1] * frac;
-        let r = right[i0] * (1.0 - frac) + right[i1] * frac;
+        let sample = sample_stereo_at(left, right, pos);
         self.read_pos = (pos + rate).rem_euclid(len as f64);
-        (l, r)
+        sample
     }
 }
 

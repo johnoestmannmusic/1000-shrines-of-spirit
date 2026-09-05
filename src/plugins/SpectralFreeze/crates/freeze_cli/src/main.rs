@@ -113,6 +113,7 @@ fn main() {
         args.stereo_width,
     );
 
+    let loop_buffer = std::sync::Arc::new(loop_buffer);
     let mut voice_manager = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
     voice_manager.note_on(args.note, 0, 1.0, 0);
 
