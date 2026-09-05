@@ -4,6 +4,31 @@ pub fn playback_rate(note: u8, root_note: u8) -> f64 {
     2f64.powf((note as f64 - root_note as f64) / 12.0)
 }
 
+/// Naive linear-interpolation whole-buffer resample from `from_rate` to
+/// `to_rate` samples/sec (no anti-aliasing filter, so downsampling by a
+/// large factor can alias - acceptable for bringing an imported sample to
+/// the plugin's operating rate, not a mastering-grade resampler). Without
+/// this, a loaded sample whose native rate differs from the host's would
+/// play back pitch/speed-shifted, since `VoiceManager` reads the frozen
+/// loop assuming it's already at the plugin's operating rate.
+pub fn resample_linear(source: &[f32], from_rate: f32, to_rate: f32) -> Vec<f32> {
+    if source.is_empty() || from_rate <= 0.0 || to_rate <= 0.0 {
+        return source.to_vec();
+    }
+    let ratio = from_rate as f64 / to_rate as f64;
+    let out_len = ((source.len() as f64 / ratio).round() as usize).max(1);
+    let last = source.len() - 1;
+    (0..out_len)
+        .map(|i| {
+            let pos = (i as f64 * ratio).min(last as f64);
+            let i0 = pos.floor() as usize;
+            let i1 = (i0 + 1).min(last);
+            let frac = (pos - pos.floor()) as f32;
+            source[i0] * (1.0 - frac) + source[i1] * frac
+        })
+        .collect()
+}
+
 /// Reads `left`/`right` at an arbitrary fractional `pos` with linear
 /// interpolation, wrapping around the buffer length. Doesn't touch any
 /// `PlaybackReader` state - used both by `read_stereo_and_advance` below and
@@ -71,6 +96,41 @@ impl PlaybackReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resample_linear_preserves_duration_in_seconds() {
+        let from_rate = 44100.0;
+        let to_rate = 48000.0;
+        let source = vec![0.0f32; 44100]; // 1 second at from_rate
+        let resampled = resample_linear(&source, from_rate, to_rate);
+        let duration_seconds = resampled.len() as f32 / to_rate;
+        assert!(
+            (duration_seconds - 1.0).abs() < 0.001,
+            "expected ~1.0s at the new rate, got {}s ({} samples)",
+            duration_seconds,
+            resampled.len()
+        );
+    }
+
+    #[test]
+    fn resample_linear_preserves_cycle_count() {
+        // A known tone resampled to a different rate should still contain
+        // roughly the same number of cycles - i.e. playing it back at the
+        // new rate reproduces the same pitch, not a shifted one.
+        let from_rate = 44100.0;
+        let to_rate = 48000.0;
+        let cycles = 100.0f32;
+        let len = from_rate as usize;
+        let source: Vec<f32> =
+            (0..len).map(|i| (2.0 * std::f32::consts::PI * cycles * i as f32 / from_rate).sin()).collect();
+        let resampled = resample_linear(&source, from_rate, to_rate);
+
+        let count_crossings = |sig: &[f32]| -> usize {
+            sig.windows(2).filter(|w| (w[0] >= 0.0) != (w[1] >= 0.0)).count()
+        };
+        let ratio = count_crossings(&resampled) as f32 / count_crossings(&source) as f32;
+        assert!((ratio - 1.0).abs() < 0.02, "expected ~the same number of cycles after resampling, got ratio {}", ratio);
+    }
 
     #[test]
     fn pitch_ratio_formula() {

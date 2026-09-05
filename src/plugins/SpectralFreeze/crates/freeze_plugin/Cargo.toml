@@ -14,4 +14,7 @@ path = "src/main.rs"
 [dependencies]
 freeze_dsp = { path = "../freeze_dsp" }
 nih_plug = { workspace = true, features = ["standalone"] }
+nih_plug_egui = { workspace = true }
 arc-swap = "1"
+rfd = "0.15"
+hound = "3.5"

@@ -2,14 +2,18 @@ mod render_worker;
 
 use arc_swap::ArcSwap;
 use freeze_dsp::render::{render_frozen_loop, LoopBufferData, DEFAULT_ROOT_NOTE};
+use freeze_dsp::resample::resample_linear;
 use freeze_dsp::voice::VoiceManager;
 use nih_plug::prelude::*;
+use nih_plug_egui::{create_egui_editor, egui, widgets, EguiState};
 use render_worker::{RenderRequest, RenderWorker};
+use std::path::Path;
 use std::sync::Arc;
 
-/// The loop buffer is baked from a synthetic source (real sample loading is
-/// Phase E) and played polyphonically through `VoiceManager`, driven by real
-/// MIDI note on/off. Freeze Point / Formant Shift / Stereo Width are real
+/// The loop buffer is baked from a source sample (the built-in placeholder
+/// tone until a real file is loaded via the editor's "Load Sample" button)
+/// and played polyphonically through `VoiceManager`, driven by real MIDI
+/// note on/off. Freeze Point / Formant Shift / Stereo Width are real
 /// automatable params, but re-rendering the frozen loop on every change is
 /// too expensive for the audio thread - `process()` only *notices* a param
 /// change and hands it to a background `RenderWorker`, which publishes the
@@ -17,6 +21,11 @@ use std::sync::Arc;
 /// the latest version lock-free without ever blocking on the render).
 pub struct FreezePlugin {
     params: Arc<FreezePluginParams>,
+    /// The audio being frozen. An `ArcSwap` (not a plain `Arc`) so the
+    /// editor's "Load Sample" button can swap in newly loaded audio without
+    /// touching the audio thread - `RenderWorker` always reads whatever is
+    /// current at the moment it renders.
+    source: Arc<ArcSwap<Vec<Vec<f32>>>>,
     loop_buffer: Arc<ArcSwap<LoopBufferData>>,
     worker: Option<RenderWorker>,
     voices: VoiceManager,
@@ -53,6 +62,9 @@ const RENDER_THROTTLE_MS: f32 = 100.0;
 
 #[derive(Params)]
 struct FreezePluginParams {
+    #[persist = "editor-state"]
+    editor_state: Arc<EguiState>,
+
     #[id = "freeze_point"]
     pub freeze_point: FloatParam,
 
@@ -71,6 +83,7 @@ impl Default for FreezePlugin {
     fn default() -> Self {
         Self {
             params: Arc::new(FreezePluginParams::default()),
+            source: Arc::new(ArcSwap::new(Arc::new(Vec::new()))),
             loop_buffer: Arc::new(ArcSwap::new(Arc::new(silent_loop_buffer()))),
             worker: None,
             voices: VoiceManager::new(1.0, DEFAULT_ROOT_NOTE),
@@ -85,6 +98,7 @@ impl Default for FreezePlugin {
 impl Default for FreezePluginParams {
     fn default() -> Self {
         Self {
+            editor_state: EguiState::from_size(320, 240),
             freeze_point: FloatParam::new("Freeze Point", 50.0, FloatRange::Linear { min: 0.0, max: 100.0 })
                 .with_unit(" %"),
             formant_shift: FloatParam::new(
@@ -99,14 +113,14 @@ impl Default for FreezePluginParams {
     }
 }
 
-/// A short synthetic tone to freeze - stands in for a user-loaded sample
-/// until Phase E adds real file loading. Brightness (the balance between
-/// the fundamental and its upper harmonics) sweeps over the tone's
-/// duration, specifically so that different Freeze Point values capture
-/// genuinely different-sounding moments - a *constant* tone would give
-/// every Freeze Point nearly identical magnitude content differing only in
-/// essentially arbitrary starting phase, which is a poor demonstration of
-/// what Freeze Point is for.
+/// A short synthetic tone to freeze - the built-in placeholder until a real
+/// file is loaded via the editor. Brightness (the balance between the
+/// fundamental and its upper harmonics) sweeps over the tone's duration,
+/// specifically so that different Freeze Point values capture genuinely
+/// different-sounding moments - a *constant* tone would give every Freeze
+/// Point nearly identical magnitude content differing only in essentially
+/// arbitrary starting phase, which is a poor demonstration of what Freeze
+/// Point is for.
 fn synthetic_source(sample_rate: f32, seconds: f32) -> Vec<f32> {
     let len = (sample_rate * seconds) as usize;
     (0..len)
@@ -118,6 +132,60 @@ fn synthetic_source(sample_rate: f32, seconds: f32) -> Vec<f32> {
                 + (0.5 * brightness) * (t * 660.0 * std::f32::consts::TAU).sin()
         })
         .collect()
+}
+
+/// Decodes a WAV file into one `Vec<f32>` per channel (interleaved samples
+/// deinterleaved), normalizing integer formats to `[-1.0, 1.0]`. Returns the
+/// file's own sample rate alongside - the caller is responsible for
+/// resampling to the plugin's operating rate if they differ.
+fn load_wav_channels(path: &Path) -> Result<(Vec<Vec<f32>>, f32), String> {
+    let mut reader = hound::WavReader::open(path).map_err(|e| format!("couldn't open WAV: {e}"))?;
+    let spec = reader.spec();
+    let num_channels = (spec.channels as usize).max(1);
+    let sample_rate = spec.sample_rate as f32;
+
+    let mut channels: Vec<Vec<f32>> = vec![Vec::new(); num_channels];
+    match spec.sample_format {
+        hound::SampleFormat::Float => {
+            for (i, sample) in reader.samples::<f32>().enumerate() {
+                let s = sample.map_err(|e| format!("error reading sample: {e}"))?;
+                channels[i % num_channels].push(s);
+            }
+        }
+        hound::SampleFormat::Int => {
+            let max_amplitude = (1i64 << (spec.bits_per_sample - 1)) as f32;
+            for (i, sample) in reader.samples::<i32>().enumerate() {
+                let s = sample.map_err(|e| format!("error reading sample: {e}"))? as f32 / max_amplitude;
+                channels[i % num_channels].push(s);
+            }
+        }
+    }
+
+    if channels.iter().all(|c| c.is_empty()) {
+        return Err("WAV file contains no audio samples".to_string());
+    }
+
+    Ok((channels, sample_rate))
+}
+
+/// Brings a loaded file's audio to the plugin's current operating rate -
+/// without this, a file whose native rate differs from the host's would
+/// play back pitch/speed-shifted, since `VoiceManager` reads the frozen
+/// loop assuming it's already at the plugin's operating rate.
+fn prepare_source_for_plugin_rate(channels: Vec<Vec<f32>>, file_rate: f32, plugin_rate: f32) -> Vec<Vec<f32>> {
+    if (file_rate - plugin_rate).abs() < 0.5 {
+        channels
+    } else {
+        channels.into_iter().map(|c| resample_linear(&c, file_rate, plugin_rate)).collect()
+    }
+}
+
+/// GUI-thread-only state for the editor (which file is loaded, any load
+/// error) - not shared with the audio thread and not persisted.
+#[derive(Default)]
+struct FreezeEditorState {
+    filename: Option<String>,
+    error: Option<String>,
 }
 
 impl Plugin for FreezePlugin {
@@ -144,6 +212,78 @@ impl Plugin for FreezePlugin {
         self.params.clone()
     }
 
+    fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
+        let params = self.params.clone();
+        let source = self.source.clone();
+        let loop_buffer = self.loop_buffer.clone();
+        let trigger = self.worker.as_ref().map(|worker| worker.trigger());
+
+        create_egui_editor(
+            self.params.editor_state.clone(),
+            FreezeEditorState::default(),
+            |_, _| {},
+            move |egui_ctx, setter, state| {
+                egui::CentralPanel::default().show(egui_ctx, |ui| {
+                    ui.heading("SpectralFreeze");
+
+                    ui.add_space(8.0);
+                    ui.label("Freeze Point");
+                    ui.add(widgets::ParamSlider::for_param(&params.freeze_point, setter));
+
+                    ui.label("Formant Shift");
+                    ui.add(widgets::ParamSlider::for_param(&params.formant_shift, setter));
+
+                    ui.label("Stereo Width");
+                    ui.add(widgets::ParamSlider::for_param(&params.stereo_width, setter));
+
+                    ui.add_space(12.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    if ui.button("Load Sample...").clicked() {
+                        if let Some(path) = rfd::FileDialog::new().add_filter("WAV", &["wav", "WAV"]).pick_file() {
+                            match load_wav_channels(&path) {
+                                Ok((channels, file_rate)) => {
+                                    // Read the plugin's current operating rate from
+                                    // the loop buffer it last rendered at, rather
+                                    // than a value captured once when the editor
+                                    // was created (which could be stale if the
+                                    // editor is opened unusually early).
+                                    let plugin_rate = loop_buffer.load().sample_rate;
+                                    let prepared = prepare_source_for_plugin_rate(channels, file_rate, plugin_rate);
+                                    source.store(Arc::new(prepared));
+                                    if let Some(trigger) = &trigger {
+                                        trigger.request_render(RenderRequest {
+                                            freeze_point_pct: params.freeze_point.value(),
+                                            formant_shift_semitones: params.formant_shift.value(),
+                                            stereo_width_pct: params.stereo_width.value(),
+                                        });
+                                    }
+                                    state.filename = path.file_name().map(|n| n.to_string_lossy().into_owned());
+                                    state.error = None;
+                                }
+                                Err(e) => state.error = Some(e),
+                            }
+                        }
+                    }
+
+                    ui.add_space(4.0);
+                    match &state.filename {
+                        Some(name) => {
+                            ui.label(format!("Loaded: {name}"));
+                        }
+                        None => {
+                            ui.label("Using built-in placeholder tone");
+                        }
+                    }
+                    if let Some(error) = &state.error {
+                        ui.colored_label(egui::Color32::from_rgb(220, 80, 80), error);
+                    }
+                });
+            },
+        )
+    }
+
     fn initialize(
         &mut self,
         _audio_io_layout: &AudioIOLayout,
@@ -151,7 +291,7 @@ impl Plugin for FreezePlugin {
         _context: &mut impl InitContext<Self>,
     ) -> bool {
         let sample_rate = buffer_config.sample_rate;
-        let source = Arc::new(vec![synthetic_source(sample_rate, 1.0)]);
+        self.source.store(Arc::new(vec![synthetic_source(sample_rate, 1.0)]));
 
         let request = RenderRequest {
             freeze_point_pct: self.params.freeze_point.value(),
@@ -162,7 +302,7 @@ impl Plugin for FreezePlugin {
         // playback starts, so blocking is fine) so process() never sees the
         // placeholder silent buffer once the host actually starts playing.
         self.loop_buffer.store(Arc::new(render_frozen_loop(
-            &source,
+            &self.source.load(),
             sample_rate,
             request.freeze_point_pct,
             request.formant_shift_semitones,
@@ -172,7 +312,7 @@ impl Plugin for FreezePlugin {
         self.last_requested = request;
 
         self.worker =
-            Some(RenderWorker::spawn(source, sample_rate, DEFAULT_ROOT_NOTE, self.loop_buffer.clone()));
+            Some(RenderWorker::spawn(self.source.clone(), sample_rate, DEFAULT_ROOT_NOTE, self.loop_buffer.clone()));
         self.voices = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
         self.sample_rate = sample_rate;
         self.pending_request = None;

@@ -17,19 +17,43 @@ pub struct RenderRequest {
     pub stereo_width_pct: f32,
 }
 
+/// A cheap-to-clone handle for asking the render worker to render again -
+/// separated from `RenderWorker` itself (which owns the thread and stops it
+/// on drop) so it can be handed to the GUI thread (e.g. so a "Load Sample"
+/// button can trigger a re-render after swapping in new source audio)
+/// without giving the GUI any control over the worker's lifetime.
+#[derive(Clone)]
+pub struct RenderTrigger {
+    pending: Arc<(Mutex<Option<RenderRequest>>, Condvar)>,
+}
+
+impl RenderTrigger {
+    /// Overwrites any not-yet-started pending request with this one.
+    pub fn request_render(&self, request: RenderRequest) {
+        let (lock, cvar) = &*self.pending;
+        *lock.lock().unwrap() = Some(request);
+        cvar.notify_one();
+    }
+}
+
 /// Owns the background render thread. Only ever holds the *latest*
 /// requested params (`request_render` overwrites any not-yet-started
 /// request) so a fast automation sweep can't back the worker up with a
 /// queue of stale renders to work through.
+///
+/// `source` is an `ArcSwap` (not a fixed `Arc` captured at spawn time) so
+/// loading a new sample (Phase E) can swap it out - the worker always reads
+/// whatever the *current* source is at the moment a request comes in, not
+/// whatever it was when the thread started.
 pub struct RenderWorker {
-    pending: Arc<(Mutex<Option<RenderRequest>>, Condvar)>,
+    trigger: RenderTrigger,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
 
 impl RenderWorker {
     pub fn spawn(
-        source: Arc<Vec<Vec<f32>>>,
+        source: Arc<ArcSwap<Vec<Vec<f32>>>>,
         sample_rate: f32,
         root_note: u8,
         output: Arc<ArcSwap<LoopBufferData>>,
@@ -53,8 +77,9 @@ impl RenderWorker {
                     guard.take().expect("woke with no request and no stop signal")
                 };
 
+                let current_source = source.load();
                 let rendered = render_frozen_loop(
-                    &source,
+                    &current_source,
                     sample_rate,
                     request.freeze_point_pct,
                     request.formant_shift_semitones,
@@ -65,21 +90,25 @@ impl RenderWorker {
             }
         });
 
-        Self { pending, stop, handle: Some(handle) }
+        Self { trigger: RenderTrigger { pending }, stop, handle: Some(handle) }
+    }
+
+    /// A cheap-to-clone handle that can request a render without holding
+    /// (or being able to stop) the worker itself.
+    pub fn trigger(&self) -> RenderTrigger {
+        self.trigger.clone()
     }
 
     /// Overwrites any not-yet-started pending request with this one.
     pub fn request_render(&self, request: RenderRequest) {
-        let (lock, cvar) = &*self.pending;
-        *lock.lock().unwrap() = Some(request);
-        cvar.notify_one();
+        self.trigger.request_render(request);
     }
 }
 
 impl Drop for RenderWorker {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
-        let (lock, cvar) = &*self.pending;
+        let (lock, cvar) = &*self.trigger.pending;
         drop(lock.lock().unwrap());
         cvar.notify_one();
         if let Some(handle) = self.handle.take() {
@@ -94,12 +123,12 @@ mod tests {
     use freeze_dsp::render::DEFAULT_ROOT_NOTE;
     use std::time::{Duration, Instant};
 
-    fn make_source(sample_rate: f32, seconds: f32) -> Arc<Vec<Vec<f32>>> {
+    fn make_source(sample_rate: f32, seconds: f32) -> Arc<ArcSwap<Vec<Vec<f32>>>> {
         let len = (sample_rate * seconds) as usize;
         let tone: Vec<f32> = (0..len)
             .map(|i| (i as f32 / sample_rate * 220.0 * std::f32::consts::TAU).sin())
             .collect();
-        Arc::new(vec![tone])
+        Arc::new(ArcSwap::new(Arc::new(vec![tone])))
     }
 
     fn wait_for_render(output: &ArcSwap<LoopBufferData>, timeout: Duration) -> bool {
@@ -151,5 +180,45 @@ mod tests {
         // still working through a backlog of the earlier requests.
         thread::sleep(Duration::from_millis(200));
         assert_eq!(output.load().channels.len(), 2);
+    }
+
+    #[test]
+    fn swapping_the_source_and_re_requesting_uses_the_new_source() {
+        // Proves the whole point of ArcSwap<Vec<Vec<f32>>> over a fixed Arc
+        // captured at spawn time: a source swapped in after the worker
+        // starts must actually be used by the *next* render, not whatever
+        // was current when the thread was spawned.
+        let sample_rate = 48000.0;
+        let source = make_source(sample_rate, 1.0);
+        let output = Arc::new(ArcSwap::new(Arc::new(LoopBufferData {
+            channels: Vec::new(),
+            sample_rate,
+            root_note: DEFAULT_ROOT_NOTE,
+        })));
+
+        let worker = RenderWorker::spawn(source.clone(), sample_rate, DEFAULT_ROOT_NOTE, output.clone());
+        let request = RenderRequest { freeze_point_pct: 50.0, formant_shift_semitones: 0.0, stereo_width_pct: 0.0 };
+        worker.request_render(request);
+        assert!(wait_for_render(&output, Duration::from_secs(2)), "worker did not publish the first render in time");
+        let first_len = output.load().channels[0].len();
+
+        // Swap in a much longer source (loop length scales with source
+        // length up to the 8s cap) and request again via a cloned trigger,
+        // mirroring how the GUI thread would use it.
+        let longer_len = (sample_rate * 6.0) as usize;
+        let longer_source: Vec<f32> =
+            (0..longer_len).map(|i| (i as f32 / sample_rate * 220.0 * std::f32::consts::TAU).sin()).collect();
+        source.store(Arc::new(vec![longer_source]));
+
+        let trigger = worker.trigger();
+        // Force a fresh publish to detect: clear the output first so we can
+        // tell a *new* render landed rather than reading the still-valid
+        // previous one during the wait.
+        output.store(Arc::new(LoopBufferData { channels: Vec::new(), sample_rate, root_note: DEFAULT_ROOT_NOTE }));
+        trigger.request_render(request);
+        assert!(wait_for_render(&output, Duration::from_secs(2)), "worker did not publish the second render in time");
+
+        let second_len = output.load().channels[0].len();
+        assert!(second_len > first_len, "expected the longer swapped-in source to produce a longer loop: first={}, second={}", first_len, second_len);
     }
 }
