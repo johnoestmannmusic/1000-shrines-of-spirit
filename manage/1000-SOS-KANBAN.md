@@ -1,7 +1,9 @@
 # 1000 Shrines of SPIRIT — Project Kanban
 
-This file is the shared Markdown coordination board for active subprojects.
-Agents should move cards between buckets instead of duplicating them, preserve
+How to use:
+This file is the shared Kanban Markdown coordination board for active subprojects.
+When starting on a project, Agents should familiarize themselves with the state of the project as described in that section in this document.
+Agents should only assign themselves to cards that are not already assigned to another agent. They should move cards between buckets instead of duplicating them, preserve
 card IDs, and append dated process comments after each completed feature.
 
 ---
