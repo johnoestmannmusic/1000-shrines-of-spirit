@@ -98,7 +98,7 @@ impl Default for FreezePlugin {
 impl Default for FreezePluginParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(320, 240),
+            editor_state: EguiState::from_size(360, 320),
             freeze_point: FloatParam::new("Freeze Point", 50.0, FloatRange::Linear { min: 0.0, max: 100.0 })
                 .with_unit(" %"),
             formant_shift: FloatParam::new(
@@ -188,6 +188,85 @@ struct FreezeEditorState {
     error: Option<String>,
 }
 
+/// Draws the loaded source's waveform (min/max per pixel column, since the
+/// source is almost always much longer than the display is wide) with a
+/// vertical marker at Freeze Point's current position, so the user can see
+/// *what* they're about to freeze rather than reading a bare percentage.
+/// Click/drag directly on it to set Freeze Point, using the same
+/// begin/set/end-normalized pattern a built-in `ParamSlider` uses
+/// internally, just driven by pixel position instead of a slider track.
+fn draw_freeze_point_waveform(
+    ui: &mut egui::Ui,
+    source: &Arc<ArcSwap<Vec<Vec<f32>>>>,
+    freeze_point: &FloatParam,
+    setter: &ParamSetter,
+) {
+    let desired_size = egui::vec2(ui.available_width(), 70.0);
+    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click_and_drag());
+    let painter = ui.painter();
+
+    painter.rect_filled(rect, 2.0, egui::Color32::from_gray(25));
+
+    let source_guard = source.load();
+    let samples = source_guard.first().filter(|s| !s.is_empty());
+    match samples {
+        Some(samples) => {
+            let width_px = (rect.width().max(1.0) as usize).max(1);
+            let mid_y = rect.center().y;
+            let half_height = rect.height() * 0.5 * 0.9;
+            let samples_per_px = (samples.len() as f32 / width_px as f32).max(1.0);
+            for px in 0..width_px {
+                let start = ((px as f32) * samples_per_px) as usize;
+                if start >= samples.len() {
+                    break;
+                }
+                let end = (((px + 1) as f32) * samples_per_px).ceil() as usize;
+                let end = end.clamp(start + 1, samples.len());
+                let slice = &samples[start..end];
+                let (min_v, max_v) = slice
+                    .iter()
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(mn, mx), &s| (mn.min(s), mx.max(s)));
+                let x = rect.left() + px as f32;
+                let y_top = mid_y - max_v.clamp(-1.0, 1.0) * half_height;
+                let y_bottom = (mid_y - min_v.clamp(-1.0, 1.0) * half_height).max(y_top + 1.0);
+                painter.line_segment(
+                    [egui::pos2(x, y_top), egui::pos2(x, y_bottom)],
+                    egui::Stroke::new(1.0, egui::Color32::from_gray(150)),
+                );
+            }
+        }
+        None => {
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "No sample loaded",
+                egui::FontId::default(),
+                egui::Color32::from_gray(120),
+            );
+        }
+    }
+
+    let freeze_normalized = freeze_point.unmodulated_normalized_value();
+    let marker_x = rect.left() + freeze_normalized * rect.width();
+    painter.line_segment(
+        [egui::pos2(marker_x, rect.top()), egui::pos2(marker_x, rect.bottom())],
+        egui::Stroke::new(2.0, egui::Color32::from_rgb(240, 180, 60)),
+    );
+
+    if response.drag_started() || response.clicked() {
+        setter.begin_set_parameter(freeze_point);
+    }
+    if response.dragged() || response.clicked() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let normalized = ((pos.x - rect.left()) / rect.width().max(1.0)).clamp(0.0, 1.0);
+            setter.set_parameter_normalized(freeze_point, normalized);
+        }
+    }
+    if response.drag_stopped() || response.clicked() {
+        setter.end_set_parameter(freeze_point);
+    }
+}
+
 impl Plugin for FreezePlugin {
     const NAME: &'static str = "SpectralFreeze";
     const VENDOR: &'static str = "John Oestmann";
@@ -228,6 +307,7 @@ impl Plugin for FreezePlugin {
 
                     ui.add_space(8.0);
                     ui.label("Freeze Point");
+                    draw_freeze_point_waveform(ui, &source, &params.freeze_point, setter);
                     ui.add(widgets::ParamSlider::for_param(&params.freeze_point, setter));
 
                     ui.label("Formant Shift");
