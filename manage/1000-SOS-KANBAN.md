@@ -184,3 +184,87 @@ priority.
 - **Card Creation Date:** 2026-09-06
 - **Card Completion Note:** Complete in Rust-port commit `f8c9033`; automated browser checks measured algorithm clicks at approximately 90–160 ms while rendering continued independently.
 - **Process Comments:** 2026-09-06 — Rapid Cross-Synth-to-Smear changes and Convolve completion were verified with updated result waveforms and no console warnings or errors.
+
+---
+
+## Project: SpectralFreeze Plugin — Rust/nih-plug VST3/CLAP Port
+
+**Project Title:** SpectralFreeze Plugin — Rust/nih-plug VST3/CLAP Port  
+**Project Description:** Port the "Freeze" algorithm from `src/0006/index.html`'s Spectral Fusion feature into a standalone Rust/nih-plug instrument: load a sample, freeze a spectral snapshot into a sustained pad/drone, and play it polyphonically via MIDI as a VST3/CLAP plugin (and standalone binary). Built bottom-up as a pure-Rust, unit-tested DSP core first, then a thin nih-plug wrapper around it, so DSP correctness and plugin-build-pipeline correctness could be verified independently.  
+**Implementation Repository:** `../src/plugins/SpectralFreeze/`  
+**Primary Reference:** `../src/0006/index.html` (Spectral Fusion "Freeze" feature)  
+**Detailed Handoff:** `../src/plugins/SpectralFreeze/NEXT_STEPS.md`  
+**Board Last Updated:** 2026-09-06 by Reason A
+
+### Ideas
+
+#### FREEZE-IDEA-001 — Master soft-saturation limiter as alternative/companion to gain compensation
+
+- **Card Title:** Master soft-saturation limiter as alternative/companion to gain compensation
+- **Description:** Current polyphony fix (`1/active_count` gain compensation in `VoiceManager::process_block`) guarantees no clipping but trades in a real, audible volume dip at 3+ held voices — acceptable to the user for now but flagged to revisit once there's a fuller instrument (params, real samples) to judge it against. A tanh-style master limiter, alone or layered with a gentler compensation curve, would keep single-note volume closer to constant at the cost of coloring loud chords. Needs a listening comparison once Phase D/E params exist to actually play with.
+- **Assigned Agent:** Unassigned
+- **Card Creation Date:** 2026-09-06
+- **Card Completion Note:** Pending; not scheduled.
+- **Process Comments:** 2026-09-06 — User confirmed the current dip isn't a blocker; explicitly deferred to a later full-instrument listening pass.
+
+### Planned Features
+
+#### FREEZE-PLAN-001 — Automatable Freeze Point / Formant Shift / Stereo Width parameters (Phase D)
+
+- **Card Title:** Automatable Freeze Point / Formant Shift / Stereo Width parameters
+- **Description:** Register all three as real `FloatParam`s, backed by a background render thread plus `ArcSwap<LoopBufferData>` and a latest-value-wins mailbox so a fast automation sweep doesn't back up the worker. All three are render-time (not per-sample) operations — none of them are free — per the design notes in `NEXT_STEPS.md`.
+- **Assigned Agent:** Unassigned
+- **Card Creation Date:** 2026-09-06
+- **Card Completion Note:** Pending; next phase after MIDI wiring.
+- **Process Comments:** 2026-09-06 — `render_frozen_loop` already accepts all three values; this phase is about exposing them to the host/automation, not new DSP.
+
+#### FREEZE-PLAN-002 — Sample loading and minimal GUI (Phase E)
+
+- **Card Title:** Sample loading and minimal GUI
+- **Description:** Add `rfd` file-dialog-driven WAV loading (via `hound`, GUI thread only) to replace the Phase B/C synthetic placeholder tone, plus a minimal `nih_plug_egui` GUI: three sliders (Freeze Point / Formant Shift / Stereo Width), a load button, and a filename label.
+- **Assigned Agent:** Unassigned
+- **Card Creation Date:** 2026-09-06
+- **Card Completion Note:** Pending; depends on Phase D's param/render-thread plumbing.
+- **Process Comments:** 2026-09-06 — Deliberately deferred past MIDI/param wiring so file I/O and GUI code aren't mixed with the audio-thread work.
+
+#### FREEZE-PLAN-003 — Decouple Formant Shift from full re-analysis (Phase F)
+
+- **Card Title:** Decouple Formant Shift from full re-analysis
+- **Description:** Formant Shift currently requires the same full source-sample re-analysis as Freeze Point on every change. Decouple it so it only reprocesses the already-frozen magnitude spectrum (cheap), making live Formant Shift automation snappier than Freeze Point/Stereo Width, which genuinely need the expensive path.
+- **Assigned Agent:** Unassigned
+- **Card Creation Date:** 2026-09-06
+- **Card Completion Note:** Pending; final planned phase.
+- **Process Comments:** 2026-09-06 — Pure optimization, deferred until the three params are actually wired and automatable (Phase D).
+
+### Assigned
+
+_None currently in progress._
+
+### Completed
+
+#### FREEZE-DONE-001 — Pure-Rust DSP core and CLI test harness (Phase A)
+
+- **Card Title:** Pure-Rust DSP core and CLI test harness
+- **Description:** Built `freeze_dsp` (phase-vocoder freeze + cepstral formant shift, ported from `src/0006/index.html`'s Spectral Fusion Freeze) with no nih-plug/hardware dependency, plus `freeze_cli` as a WAV-in/WAV-out test harness for fast by-ear iteration. Resolved several non-obvious DSP correctness issues along the way: `realfft`'s real-DC/Nyquist-bin constraint, floored-modulo phase wrapping at exactly ±π, and Stereo Width needing to be baked into render-time synthesis rather than applied as a post-hoc mid-side transform (the latter does nothing on this project's own bit-identical-L/R test asset).
+- **Assigned Agent:** Reason A
+- **Card Creation Date:** Before 2026-09-06
+- **Card Completion Note:** Complete in commit `7d91249`; 39 tests passing.
+- **Process Comments:** 2026-09-06 — Full rationale for each DSP decision recorded in `NEXT_STEPS.md`'s "Key learnings" section for future agents touching this code.
+
+#### FREEZE-DONE-002 — Minimal nih-plug wrapper and build pipeline (Phase B)
+
+- **Card Title:** Minimal nih-plug wrapper and build pipeline
+- **Description:** Added `freeze_plugin`/`xtask` to the workspace, pinned nih-plug to a specific commit, and implemented a minimal `Plugin`/`ClapPlugin`/`Vst3Plugin` with a baked/looped buffer (no MIDI/params/GUI) to prove the VST3/CLAP/standalone build pipeline independent of DSP correctness. Required installing the `libx11-xcb-dev` system package (pulled in transitively by nih-plug's `standalone` feature even for this audio-only plugin).
+- **Assigned Agent:** Reason A
+- **Card Creation Date:** 2026-09-06
+- **Card Completion Note:** Complete in commit `fe5767c`; `cargo xtask bundle` produced working `.vst3`/`.clap`, and the standalone binary was confirmed audible by the user via both ALSA and JACK backends.
+- **Process Comments:** 2026-09-06 — JACK preferred over ALSA for manual listening tests on this machine (ALSA stutters from PulseAudio device contention).
+
+#### FREEZE-DONE-003 — Real MIDI wiring, polyphony, and chord-clipping fix (Phase C)
+
+- **Card Title:** Real MIDI wiring, polyphony, and chord-clipping fix
+- **Description:** Wired the already-tested `VoiceManager` into `process()` for real MIDI note-on/off, polyphony, and playback-rate pitch, replacing the Phase B baked-loop-ignoring-MIDI placeholder. Found and fixed a real chord-clipping bug during testing: voices summed with no headroom, and the initial `1/sqrt(active_count)` fix wasn't conservative enough, so it was replaced with strict `1/active_count` (mathematically guaranteed to never exceed a single voice's own peak). Separately diagnosed a testing-process mistake (a stale JACK client from an earlier launch silently absorbing all "new build" test attempts) that had made the real fix look ineffective for several iterations.
+- **Assigned Agent:** Reason A
+- **Card Creation Date:** 2026-09-06
+- **Card Completion Note:** Complete in commit `e9e2dae`; 40 tests passing; user confirmed clean chords up to 5 simultaneous notes with only the expected/accepted gain-compensation volume dip.
+- **Process Comments:** 2026-09-06 — User accepted the current volume-dip tradeoff and deferred further tuning to a later full-instrument listening pass (see `FREEZE-IDEA-001`).
