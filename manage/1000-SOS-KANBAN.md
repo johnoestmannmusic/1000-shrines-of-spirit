@@ -194,7 +194,7 @@ priority.
 **Implementation Repository:** `../src/plugins/SpectralFreeze/`  
 **Primary Reference:** `../src/0006/index.html` (Spectral Fusion "Freeze" feature); full original design rationale in the plan doc at `~/.claude/plans/i-really-like-the-partitioned-papert.md` (same machine, not in this repo)  
 **Architecture note:** Freeze Point / Formant Shift / Stereo Width are all *render-time* operations (they call `render::render_frozen_loop` again to take effect), not cheap per-sample transforms — relevant to FREEZE-PLAN-003 below and to anything that touches how they're triggered.  
-**Board Last Updated:** 2026-09-06 08:23 by Reason A
+**Board Last Updated:** 2026-09-06 08:51 by Reason A
 
 ### Ideas
 
@@ -209,15 +209,6 @@ priority.
 
 ### Planned Features
 
-#### FREEZE-PLAN-002 — Sample loading and minimal GUI (Phase E)
-
-- **Card Title:** Sample loading and minimal GUI
-- **Description:** Add `rfd` file-dialog-driven WAV loading (via `hound`, GUI thread only) to replace the Phase B/C synthetic placeholder tone, plus a minimal `nih_plug_egui` GUI: three sliders (Freeze Point / Formant Shift / Stereo Width), a load button, and a filename label.
-- **Assigned Agent:** Unassigned
-- **Card Creation Date:** 2026-09-06 07:45
-- **Card Completion Note:** Pending; depends on Phase D's param/render-thread plumbing.
-- **Process Comments:** 2026-09-06 07:45 — Deliberately deferred past MIDI/param wiring so file I/O and GUI code aren't mixed with the audio-thread work.
-
 #### FREEZE-PLAN-003 — Decouple Formant Shift from full re-analysis (Phase F)
 
 - **Card Title:** Decouple Formant Shift from full re-analysis
@@ -229,9 +220,38 @@ priority.
 
 ### Assigned
 
-_None currently in progress._
+#### FREEZE-PLAN-004 — ADSR envelope parameters with a draggable visual graph
+
+- **Card Title:** ADSR envelope parameters with a draggable visual graph
+- **Description:** Replace the current fixed, unexposed two-stage envelope (`freeze_dsp::envelope::ArEnvelope`, hardcoded `ATTACK_MS = 10.0` / `RELEASE_MS = 150.0` constants in `voice.rs`) with a real Attack/Decay/Sustain/Release envelope: 4 automatable `FloatParam`s (attack/decay/release time, sustain level), plus a custom-drawn envelope-shape graph in the editor with grabbable points (attack-end point drags horizontally only - it always tops out at 1.0; decay-end/sustain-level point drags both axes; release-end point drags horizontally only, always returns to 0) instead of plain sliders. Unlike Freeze Point/Formant Shift/Stereo Width, ADSR is cheap (per-sample, not render-time) - no `RenderWorker`/crossfade/throttle needed. Values should be read at note-trigger time in `VoiceManager::note_on` (like most synths - changing Attack doesn't reshape a note already mid-decay), so `note_on`'s signature needs to grow to accept the 4 current values (or a small `AdsrSettings` struct) read from the params where `process()` currently handles `NoteEvent::NoteOn`. `ArEnvelope`'s decay math (currently release-only: `level *= release_coeff` each sample, decaying toward 0) generalizes to decay by decaying toward `sustain_level` instead of 0, using the same `exp(-9.2103 / samples)` coefficient shape.
+- **Assigned Agent:** Reason A
+- **Card Creation Date:** 2026-09-06 08:40
+- **Card Completion Note:** In progress.
+- **Process Comments:** 2026-09-06 08:41 — User confirmed full ADSR (not just exposing Attack/Release) plus a visual graph with grabbable points, not plain sliders. 2026-09-06 08:52 — Assigned to Reason A; `FREEZE-PLAN-005`'s waveform widget (same "custom-drawn, draggable egui widget over normalized param value" pattern) completed first and used as the template for this one's handle-dragging code.
 
 ### Completed
+
+#### FREEZE-PLAN-005 — Freeze Point waveform display with position marker
+
+- **Card Title:** Freeze Point waveform display with position marker
+- **Description:** Added `draw_freeze_point_waveform()` to the editor: draws the loaded source's waveform (min/max per pixel column) with a vertical marker at Freeze Point's current position, directly click/draggable via `ParamSetter::set_parameter_normalized` (bracketed by `begin_set_parameter`/`end_set_parameter` on `drag_started`/`drag_stopped` so host automation recording sees a proper gesture, not a value jump) rather than only adjustable through the numeric `ParamSlider` below it, which stays for precision. Uses `unmodulated_normalized_value()` to read the marker position and `set_parameter_normalized()` to write it, so the widget doesn't need to know anything about Freeze Point's underlying range/skew - reusable as the template for `FREEZE-PLAN-004`'s handles.
+- **Assigned Agent:** Reason A
+- **Card Creation Date:** 2026-09-06 08:41
+- **Card Completion Note:** Complete in commit `1a6d3f2`; 46 tests still passing (no DSP changes, GUI-only). User confirmed the waveform renders, the marker tracks Freeze Point, and dragging directly on it both moves the marker and audibly changes the frozen content.
+- **Process Comments:** 2026-09-06 08:41 — Requested by the user immediately after scoping `FREEZE-PLAN-004`; done first since it's the simpler of the two (one draggable line vs. three-handle curve editing).
+
+#### FREEZE-PLAN-002 — Sample loading and minimal GUI (Phase E)
+
+- **Card Title:** Sample loading and minimal GUI
+- **Description:** Added a `nih_plug_egui` editor (`FreezePlugin::editor()`): three `widgets::ParamSlider`s bound directly to the Phase D `FloatParam`s, a "Load Sample..." button (`rfd::FileDialog::pick_file`), and a filename/error label. `load_wav_channels` (`freeze_plugin/src/lib.rs`) decodes WAV via `hound` (int and float formats, normalized to `[-1.0, 1.0]`) on the GUI thread, matching `freeze_cli`'s existing decode logic but kept as a separate small copy rather than sharing code with it, to keep `hound`/file-I/O out of `freeze_dsp`'s pure-DSP dependency surface.
+
+  **Architecture change needed to make this possible**: `RenderWorker`'s source was a fixed `Arc<Vec<Vec<f32>>>` captured at spawn time (Phase D) - fine when the source never changed, but loading a new sample needs the worker to pick up new audio after it's already running. Source is now `Arc<ArcSwap<Vec<Vec<f32>>>>`; the worker reads whatever is *current* at the moment each render actually runs. Also split a `RenderTrigger` (cheap-to-clone, just the request-a-render capability) out of `RenderWorker` (owns the thread, stops it on drop) so the GUI thread can trigger a re-render after loading without being able to affect the worker's lifetime. Test: `render_worker::tests::swapping_the_source_and_re_requesting_uses_the_new_source`.
+
+  **New DSP utility**: `freeze_dsp::resample::resample_linear` - naive linear-interpolation whole-buffer resample (no anti-aliasing filter, so a large downsample factor can alias) used to bring a loaded file to the plugin's operating sample rate when they differ. Without this, a loaded 44.1kHz file in a 48kHz host session (or vice versa) would play back pitch/speed-shifted, since `VoiceManager` reads the frozen loop assuming it's already at the plugin's rate. The plugin reads its own operating rate live from `loop_buffer.load().sample_rate` at load time rather than a value captured once when the editor was created, in case the editor is ever opened unusually early.
+- **Assigned Agent:** Reason A
+- **Card Creation Date:** 2026-09-06 07:45
+- **Card Completion Note:** Complete in commit `2a89d5e`; 46 tests passing (43 `freeze_dsp` + 3 `freeze_plugin`); user confirmed the GUI opens in Carla with working sliders, loaded a real WAV file via the dialog, and heard the loaded sample's frozen content play back correctly.
+- **Process Comments:** 2026-09-06 08:40 — User has requested ADSR envelope parameters next (see `FREEZE-PLAN-004`); current envelope is a fixed attack/release only (`freeze_dsp::envelope::ArEnvelope`, `ATTACK_MS`/`RELEASE_MS` constants in `voice.rs`), not yet exposed as params at all.
 
 #### FREEZE-PLAN-001 — Automatable Freeze Point / Formant Shift / Stereo Width parameters (Phase D)
 
