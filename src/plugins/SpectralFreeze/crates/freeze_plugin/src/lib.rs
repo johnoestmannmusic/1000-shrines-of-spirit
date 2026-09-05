@@ -1,15 +1,16 @@
 use freeze_dsp::render::{render_frozen_loop, LoopBufferData, DEFAULT_ROOT_NOTE};
+use freeze_dsp::voice::VoiceManager;
 use nih_plug::prelude::*;
 use std::sync::Arc;
 
-/// Phase B: prove the VST3/CLAP/standalone build+load pipeline works. The
-/// loop buffer is baked from a synthetic source at `initialize()` time and
-/// just plays on repeat, ignoring MIDI/transport entirely - real note
-/// on/off, polyphony and parameter automation are Phase C/D.
+/// The loop buffer is baked from a synthetic source at `initialize()` time
+/// (real sample loading is Phase E) and played polyphonically through
+/// `VoiceManager`, driven by real MIDI note on/off. Parameter automation
+/// (Freeze Point / Formant Shift / Stereo Width) is Phase D.
 pub struct FreezePlugin {
     params: Arc<FreezePluginParams>,
     loop_buffer: Option<LoopBufferData>,
-    play_pos: usize,
+    voices: VoiceManager,
 }
 
 #[derive(Params)]
@@ -20,7 +21,7 @@ impl Default for FreezePlugin {
         Self {
             params: Arc::new(FreezePluginParams::default()),
             loop_buffer: None,
-            play_pos: 0,
+            voices: VoiceManager::new(1.0, DEFAULT_ROOT_NOTE),
         }
     }
 }
@@ -59,7 +60,7 @@ impl Plugin for FreezePlugin {
         ..AudioIOLayout::const_default()
     }];
 
-    const MIDI_INPUT: MidiConfig = MidiConfig::None;
+    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
     type SysExMessage = ();
@@ -85,35 +86,48 @@ impl Plugin for FreezePlugin {
             30.0,
             DEFAULT_ROOT_NOTE,
         ));
-        self.play_pos = 0;
+        self.voices = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
 
         true
     }
 
     fn reset(&mut self) {
-        self.play_pos = 0;
+        self.voices.choke_all();
     }
 
     fn process(
         &mut self,
         buffer: &mut Buffer,
         _aux: &mut AuxiliaryBuffers,
-        _context: &mut impl ProcessContext<Self>,
+        context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         let Some(loop_buffer) = &self.loop_buffer else {
             return ProcessStatus::Normal;
         };
-        let left = &loop_buffer.channels[0];
-        let right = &loop_buffer.channels[1];
-        let loop_len = left.len();
 
-        for channel_samples in buffer.iter_samples() {
-            let pos = self.play_pos % loop_len;
-            for (ch_idx, sample) in channel_samples.into_iter().enumerate() {
-                *sample = if ch_idx == 0 { left[pos] } else { right[pos] };
+        // Block-level MIDI handling: every event pending for this buffer is
+        // applied before rendering, rather than split at the exact sample it
+        // arrived on. Good enough for proving polyphony/pitch/voice-stealing
+        // here; sample-accurate note timing can be revisited later if a
+        // fast arpeggio/chord attack audibly needs it.
+        while let Some(event) = context.next_event() {
+            match event {
+                NoteEvent::NoteOn { note, channel, velocity, voice_id, .. } => {
+                    self.voices.note_on(note, channel, velocity, voice_id.unwrap_or(note as i32));
+                }
+                NoteEvent::NoteOff { note, channel, .. } => {
+                    self.voices.note_off(note, channel);
+                }
+                NoteEvent::Choke { .. } => {
+                    self.voices.choke_all();
+                }
+                _ => (),
             }
-            self.play_pos += 1;
         }
+
+        let channels = buffer.as_slice();
+        let (left, right) = channels.split_at_mut(1);
+        self.voices.process_block(loop_buffer, left[0], right[0]);
 
         ProcessStatus::Normal
     }

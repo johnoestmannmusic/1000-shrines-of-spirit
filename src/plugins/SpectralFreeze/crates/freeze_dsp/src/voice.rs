@@ -131,13 +131,25 @@ impl VoiceManager {
         };
         let right_channel = buffer.channels.get(1).unwrap_or(left_channel);
 
+        // Voices are summed with no per-voice headroom, so a held chord
+        // clips without this. A single frozen note can already sit close to
+        // full scale, and frozen spectra from the same source can be highly
+        // correlated across notes (e.g. a small formant/pitch difference),
+        // so 1/sqrt(n) (tuned for uncorrelated signals) isn't conservative
+        // enough - it still let 4 voices clip in practice. 1/n guarantees
+        // the sum can never exceed a single voice's own peak even in the
+        // fully-correlated worst case, at the cost of chords getting quieter
+        // faster than perceived loudness would suggest.
+        let active_count = self.active_voice_count().max(1);
+        let gain_compensation = 1.0 / active_count as f32;
+
         for slot in self.voices.iter_mut() {
             let Some(voice) = slot else { continue };
             for i in 0..out_left.len() {
                 let (l, r) = voice.reader.read_stereo_and_advance(left_channel, right_channel, voice.rate);
                 let level = voice.env.advance();
-                out_left[i] += l * level * voice.gain;
-                out_right[i] += r * level * voice.gain;
+                out_left[i] += l * level * voice.gain * gain_compensation;
+                out_right[i] += r * level * voice.gain * gain_compensation;
             }
             if voice.env.is_finished() {
                 *slot = None;
@@ -250,6 +262,47 @@ mod tests {
         for (l, r) in out_left.iter().zip(out_right.iter()) {
             assert!((l - r).abs() < 1e-4, "single-channel buffer should read identically on both outputs");
         }
+    }
+
+    #[test]
+    fn gain_compensation_scales_down_with_more_active_voices() {
+        // A held chord must not clip even in the fully-correlated worst
+        // case: N simultaneous identical voices should sum to the same
+        // level as a single voice, not N times.
+        let buffer = LoopBufferData {
+            channels: vec![vec![1.0f32; 8192], vec![1.0f32; 8192]],
+            sample_rate: 48000.0,
+            root_note: DEFAULT_ROOT_NOTE,
+        };
+
+        let mut single = VoiceManager::new(48000.0, DEFAULT_ROOT_NOTE);
+        single.note_on(DEFAULT_ROOT_NOTE, 0, 1.0, 1);
+        let mut single_out_l = vec![0.0f32; 8192];
+        let mut single_out_r = vec![0.0f32; 8192];
+        for _ in 0..5 {
+            single.process_block(&buffer, &mut single_out_l, &mut single_out_r);
+        }
+
+        let mut quad = VoiceManager::new(48000.0, DEFAULT_ROOT_NOTE);
+        for i in 0..4 {
+            quad.note_on(DEFAULT_ROOT_NOTE, 0, 1.0, i);
+        }
+        let mut quad_out_l = vec![0.0f32; 8192];
+        let mut quad_out_r = vec![0.0f32; 8192];
+        for _ in 0..5 {
+            quad.process_block(&buffer, &mut quad_out_l, &mut quad_out_r);
+        }
+
+        let tail_start = single_out_l.len() - 100;
+        let single_level: f32 = single_out_l[tail_start..].iter().sum::<f32>() / 100.0;
+        let quad_level: f32 = quad_out_l[tail_start..].iter().sum::<f32>() / 100.0;
+
+        assert!(
+            (quad_level - single_level).abs() < 1e-2,
+            "expected 4 voices (1/4 compensation) to sum to the same level as a single voice: single={}, quad={}",
+            single_level,
+            quad_level
+        );
     }
 
     #[test]

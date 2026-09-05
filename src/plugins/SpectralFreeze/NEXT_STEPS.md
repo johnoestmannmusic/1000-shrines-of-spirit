@@ -55,19 +55,26 @@ All three require calling `render::render_frozen_loop` again to take effect — 
 
 4. `render_frozen_loop` **always outputs exactly 2 channels** now, regardless of source channel count (mono sources get duplicated before freezing). `VoiceManager::process_block` does no width/channel logic of its own — it just reads both (already width-shaped) channels in lockstep per voice via `PlaybackReader::read_stereo_and_advance`.
 
-## Next: Phase C — real MIDI wiring via VoiceManager
+## Where things stand: Phase C complete
 
-Goal: wire `VoiceManager` (already built and tested in Phase A, `crates/freeze_dsp/src/voice.rs`) into `freeze_plugin`'s `process()` for real MIDI note-on/off + polyphony + playback-rate pitch, replacing the Phase B baked-loop-ignoring-MIDI placeholder.
+`FreezePlugin::MIDI_INPUT = MidiConfig::Basic`. `process()` (`crates/freeze_plugin/src/lib.rs`) drains `context.next_event()` once per host buffer (block-level, not sample-accurate — a fast chord/arpeggio attack might reveal a need to split at event boundaries later, but wasn't audible in testing) and calls `VoiceManager::note_on`/`note_off`/`choke_all` accordingly, then renders the whole block in one `VoiceManager::process_block` call via `buffer.as_slice().split_at_mut(1)`.
 
-1. Set `FreezePlugin::MIDI_INPUT = MidiConfig::Basic` (currently `None`).
-2. In `process()`, read `context.next_event()` each block and call `VoiceManager::note_on`/`note_off` on `NoteEvent::NoteOn`/`NoteOff` (see the `sine` example in nih-plug's own repo for the polling pattern — `next_event = context.next_event()` in a loop keyed off `event.timing()` vs. `sample_id`).
-3. Replace the hand-rolled `play_pos` loop in `process()` with `VoiceManager::process_block(&loop_buffer, out_left, out_right)`.
-4. The synthetic baked loop from Phase B stays as-is for now (Phase E adds real sample loading) — this phase is purely about proving MIDI → voices → audio, independent of what's frozen.
-5. Stress-test >16 simultaneous notes for graceful voice stealing (`VoiceManager` already has this logic from Phase A — confirm it holds up driven by real MIDI rather than test harness calls).
-6. Exit gate: play notes on a MIDI keyboard/host into the standalone binary (`--backend jack` preferred on this machine, see Phase B notes above) or a DAW, hear pitched frozen pads with clean polyphony.
+### Key learning from Phase C: polyphony needs gain compensation, and 1/sqrt(n) isn't conservative enough
 
-## After that (Phases D-F, in order)
-- **D**: register Freeze Point / Formant Shift / Stereo Width as real automatable `FloatParam`s, backed by a background render thread + `ArcSwap<LoopBufferData>` + a latest-value-wins mailbox (drops superseded requests so a fast automation sweep doesn't back up the worker). All three params go through this same path — none of them are free.
+`VoiceManager::process_block` (`crates/freeze_dsp/src/voice.rs`) sums voices with no headroom, so a chord of the same frozen source clips without scaling. The standard `1/sqrt(active_count)` polysynth approach (tuned for uncorrelated signals) still let a real chord clip in testing — a single frozen note can already sit close to full scale, and different-pitched voices reading the *same* frozen spectrum can align closely enough in phase to behave more like correlated signals than sqrt(n) assumes. Switched to strict **`1/active_count`**, which guarantees the sum can never exceed a single voice's own peak (triangle inequality: `|Σx_i| ≤ Σ|x_i| ≤ N·(A/N) = A`) regardless of correlation, at the cost of a real (and expected/acceptable per the user) volume dip as more notes are held — noticeable around 3 and 5 voices. Test: `voice::tests::gain_compensation_scales_down_with_more_active_voices`. Revisit if the dip feels too aggressive once there's a full instrument to judge it against (Phase D/E) — the option not taken was a soft-saturation master limiter instead of/alongside gain compensation, which would keep single-note volume closer to constant at the cost of coloring loud chords.
+
+### Testing gotcha worth remembering: JACK client name collisions fail silently
+
+While iterating on the fix above, several "kill old process, rebuild, relaunch" cycles didn't actually work — a stale PID reference meant the *original* process was never killed, so every later launch attempt failed outright (JACK already had a client registered as `spectralfreeze`) and exited almost immediately without visibly erroring in the terminal output. The user kept hearing the first build the entire time despite several real code fixes landing. **Before trusting a "does it sound right now" test after a rebuild, confirm there's exactly one `freeze_plugin_standalone` process alive** (`pgrep -af freeze_plugin_standalone`) and that `jack_lsp | grep spectralfreeze` shows freshly-connected ports, not stale ones surviving from an earlier launch.
+
+For deterministic, repeatable testing without a physical MIDI keyboard: the ALSA "Midi Through" port (`14:0`, check via `aplaymidi -l`) is bridged into JACK automatically on this machine as `Midi-Bridge:Midi Through:...` — `jack_connect` that to `spectralfreeze:midi_input`, then `aplaymidi -p 14:0 some.mid` sends a hand-built chord. Combine with `jack_capture --port spectralfreeze:output_1 --port spectralfreeze:output_2 -d <secs> -fn out.wav` to objectively measure peak/clipping instead of relying on ear alone — this is what caught that the perceived "still distorting" reports were against a stale process, not the actual fix.
+
+## Next: Phase D — automatable parameters (Freeze Point / Formant Shift / Stereo Width)
+
+Register Freeze Point / Formant Shift / Stereo Width as real automatable `FloatParam`s, backed by a background render thread + `ArcSwap<LoopBufferData>` + a latest-value-wins mailbox (drops superseded requests so a fast automation sweep doesn't back up the worker). All three params go through this same path — none of them are free.
+
+## After that (Phases E-F, in order)
+
 - **E**: sample loading (`rfd` file dialog + `hound` WAV decode, GUI thread only) + minimal `nih_plug_egui` GUI (three sliders, load button, filename label).
 - **F**: decouple Formant Shift so it only reprocesses the already-frozen magnitude spectrum (cheap) instead of requiring the full source-sample re-analysis Freeze Point needs (expensive) — makes live Formant Shift automation snappier than Freeze Point/Stereo Width.
 
