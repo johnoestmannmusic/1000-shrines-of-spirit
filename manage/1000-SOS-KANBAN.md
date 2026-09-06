@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Technical Handoff:** See the source-of-truth notes below.
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-07 07:05 by Codex A
+**Board Last Updated:** 2026-09-07 07:37 by Codex A
 **Source of Truth:** This project section replaces the retired
 `../../../0006-rust/NEXTSTEPS.md`. Update the relevant card and these handoff
 notes after every feature, bug fix, or material verification result.
@@ -45,14 +45,18 @@ notes after every feature, bug fix, or material verification result.
   editing, animated cover art, reference sidebar, hover Explainer, and
   responsive stacking are implemented. The Assigned and Planned buckets below
   are the authoritative remaining-work list.
-- **Verification baseline:** `cargo test --workspace` passes 26 tests;
+- **Verification baseline:** `cargo test --workspace` passes 30 tests;
   `cargo check -p lantern-app --target wasm32-unknown-unknown` and
   `trunk build --release` pass. Release-browser checks cover transport,
   sampler and Fusion editing, import/export, tracker audition, live Web Audio
   meters, quick instrument edits, the desktop/sidebar composition, and narrow
   stacking, and a release bundle served below a nested URL. Cover tests verify
   the 1600×1600 RGBA PNG and real tracker-note scan generation; folder tests
-  verify valid layout assembly and actionable missing-asset errors. Existing
+  verify valid layout assembly, one-based CHIP-only stem folders, and actionable
+  missing-asset errors. `tests/golden-battletrain` browser-loads as a 16-order,
+  94.4-second song and plays with no browser warnings/errors; its computed
+  94.420-second effect timeline matches the 94.416-second Furnace stems within
+  4 ms. Existing
   `lantern-fur` unused-code warnings are known.
   Numerical Fusion parity is recorded in `PARITY.md`;
   musical listening approval remains on `0006-ASGN-001`.
@@ -68,7 +72,9 @@ notes after every feature, bug fix, or material verification result.
   180=off, 181=release, 182=macro release, and 183=raw frequency override; do
   not replace them with the original HTML converter's 253 note-off sentinel.
   `INS2` macros are intentionally skipped because playback uses rendered stems
-  or samples rather than live Game Boy synthesis.
+  or samples rather than live Game Boy synthesis. The legacy pre-v240 `INFO`
+  layout is supported for the modern old-format range that uses `INS2` and
+  compressed `PATN`; `golden-battletrain` validates Furnace format 181.
 - **Audio invariants:** Web stem looping deliberately uses Web Audio's native
   `AudioBufferSourceNode.loop` for sample-accurate looping. Sampler playback,
   preview, audition, and offline export share trim, transpose, ADSR, loop,
@@ -76,6 +82,10 @@ notes after every feature, bug fix, or material verification result.
   edge fades; mono/channel stealing uses an independent 8 ms cutoff. Fusion
   DSP must remain in `fusion-worker.js`: synchronous WASM FFT work previously
   caused multi-second UI hangs. Generation tokens reject stale worker results.
+  Furnace `01xx`/`02xx` effects schedule continuous pitch-rate ramps in web,
+  native, and offline sampler paths. `F0xx`, speed, tick-rate, and virtual-tempo
+  effects feed one variable row clock shared by transport, seeking, tracker
+  position, audition, scheduling, and export.
 - **Fusion facts:** The STFT is 2048 points with a 1024 hop and sine analysis /
   synthesis windows. Saved Cross-Synth uses the legacy key
   `spectral-blend`. The production worker matches the reference fingerprints
@@ -139,8 +149,8 @@ _None currently planned; the final implementation milestone is assigned below._
 - **Description:** Add the folder-based flow for a different Game Boy `.fur` file with matching assets. Validate browser error handling, cache paths, and hosting from a nested website route. Produce and test the final optimized WASM bundle before publishing.
 - **Assigned Agent:** Codex A
 - **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** In progress in Rust-port commits `af4fdde` and `017bd9b`; folder loading, active-song downloads, and nested-route bundle preparation are implemented, while acceptance with a second real Game Boy song and live publishing remain.
-- **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain. 2026-09-07 06:56 — Moved from Planned Features to Assigned after completing visual chrome. Audited existing file-input and loader abstractions before adding folder replacement and nested-route release verification. 2026-09-07 07:02 — Added native recursive folder selection and web `webkitdirectory`, validation for exactly one supported `.fur` plus four stems and three source samples, optional Project JSON with a safe generated fallback, and atomic live-state replacement. `Trunk.toml` now emits relative JS/WASM URLs; the optimized bundle loaded successfully from `/dist/` with decoded audio and no browser warnings/errors. All 26 tests and the WASM/release builds pass. A second distinct Game Boy fixture with matching rendered assets is not present in the workspace, so that acceptance check remains open rather than being simulated with the bundled song. 2026-09-07 07:05 — The loader now retains the active `.fur` and optional MIDI, and the release toolbar exposes both downloads; the bundled reference MIDI is packaged. Nested-route browser loading remained clean after the change. The original 38 MB CHIP-mode WAV is still excluded from the optimized bundle and remains a documented parity gap.
+- **Card Completion Note:** In progress in Rust-port commits `af4fdde`, `017bd9b`, and `2e42c85`; folder loading, active-song downloads, nested-route preparation, effect-aware playback, and real alternate-song acceptance are implemented. Live website publishing and the bundled CHIP-mix download remain.
+- **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain. 2026-09-07 06:56 — Moved from Planned Features to Assigned after completing visual chrome. Audited existing file-input and loader abstractions before adding folder replacement and nested-route release verification. 2026-09-07 07:02 — Added native recursive folder selection and web `webkitdirectory`, validation for exactly one supported `.fur` plus four stems and three source samples, optional Project JSON with a safe generated fallback, and atomic live-state replacement. `Trunk.toml` now emits relative JS/WASM URLs; the optimized bundle loaded successfully from `/dist/` with decoded audio and no browser warnings/errors. All 26 tests and the WASM/release builds pass. A second distinct Game Boy fixture with matching rendered assets is not present in the workspace, so that acceptance check remains open rather than being simulated with the bundled song. 2026-09-07 07:05 — The loader now retains the active `.fur` and optional MIDI, and the release toolbar exposes both downloads; the bundled reference MIDI is packaged. Nested-route browser loading remained clean after the change. The original 38 MB CHIP-mode WAV is still excluded from the optimized bundle and remains a documented parity gap. 2026-09-07 07:37 — Accepted the user-supplied `golden-battletrain` folder directly in the release browser. The loader now supports Furnace v181 `INFO`, one-based root stems, and missing sampler sources for CHIP-only projects; its 16-order, 94.4-second transport played and tracked rows without browser warnings/errors. Added a shared effect-aware row clock plus continuous `01xx`/`02xx` pitch ramps across web, native, and offline sampler playback. All 30 tests, WASM check, and optimized build pass; live publishing remains the final deployment step.
 
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
 
@@ -219,6 +229,18 @@ _None currently planned; the final implementation milestone is assigned below._
 - **Card Creation Date:** 2026-09-06 13:04
 - **Card Completion Note:** Resolved; the editor now has a bounded scrolling region and the action row remains part of the visible window layout.
 - **Process Comments:** 2026-09-06 13:05 — Found while visually testing the release WASM build after Project JSON generation passed.
+
+#### 0006-BUG-003 — Legacy Furnace songs ignored effect timing and pitch slides
+
+- **Card Title:** Legacy Furnace songs ignored effect timing and pitch slides
+- **Description:** Load the user-supplied `golden-battletrain` Furnace 0.6 module and use it as the second real-song acceptance fixture. Preserve its global tempo automation in every row/time conversion and its continuous pitch slides in sampler playback. Accept its one-based root WAV stems without requiring unrelated source-sample assets.
+- **Symptom:** The format-181 `.fur` initially failed at the newer `INF2` check, and the existing sequence assumed one fixed row duration while ignoring pitch effects. The folder validator also required zero-based stems under `ASSETS` plus three source samples, so the supplied valid CHIP-only export could not load.
+- **Root cause:** The parser and loader had been scoped to the newer bundled-song layout, and row timing was represented by a single scalar. Parsed effect cells existed for display but were not compiled into transport or sampler scheduling.
+- **Fix approach:** Parse the legacy `INFO` container for the `INS2`/`PATN` era, build an absolute variable-row timeline from Furnace timing commands, and emit continuous pitch-rate ramps for `01xx`/`02xx`. Share that data across browser/native scheduling, transport, seek/audition, tracker position, and offline export.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-07 07:37
+- **Card Completion Note:** Resolved in Rust-port commit `2e42c85` and browser-verified with the real folder; the song loads as 16 orders and 94.4 seconds, plays with row tracking, and produces no warnings/errors.
+- **Process Comments:** 2026-09-07 07:37 — The binary parser reports Furnace v181, six instruments, two wavetables, and real effect cells. The computed 94.420-second timeline matches all four 94.416-second Furnace stem exports within 4 ms; 30 workspace tests, WASM check, and release build pass.
 
 #### 0006-DONE-001 — Rust workspace and Furnace Game Boy parser
 
