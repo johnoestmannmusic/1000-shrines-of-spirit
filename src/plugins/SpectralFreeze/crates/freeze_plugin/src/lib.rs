@@ -1,6 +1,6 @@
 mod render_worker;
 
-use arc_swap::ArcSwap;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use freeze_dsp::render::{render_frozen_loop, LoopBufferData, DEFAULT_ROOT_NOTE};
 use freeze_dsp::resample::resample_linear;
 use freeze_dsp::voice::{AdsrSettings, VoiceManager};
@@ -32,6 +32,15 @@ pub struct FreezePlugin {
     /// touching the audio thread - `RenderWorker` always reads whatever is
     /// current at the moment it renders.
     source: Arc<ArcSwap<Vec<Vec<f32>>>>,
+    /// The real file's name once the user has loaded one, `None` while
+    /// still on the built-in placeholder tone. Kept on the plugin (not in
+    /// `FreezeEditorState`) specifically so it survives the editor window
+    /// being closed and reopened within the same plugin instance -
+    /// `FreezeEditorState` is recreated fresh every time `editor()` is
+    /// called, but `source` itself (and therefore what's actually loaded)
+    /// is not. Also doubles as the "[ Load Sample ]" sign's gate in
+    /// `draw_freeze_point_waveform`.
+    loaded_filename: Arc<ArcSwapOption<String>>,
     loop_buffer: Arc<ArcSwap<LoopBufferData>>,
     worker: Option<RenderWorker>,
     voices: VoiceManager,
@@ -121,6 +130,7 @@ impl Default for FreezePlugin {
         Self {
             params: Arc::new(FreezePluginParams::default()),
             source: Arc::new(ArcSwap::new(Arc::new(Vec::new()))),
+            loaded_filename: Arc::new(ArcSwapOption::from(None)),
             loop_buffer: Arc::new(ArcSwap::new(Arc::new(silent_loop_buffer()))),
             worker: None,
             voices: VoiceManager::new(1.0, DEFAULT_ROOT_NOTE),
@@ -249,12 +259,49 @@ fn prepare_source_for_plugin_rate(channels: Vec<Vec<f32>>, file_rate: f32, plugi
     }
 }
 
-/// GUI-thread-only state for the editor (which file is loaded, any load
-/// error) - not shared with the audio thread and not persisted.
+/// GUI-thread-only state for the editor - not shared with the audio thread
+/// and not persisted. Which file is loaded lives on the plugin itself
+/// (`FreezePlugin::loaded_filename`) instead, so it survives the editor
+/// window being closed and reopened; only the load-error message (fine to
+/// forget when the editor is reopened) stays here.
 #[derive(Default)]
 struct FreezeEditorState {
-    filename: Option<String>,
     error: Option<String>,
+}
+
+/// Multiplies built-in text sizes and interactive-widget spacing by `scale`,
+/// so dragging `ResizableWindow`'s corner (see `editor()` below) genuinely
+/// makes buttons/sliders/labels bigger too, not just the custom-drawn
+/// waveform/ADSR graphs (which already grow via `ui.available_width()`).
+///
+/// This is necessary rather than just calling `egui::Context::
+/// set_zoom_factor()`: this project's pinned `nih_plug_egui`/`egui_baseview`
+/// revision renders using its *own* `pixels_per_point` field, tracked
+/// entirely inside `egui_baseview`'s window loop and reset on every host
+/// resize event from the fixed `WindowScalePolicy` nih_plug_egui chose at
+/// window-creation time (`Some(1.0)` on Linux) - it never reads back
+/// whatever `Context::set_zoom_factor()`/`pixels_per_point()` was set to
+/// internally, so that call has no visible effect on this platform/version.
+/// Scaling the actual "points" sizes (fonts, spacing, and our own custom
+/// draw dimensions) is the one lever that reaches every widget regardless.
+///
+/// Rebuilt from `egui::Style::default()`'s reference values every call
+/// (not compounded onto whatever the style already is) so it stays correct
+/// as the window is dragged to any size, in either direction, and applied
+/// via `all_styles_mut` so it doesn't clobber dark/light `Visuals`.
+fn apply_gui_scale(ctx: &egui::Context, scale: f32) {
+    let base = egui::Style::default();
+    ctx.all_styles_mut(|style| {
+        for (text_style, font_id) in style.text_styles.iter_mut() {
+            if let Some(base_font) = base.text_styles.get(text_style) {
+                font_id.size = base_font.size * scale;
+            }
+        }
+        style.spacing.item_spacing = base.spacing.item_spacing * scale;
+        style.spacing.button_padding = base.spacing.button_padding * scale;
+        style.spacing.interact_size = base.spacing.interact_size * scale;
+        style.spacing.slider_width = base.spacing.slider_width * scale;
+    });
 }
 
 /// Draws the loaded source's waveform (min/max per pixel column, since the
@@ -265,34 +312,52 @@ struct FreezeEditorState {
 /// begin/set/end-normalized pattern a built-in `ParamSlider` uses
 /// internally, just driven by pixel position instead of a slider track.
 ///
-/// Before anything is loaded there's no waveform (and no Freeze Point) to
-/// show or drag, so this area instead becomes a clickable "[ Load Sample ]"
-/// sign - returns `true` on the frame it's clicked, so the caller (which
-/// owns the actual file dialog / decode logic, shared with the "Load
-/// Sample..." button below) can open it in response.
+/// Until the user has explicitly loaded a real file (`has_loaded_sample`)
+/// there's nothing meaningful to show or drag - the plugin always has
+/// *some* audio in `source` even then (the built-in placeholder tone,
+/// loaded at `initialize()` before the editor can even open), so checking
+/// whether `source` itself is empty would never actually trigger this.
+/// Instead this area becomes a clickable "[ Load Sample ]" sign - returns
+/// `true` on the frame it's clicked, so the caller (which owns the actual
+/// file dialog / decode logic, shared with the "Load Sample..." button
+/// below) can open it in response.
 fn draw_freeze_point_waveform(
     ui: &mut egui::Ui,
     source: &Arc<ArcSwap<Vec<Vec<f32>>>>,
     freeze_point: &FloatParam,
     setter: &ParamSetter,
+    has_loaded_sample: bool,
+    scale: f32,
 ) -> bool {
-    let desired_size = egui::vec2(ui.available_width(), 70.0);
+    let desired_size = egui::vec2(ui.available_width(), 70.0 * scale);
     let painter = ui.painter().clone();
 
-    let source_guard = source.load();
-    let samples = source_guard.first().filter(|s| !s.is_empty());
-
-    let Some(samples) = samples else {
+    if !has_loaded_sample {
         let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
         let bg = if response.hovered() { egui::Color32::from_gray(35) } else { egui::Color32::from_gray(25) };
         painter.rect_filled(rect, 2.0, bg);
         let text_color =
             if response.hovered() { egui::Color32::from_rgb(240, 180, 60) } else { egui::Color32::from_gray(150) };
-        painter.text(rect.center(), egui::Align2::CENTER_CENTER, "[ Load Sample ]", egui::FontId::default(), text_color);
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "[ Load Sample ]",
+            egui::FontId::proportional(14.0 * scale),
+            text_color,
+        );
         if response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
         return response.clicked();
+    }
+
+    let source_guard = source.load();
+    let samples = source_guard.first().filter(|s| !s.is_empty());
+    let Some(samples) = samples else {
+        // Shouldn't happen while `has_loaded_sample` is true, but avoid a
+        // panic on the empty slice below if it somehow does.
+        ui.allocate_exact_size(desired_size, egui::Sense::hover());
+        return false;
     };
 
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click_and_drag());
@@ -359,15 +424,16 @@ fn draw_adsr_graph(
     sustain: &FloatParam,
     release: &FloatParam,
     setter: &ParamSetter,
+    scale: f32,
 ) {
-    let desired_size = egui::vec2(ui.available_width(), 90.0);
+    let desired_size = egui::vec2(ui.available_width(), 90.0 * scale);
     let (rect, _response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 2.0, egui::Color32::from_gray(25));
 
-    let sustain_plateau_width: f32 = 30.0;
+    let sustain_plateau_width: f32 = 30.0 * scale;
     let segment_width = ((rect.width() - sustain_plateau_width) / 3.0).max(1.0);
-    let margin = 10.0;
+    let margin = 10.0 * scale;
     let plot_top = rect.top() + margin;
     let plot_bottom = rect.bottom() - margin;
     let plot_height = (plot_bottom - plot_top).max(1.0);
@@ -396,7 +462,7 @@ fn draw_adsr_graph(
     painter.line_segment([p2, p3], curve_stroke);
     painter.line_segment([p3, p4], curve_stroke);
 
-    let handle_radius = 5.0;
+    let handle_radius = 5.0 * scale;
     let handle_color = egui::Color32::from_rgb(240, 180, 60);
     painter.circle_filled(p1, handle_radius, handle_color);
     painter.circle_filled(p2, handle_radius, handle_color);
@@ -484,6 +550,7 @@ impl Plugin for FreezePlugin {
         let trigger = self.worker.as_ref().map(|worker| worker.trigger());
         let last_note = self.last_note.clone();
         let active_voice_count = self.active_voice_count.clone();
+        let loaded_filename = self.loaded_filename.clone();
 
         create_egui_editor(
             self.params.editor_state.clone(),
@@ -493,20 +560,20 @@ impl Plugin for FreezePlugin {
                 // GUI scaling: the corner of `ResizableWindow` below lets the
                 // user drag the window to any size (through nih-plug's real
                 // host-negotiated resize, not just adding blank space); here
-                // we read back the *actual* current size and set egui's zoom
-                // factor to match how much bigger than the base design size
-                // it now is. That keeps the same "points" budget our layout
-                // was designed for (so nothing overflows/rescales oddly) while
-                // making every point map to more physical pixels on screen -
-                // i.e. actually bigger text, sliders, and graphs, not just a
-                // bigger window with more empty margin. Never scales below
-                // 1x (`min_size` below stops the window from being dragged
-                // smaller than the base size in the first place).
+                // we read back the *actual* current size and derive how much
+                // bigger than the base design size it now is, then scale
+                // every widget's actual "points" dimensions by that (see
+                // `apply_gui_scale` for why - not `set_zoom_factor`, which
+                // this nih_plug_egui/egui_baseview revision doesn't apply at
+                // render time). Never scales below 1x (`min_size` below also
+                // stops the window from being dragged smaller than the base
+                // size in the first place).
                 let (current_width, current_height) = params.editor_state.size();
-                let scale = ((current_width as f32 / BASE_EDITOR_WIDTH as f32)
+                let scale = (((current_width as f32 / BASE_EDITOR_WIDTH as f32)
                     + (current_height as f32 / BASE_EDITOR_HEIGHT as f32))
-                    / 2.0;
-                egui_ctx.set_zoom_factor(scale.max(1.0));
+                    / 2.0)
+                    .max(1.0);
+                apply_gui_scale(egui_ctx, scale);
 
                 // Shared by the waveform-area "[ Load Sample ]" sign (shown
                 // before anything is loaded) and the "Load Sample..." button
@@ -531,7 +598,8 @@ impl Plugin for FreezePlugin {
                                         stereo_width_pct: params.stereo_width.value(),
                                     });
                                 }
-                                state.filename = path.file_name().map(|n| n.to_string_lossy().into_owned());
+                                let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+                                loaded_filename.store(name.map(Arc::new));
                                 state.error = None;
                             }
                             Err(e) => state.error = Some(e),
@@ -551,7 +619,8 @@ impl Plugin for FreezePlugin {
 
                         ui.add_space(8.0);
                         ui.label("Freeze Point");
-                        if draw_freeze_point_waveform(ui, &source, &params.freeze_point, setter) {
+                        let has_loaded_sample = loaded_filename.load().is_some();
+                        if draw_freeze_point_waveform(ui, &source, &params.freeze_point, setter, has_loaded_sample, scale) {
                             open_sample_dialog(state);
                         }
                         ui.add(widgets::ParamSlider::for_param(&params.freeze_point, setter));
@@ -567,7 +636,7 @@ impl Plugin for FreezePlugin {
                         ui.add_space(8.0);
 
                         ui.label("Envelope (Attack / Decay / Sustain / Release)");
-                        draw_adsr_graph(ui, &params.attack, &params.decay, &params.sustain, &params.release, setter);
+                        draw_adsr_graph(ui, &params.attack, &params.decay, &params.sustain, &params.release, setter, scale);
                         ui.label("Attack");
                         ui.add(widgets::ParamSlider::for_param(&params.attack, setter));
                         ui.label("Decay");
@@ -590,7 +659,7 @@ impl Plugin for FreezePlugin {
                         }
 
                         ui.add_space(4.0);
-                        match &state.filename {
+                        match loaded_filename.load().as_deref() {
                             Some(name) => {
                                 ui.label(format!("Loaded: {name}"));
                             }

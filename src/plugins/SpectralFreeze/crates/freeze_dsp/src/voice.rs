@@ -27,6 +27,36 @@ pub const GAIN_COMPENSATION_SMOOTHING_MS: f32 = 30.0;
 /// Default velocity sensitivity: 1.0 reproduces the plugin's original
 /// behavior (gain equals velocity exactly).
 pub const DEFAULT_VELOCITY_SENSITIVITY: f32 = 1.0;
+/// Below this level, `soft_limit` is exact identity - only signals that
+/// would otherwise exceed it are affected.
+pub const SOFT_LIMIT_THRESHOLD: f32 = 0.9;
+
+/// Soft-knee limiter applied as the final safety stage on the mixed output
+/// (see `process_block`): identity below `SOFT_LIMIT_THRESHOLD`, smoothly
+/// compressing louder signal toward an asymptotic ceiling of 1.0 via a tanh
+/// knee that's C1-continuous at the threshold (its derivative there is
+/// exactly 1, matching the identity region, so there's no audible kink).
+///
+/// This exists because the polyphony gain-compensation *target* (see
+/// `GAIN_COMPENSATION_SMOOTHING_MS`) is deliberately smoothed rather than
+/// applied instantly - so several voices attacked together (a real chord)
+/// can genuinely sum well past unity for the first ~30-50ms while the
+/// compensation is still chasing its new, lower target down. Measured with
+/// 5 simultaneous full-gain voices on a realistic frozen-loop amplitude
+/// (~0.64 peak): the uncompensated attack transient reached roughly 2.5x
+/// full scale before this limiter existed. That was previously masked by
+/// real MIDI velocity naturally sitting below 1.0 most of the time - it
+/// became clearly audible once Velocity Sensitivity could force every voice
+/// to gain 1.0 regardless of how hard a key was struck.
+fn soft_limit(x: f32) -> f32 {
+    let magnitude = x.abs();
+    if magnitude <= SOFT_LIMIT_THRESHOLD {
+        return x;
+    }
+    let headroom = 1.0 - SOFT_LIMIT_THRESHOLD;
+    let compressed = SOFT_LIMIT_THRESHOLD + headroom * ((magnitude - SOFT_LIMIT_THRESHOLD) / headroom).tanh();
+    x.signum() * compressed
+}
 
 /// Attack/Decay/Sustain/Release timing applied to newly triggered voices
 /// (like most synths, changing these doesn't reshape a note already
@@ -294,8 +324,8 @@ impl VoiceManager {
         for i in 0..out_left.len() {
             self.smoothed_gain_compensation =
                 target_gain_compensation + (self.smoothed_gain_compensation - target_gain_compensation) * smoothing_coeff;
-            out_left[i] *= self.smoothed_gain_compensation;
-            out_right[i] *= self.smoothed_gain_compensation;
+            out_left[i] = soft_limit(out_left[i] * self.smoothed_gain_compensation);
+            out_right[i] = soft_limit(out_right[i] * self.smoothed_gain_compensation);
         }
 
         if self.outgoing_buffer.is_some() {
@@ -448,6 +478,49 @@ mod tests {
     }
 
     #[test]
+    fn chord_attack_at_zero_velocity_sensitivity_never_exceeds_unity() {
+        // Regression test for real distortion reported by ear: with Velocity
+        // Sensitivity at 0% every voice plays at gain 1.0 regardless of how
+        // hard a key is struck, removing the natural headroom real MIDI
+        // velocity (usually well below 1.0) used to provide "for free". A
+        // realistic 5-note chord hit together then genuinely sums well past
+        // unity for the first ~30-50ms while `GAIN_COMPENSATION_SMOOTHING_MS`
+        // is still chasing its new, lower target down (measured ~2.5x before
+        // `soft_limit` existed, using this same buffer amplitude and voice
+        // count). This proves the safety limiter actually catches it, one
+        // sample at a time so the exact peak during the attack is captured.
+        let sample_rate = 48000.0;
+        let buffer = Arc::new(LoopBufferData {
+            // Amplitude representative of a real frozen loop (measured
+            // ~0.22-0.64 peak on the project's bundled test asset), not the
+            // artificial 1.0 used by other tests that aren't about peak level.
+            channels: vec![vec![0.64f32; 4096], vec![0.64f32; 4096]],
+            sample_rate,
+            root_note: DEFAULT_ROOT_NOTE,
+        });
+
+        let mut vm = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
+        vm.set_velocity_sensitivity(0.0);
+        for (i, note) in [60u8, 64, 67, 70, 74].into_iter().enumerate() {
+            // Velocity deliberately varied (as a real hand on a keybed
+            // would) to prove sensitivity 0.0 - not the input velocities -
+            // is what's making every voice play at full gain.
+            vm.note_on(note, 0, 0.3 + 0.1 * i as f32, i as i32);
+        }
+
+        let mut out_l = [0.0f32];
+        let mut out_r = [0.0f32];
+        let mut peak = 0.0f32;
+        for _ in 0..(sample_rate as usize / 10) {
+            // 100ms, comfortably past the attack/compensation transient.
+            vm.process_block(&buffer, &mut out_l, &mut out_r);
+            peak = peak.max(out_l[0].abs()).max(out_r[0].abs());
+        }
+
+        assert!(peak <= 1.0 + 1e-4, "chord attack at zero velocity sensitivity must never exceed unity, got peak={peak}");
+    }
+
+    #[test]
     fn gain_compensation_scales_down_with_more_active_voices() {
         // A held chord must not clip even in the fully-correlated worst
         // case: N simultaneous identical voices should sum to the same
@@ -512,9 +585,12 @@ mod tests {
         // compensation multiplier does at this boundary, with no
         // contamination from the envelope's own (legitimate, and otherwise
         // easily confusable with this bug) ongoing decay.
+        // Buffer amplitude kept below `SOFT_LIMIT_THRESHOLD` (0.9) so the
+        // safety limiter added for `FREEZE-PLAN-007` doesn't confound this
+        // test's own concern (compensation-jump smoothness, not peak level).
         let sample_rate = 48000.0;
         let buffer = Arc::new(LoopBufferData {
-            channels: vec![vec![1.0f32; 8192], vec![1.0f32; 8192]],
+            channels: vec![vec![0.5f32; 8192], vec![0.5f32; 8192]],
             sample_rate,
             root_note: DEFAULT_ROOT_NOTE,
         });
@@ -566,7 +642,7 @@ mod tests {
             vm.process_block(&buffer, &mut out_l, &mut out_r);
         }
         assert!(
-            (out_l[0] - 1.0).abs() < 1e-2,
+            (out_l[0] - 0.5).abs() < 1e-2,
             "expected to settle back at full level with 1 active voice (no compensation needed), got {}",
             out_l[0]
         );
@@ -576,12 +652,14 @@ mod tests {
     fn distinct_channels_produce_distinct_output() {
         // VoiceManager itself must faithfully reproduce whatever difference
         // the (already width-shaped) buffer contains - it does no width
-        // processing of its own.
+        // processing of its own. Amplitudes kept below `SOFT_LIMIT_THRESHOLD`
+        // (0.9) so the safety limiter added for `FREEZE-PLAN-007` doesn't
+        // confound this test's own concern (channel fidelity, not peak level).
         let mut vm = VoiceManager::new(48000.0, DEFAULT_ROOT_NOTE);
         vm.note_on(60, 0, 1.0, 1);
 
         let buffer = Arc::new(LoopBufferData {
-            channels: vec![vec![1.0f32; 4096], vec![0.5f32; 4096]],
+            channels: vec![vec![0.7f32; 4096], vec![0.35f32; 4096]],
             sample_rate: 48000.0,
             root_note: DEFAULT_ROOT_NOTE,
         });
@@ -593,8 +671,8 @@ mod tests {
 
         let tail_start = out_left.len() - 100;
         for i in tail_start..out_left.len() {
-            assert!((out_left[i] - 1.0).abs() < 1e-3, "got {}", out_left[i]);
-            assert!((out_right[i] - 0.5).abs() < 1e-3, "got {}", out_right[i]);
+            assert!((out_left[i] - 0.7).abs() < 1e-3, "got {}", out_left[i]);
+            assert!((out_right[i] - 0.35).abs() < 1e-3, "got {}", out_right[i]);
         }
     }
 
@@ -602,20 +680,23 @@ mod tests {
     fn buffer_swap_crossfades_instead_of_clicking() {
         // Two maximally different (opposite-polarity, constant) buffers
         // stand in for "two very different frozen spectra" - swapping
-        // between them with no crossfade would jump by 2.0 in a single
+        // between them with no crossfade would jump by 1.0 in a single
         // sample. With the crossfade, the largest sample-to-sample delta
         // anywhere in the transition should be far smaller than that.
+        // Amplitude kept below `SOFT_LIMIT_THRESHOLD` (0.9) so the safety
+        // limiter added for `FREEZE-PLAN-007` doesn't confound this test's
+        // own concern (crossfade smoothness, not peak level).
         let sample_rate = 48000.0;
         let mut vm = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
         vm.note_on(DEFAULT_ROOT_NOTE, 0, 1.0, 1);
 
         let buffer_a = Arc::new(LoopBufferData {
-            channels: vec![vec![1.0f32; 4096], vec![1.0f32; 4096]],
+            channels: vec![vec![0.5f32; 4096], vec![0.5f32; 4096]],
             sample_rate,
             root_note: DEFAULT_ROOT_NOTE,
         });
         let buffer_b = Arc::new(LoopBufferData {
-            channels: vec![vec![-1.0f32; 4096], vec![-1.0f32; 4096]],
+            channels: vec![vec![-0.5f32; 4096], vec![-0.5f32; 4096]],
             sample_rate,
             root_note: DEFAULT_ROOT_NOTE,
         });
@@ -635,8 +716,8 @@ mod tests {
 
         let max_delta = out_left.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
         assert!(
-            max_delta < 0.5,
-            "expected the crossfade to smooth the transition (max single-sample delta far below the 2.0 hard-swap jump), got {}",
+            max_delta < 0.25,
+            "expected the crossfade to smooth the transition (max single-sample delta far below the 1.0 hard-swap jump), got {}",
             max_delta
         );
 
@@ -647,7 +728,7 @@ mod tests {
         }
         let tail_start = out_left.len() - 100;
         for i in tail_start..out_left.len() {
-            assert!((out_left[i] - -1.0).abs() < 1e-3, "expected to have settled on buffer_b, got {}", out_left[i]);
+            assert!((out_left[i] - -0.5).abs() < 1e-3, "expected to have settled on buffer_b, got {}", out_left[i]);
         }
     }
 }
