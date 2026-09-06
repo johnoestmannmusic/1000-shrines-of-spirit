@@ -1,10 +1,12 @@
-use crate::envelope::ArEnvelope;
+use crate::envelope::AdsrEnvelope;
 use crate::render::LoopBufferData;
 use crate::resample::{playback_rate, sample_stereo_at, PlaybackReader};
 use std::sync::Arc;
 
 pub const MAX_VOICES: usize = 16;
 pub const ATTACK_MS: f32 = 10.0;
+pub const DECAY_MS: f32 = 100.0;
+pub const SUSTAIN_LEVEL: f32 = 1.0;
 pub const RELEASE_MS: f32 = 150.0;
 /// How long to crossfade into a freshly rendered loop buffer (e.g. after a
 /// Freeze Point / Formant Shift / Stereo Width change) instead of hard-
@@ -13,6 +15,35 @@ pub const RELEASE_MS: f32 = 150.0;
 /// discontinuity - audible as a click, and as stuttering when a host
 /// automates a param quickly enough to trigger several swaps in a row.
 pub const BUFFER_CROSSFADE_MS: f32 = 15.0;
+/// How quickly the polyphony gain compensation (see `process_block`) chases
+/// its target as the active voice count changes, instead of jumping to it
+/// instantly. Without this, the *instant* a voice actually finishes and
+/// frees its slot (not when it's triggered - releasing voices are still
+/// "active" and already compensated for), every other still-sounding voice
+/// gets an abrupt, audible volume jump as the divisor changes underneath
+/// them. Confirmed by measurement: RMS held steady while 2 notes overlapped,
+/// then jumped ~1.6x the instant the first note's voice was freed.
+pub const GAIN_COMPENSATION_SMOOTHING_MS: f32 = 30.0;
+
+/// Attack/Decay/Sustain/Release timing applied to newly triggered voices
+/// (like most synths, changing these doesn't reshape a note already
+/// mid-envelope - only the *next* `note_on` picks up a change). Defaults to
+/// `SUSTAIN_LEVEL = 1.0`, which makes Decay a no-op regardless of
+/// `decay_ms` and reproduces the plugin's original fixed Attack/Release-only
+/// behavior exactly.
+#[derive(Clone, Copy, PartialEq)]
+pub struct AdsrSettings {
+    pub attack_ms: f32,
+    pub decay_ms: f32,
+    pub sustain_level: f32,
+    pub release_ms: f32,
+}
+
+impl Default for AdsrSettings {
+    fn default() -> Self {
+        Self { attack_ms: ATTACK_MS, decay_ms: DECAY_MS, sustain_level: SUSTAIN_LEVEL, release_ms: RELEASE_MS }
+    }
+}
 
 pub struct Voice {
     pub id: i32,
@@ -21,7 +52,7 @@ pub struct Voice {
     pub gain: f32,
     pub rate: f64,
     pub reader: PlaybackReader,
-    pub env: ArEnvelope,
+    pub env: AdsrEnvelope,
     pub triggered_at: u64,
 }
 
@@ -45,6 +76,8 @@ pub struct VoiceManager {
     current_buffer: Option<Arc<LoopBufferData>>,
     outgoing_buffer: Option<Arc<LoopBufferData>>,
     crossfade_elapsed: usize,
+    adsr: AdsrSettings,
+    smoothed_gain_compensation: f32,
 }
 
 impl VoiceManager {
@@ -57,6 +90,8 @@ impl VoiceManager {
             current_buffer: None,
             outgoing_buffer: None,
             crossfade_elapsed: 0,
+            adsr: AdsrSettings::default(),
+            smoothed_gain_compensation: 1.0,
         }
     }
 
@@ -64,9 +99,15 @@ impl VoiceManager {
         self.voices.iter().filter(|v| v.is_some()).count()
     }
 
+    /// Applied to voices triggered from now on - see `AdsrSettings`.
+    pub fn set_adsr(&mut self, adsr: AdsrSettings) {
+        self.adsr = adsr;
+    }
+
     pub fn note_on(&mut self, note: u8, channel: u8, velocity: f32, id: i32) {
         let rate = playback_rate(note, self.root_note);
-        let mut env = ArEnvelope::new(self.sample_rate, ATTACK_MS, RELEASE_MS);
+        let mut env =
+            AdsrEnvelope::new(self.sample_rate, self.adsr.attack_ms, self.adsr.decay_ms, self.adsr.sustain_level, self.adsr.release_ms);
         env.note_on();
         let voice = Voice {
             id,
@@ -183,8 +224,26 @@ impl VoiceManager {
         // the sum can never exceed a single voice's own peak even in the
         // fully-correlated worst case, at the cost of chords getting quieter
         // faster than perceived loudness would suggest.
-        let active_count = self.active_voice_count().max(1);
-        let gain_compensation = 1.0 / active_count as f32;
+        //
+        // The target is read from the count *before* this block's voices
+        // are processed (a voice that finishes partway through this same
+        // block was still contributing real signal for most of it, so this
+        // block must still be compensated as if it were active - using the
+        // post-removal count here would apply next block's lower divisor to
+        // audio this block that still includes that voice's tail).
+        //
+        // Applied as a smoothed post-sum multiply, not per-voice inside the
+        // loop below: mathematically identical for a constant multiplier
+        // (gain * sum(x_i) == sum(gain * x_i)), but this is the only way to
+        // *smooth* it - the active count (and therefore the target) can
+        // change between blocks whenever a voice starts or finishes, and
+        // applying that new divisor instantly causes a real, audible volume
+        // jump on every other already-sounding voice, not just the one that
+        // changed. During the brief chase toward a lower target the
+        // smoothed value can sit slightly above the strict worst-case-safe
+        // bound - an accepted, standard tradeoff for avoiding a hard step,
+        // same as any other audio-rate smoothing.
+        let target_gain_compensation = 1.0 / self.active_voice_count().max(1) as f32;
 
         for slot in self.voices.iter_mut() {
             let Some(voice) = slot else { continue };
@@ -203,12 +262,20 @@ impl VoiceManager {
                 }
 
                 let level = voice.env.advance();
-                out_left[i] += l * level * voice.gain * gain_compensation;
-                out_right[i] += r * level * voice.gain * gain_compensation;
+                out_left[i] += l * level * voice.gain;
+                out_right[i] += r * level * voice.gain;
             }
             if voice.env.is_finished() {
                 *slot = None;
             }
+        }
+
+        let smoothing_coeff = (-1.0 / ((GAIN_COMPENSATION_SMOOTHING_MS / 1000.0) * self.sample_rate)).exp();
+        for i in 0..out_left.len() {
+            self.smoothed_gain_compensation =
+                target_gain_compensation + (self.smoothed_gain_compensation - target_gain_compensation) * smoothing_coeff;
+            out_left[i] *= self.smoothed_gain_compensation;
+            out_right[i] *= self.smoothed_gain_compensation;
         }
 
         if self.outgoing_buffer.is_some() {
@@ -365,6 +432,90 @@ mod tests {
             "expected 4 voices (1/4 compensation) to sum to the same level as a single voice: single={}, quad={}",
             single_level,
             quad_level
+        );
+    }
+
+    #[test]
+    fn gain_compensation_ramps_smoothly_when_a_voice_finishes() {
+        // Regression test for a real bug found by ear: a second, still-
+        // sounding voice got an abrupt, audible volume jump the instant an
+        // earlier released voice actually finished and freed its slot (the
+        // compensation divisor changing from 2 to 1 with no smoothing).
+        // Measured live: RMS held steady while overlapping, then jumped
+        // ~1.6x the instant the old voice's slot freed.
+        //
+        // Processes one sample per "block" specifically so the exact sample
+        // where `active_voice_count()` changes can be pinpointed. Note the
+        // target used for a given sample is computed from the count
+        // *before* that sample's voices are processed (see the comment in
+        // `process_block`), so the sample where the count is first observed
+        // to drop to 1 was itself still rendered with the *old* (2-voice)
+        // target - the new target only takes effect starting the sample
+        // after that. At either of these two samples, voice A's own
+        // envelope has *already* been forced to precisely 0.0 by
+        // `AdsrEnvelope::advance` (the same sample that flips it to
+        // `Stage::Idle`), so its contribution to the raw sum is identically
+        // 0 at both. That isolates the comparison to *only* whatever the
+        // compensation multiplier does at this boundary, with no
+        // contamination from the envelope's own (legitimate, and otherwise
+        // easily confusable with this bug) ongoing decay.
+        let sample_rate = 48000.0;
+        let buffer = Arc::new(LoopBufferData {
+            channels: vec![vec![1.0f32; 8192], vec![1.0f32; 8192]],
+            sample_rate,
+            root_note: DEFAULT_ROOT_NOTE,
+        });
+
+        let mut vm = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
+        vm.set_adsr(AdsrSettings { attack_ms: 0.1, decay_ms: 0.1, sustain_level: 1.0, release_ms: 5.0 });
+        vm.note_on(60, 0, 1.0, 1);
+        vm.note_on(72, 0, 1.0, 2);
+
+        let mut out_l = [0.0f32];
+        let mut out_r = [0.0f32];
+
+        // Run past attack so both voices have settled at full level with
+        // compensation applied for 2 active voices.
+        for _ in 0..100 {
+            vm.process_block(&buffer, &mut out_l, &mut out_r);
+        }
+        assert_eq!(vm.active_voice_count(), 2);
+
+        vm.note_off(60, 0);
+
+        let mut level_at_transition: Option<f32> = None;
+        let mut boundary_jump = None;
+        for _ in 0..(sample_rate as usize) {
+            let was_two = vm.active_voice_count() == 2;
+            vm.process_block(&buffer, &mut out_l, &mut out_r);
+            let level = out_l[0];
+            if let Some(prev) = level_at_transition {
+                boundary_jump = Some((level - prev).abs());
+                break;
+            }
+            if was_two && vm.active_voice_count() == 1 {
+                level_at_transition = Some(level);
+            }
+        }
+
+        let boundary_jump = boundary_jump.expect("voice A should have finished and freed its slot within the test window");
+        // The old (unsmoothed) behavior stepped by close to the full
+        // (1.0 - 0.5) = 0.5 compensation change in this single sample. A
+        // smoothed transition should move only a tiny fraction of that in
+        // one sample, given a 30ms smoothing time constant.
+        assert!(
+            boundary_jump < 0.01,
+            "expected a smooth transition right at the voice-freed boundary, not a jump: jump={}",
+            boundary_jump
+        );
+
+        for _ in 0..(sample_rate as usize / 5) {
+            vm.process_block(&buffer, &mut out_l, &mut out_r);
+        }
+        assert!(
+            (out_l[0] - 1.0).abs() < 1e-2,
+            "expected to settle back at full level with 1 active voice (no compensation needed), got {}",
+            out_l[0]
         );
     }
 

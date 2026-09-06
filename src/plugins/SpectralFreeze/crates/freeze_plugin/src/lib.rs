@@ -3,7 +3,7 @@ mod render_worker;
 use arc_swap::ArcSwap;
 use freeze_dsp::render::{render_frozen_loop, LoopBufferData, DEFAULT_ROOT_NOTE};
 use freeze_dsp::resample::resample_linear;
-use freeze_dsp::voice::VoiceManager;
+use freeze_dsp::voice::{AdsrSettings, VoiceManager};
 use nih_plug::prelude::*;
 use nih_plug_egui::{create_egui_editor, egui, widgets, EguiState};
 use render_worker::{RenderRequest, RenderWorker};
@@ -73,6 +73,18 @@ struct FreezePluginParams {
 
     #[id = "stereo_width"]
     pub stereo_width: FloatParam,
+
+    #[id = "attack"]
+    pub attack: FloatParam,
+
+    #[id = "decay"]
+    pub decay: FloatParam,
+
+    #[id = "sustain"]
+    pub sustain: FloatParam,
+
+    #[id = "release"]
+    pub release: FloatParam,
 }
 
 fn silent_loop_buffer() -> LoopBufferData {
@@ -98,7 +110,7 @@ impl Default for FreezePlugin {
 impl Default for FreezePluginParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(360, 320),
+            editor_state: EguiState::from_size(420, 700),
             freeze_point: FloatParam::new("Freeze Point", 50.0, FloatRange::Linear { min: 0.0, max: 100.0 })
                 .with_unit(" %"),
             formant_shift: FloatParam::new(
@@ -109,6 +121,30 @@ impl Default for FreezePluginParams {
             .with_unit(" st"),
             stereo_width: FloatParam::new("Stereo Width", 30.0, FloatRange::Linear { min: 0.0, max: 100.0 })
                 .with_unit(" %"),
+            attack: FloatParam::new(
+                "Attack",
+                freeze_dsp::voice::ATTACK_MS,
+                FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) },
+            )
+            .with_unit(" ms"),
+            decay: FloatParam::new(
+                "Decay",
+                freeze_dsp::voice::DECAY_MS,
+                FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) },
+            )
+            .with_unit(" ms"),
+            sustain: FloatParam::new(
+                "Sustain",
+                freeze_dsp::voice::SUSTAIN_LEVEL * 100.0,
+                FloatRange::Linear { min: 0.0, max: 100.0 },
+            )
+            .with_unit(" %"),
+            release: FloatParam::new(
+                "Release",
+                freeze_dsp::voice::RELEASE_MS,
+                FloatRange::Skewed { min: 1.0, max: 5000.0, factor: FloatRange::skew_factor(-2.0) },
+            )
+            .with_unit(" ms"),
         }
     }
 }
@@ -267,6 +303,115 @@ fn draw_freeze_point_waveform(
     }
 }
 
+/// Draws the ADSR envelope shape with three grabbable handles instead of
+/// four plain sliders: the attack-end point (drags horizontally only - it
+/// always tops out at level 1.0), the decay-end/sustain-level point (drags
+/// both axes), and the release-end point (drags horizontally only - it
+/// always returns to level 0.0). Attack/Decay/Release each get an equal
+/// fixed-width "slot" for layout (not sized by their own current value, so
+/// the graph doesn't rescale itself while you're dragging it) with a fixed-
+/// width flat plateau for Sustain, which has no time/duration of its own.
+fn draw_adsr_graph(
+    ui: &mut egui::Ui,
+    attack: &FloatParam,
+    decay: &FloatParam,
+    sustain: &FloatParam,
+    release: &FloatParam,
+    setter: &ParamSetter,
+) {
+    let desired_size = egui::vec2(ui.available_width(), 90.0);
+    let (rect, _response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 2.0, egui::Color32::from_gray(25));
+
+    let sustain_plateau_width: f32 = 30.0;
+    let segment_width = ((rect.width() - sustain_plateau_width) / 3.0).max(1.0);
+    let margin = 10.0;
+    let plot_top = rect.top() + margin;
+    let plot_bottom = rect.bottom() - margin;
+    let plot_height = (plot_bottom - plot_top).max(1.0);
+    let y_for_level = |level: f32| plot_bottom - level.clamp(0.0, 1.0) * plot_height;
+    let level_for_y = |y: f32| ((plot_bottom - y) / plot_height).clamp(0.0, 1.0);
+
+    let attack_start_x = rect.left();
+    let decay_start_x = attack_start_x + segment_width;
+    let sustain_start_x = decay_start_x + segment_width;
+    let release_start_x = sustain_start_x + sustain_plateau_width;
+
+    let attack_norm = attack.unmodulated_normalized_value();
+    let decay_norm = decay.unmodulated_normalized_value();
+    let sustain_norm = sustain.unmodulated_normalized_value();
+    let release_norm = release.unmodulated_normalized_value();
+
+    let p0 = egui::pos2(attack_start_x, y_for_level(0.0));
+    let p1 = egui::pos2(attack_start_x + segment_width * attack_norm, y_for_level(1.0));
+    let p2 = egui::pos2(decay_start_x + segment_width * decay_norm, y_for_level(sustain_norm));
+    let p3 = egui::pos2(sustain_start_x + sustain_plateau_width, y_for_level(sustain_norm));
+    let p4 = egui::pos2(release_start_x + segment_width * release_norm, y_for_level(0.0));
+
+    let curve_stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(240, 180, 60));
+    painter.line_segment([p0, p1], curve_stroke);
+    painter.line_segment([p1, p2], curve_stroke);
+    painter.line_segment([p2, p3], curve_stroke);
+    painter.line_segment([p3, p4], curve_stroke);
+
+    let handle_radius = 5.0;
+    let handle_color = egui::Color32::from_rgb(240, 180, 60);
+    painter.circle_filled(p1, handle_radius, handle_color);
+    painter.circle_filled(p2, handle_radius, handle_color);
+    painter.circle_filled(p4, handle_radius, handle_color);
+
+    let handle_rect = |center: egui::Pos2| egui::Rect::from_center_size(center, egui::vec2(handle_radius * 3.0, handle_radius * 3.0));
+
+    // Attack handle: horizontal-only drag within its slot.
+    let attack_id = ui.make_persistent_id("adsr_attack_handle");
+    let attack_response = ui.interact(handle_rect(p1), attack_id, egui::Sense::click_and_drag());
+    if attack_response.drag_started() || attack_response.clicked() {
+        setter.begin_set_parameter(attack);
+    }
+    if attack_response.dragged() || attack_response.clicked() {
+        if let Some(pos) = attack_response.interact_pointer_pos() {
+            setter.set_parameter_normalized(attack, ((pos.x - attack_start_x) / segment_width).clamp(0.0, 1.0));
+        }
+    }
+    if attack_response.drag_stopped() || attack_response.clicked() {
+        setter.end_set_parameter(attack);
+    }
+
+    // Decay/Sustain handle: both axes at once (X -> decay time, Y -> sustain level).
+    let decay_sustain_id = ui.make_persistent_id("adsr_decay_sustain_handle");
+    let ds_response = ui.interact(handle_rect(p2), decay_sustain_id, egui::Sense::click_and_drag());
+    if ds_response.drag_started() || ds_response.clicked() {
+        setter.begin_set_parameter(decay);
+        setter.begin_set_parameter(sustain);
+    }
+    if ds_response.dragged() || ds_response.clicked() {
+        if let Some(pos) = ds_response.interact_pointer_pos() {
+            setter.set_parameter_normalized(decay, ((pos.x - decay_start_x) / segment_width).clamp(0.0, 1.0));
+            setter.set_parameter_normalized(sustain, level_for_y(pos.y));
+        }
+    }
+    if ds_response.drag_stopped() || ds_response.clicked() {
+        setter.end_set_parameter(decay);
+        setter.end_set_parameter(sustain);
+    }
+
+    // Release handle: horizontal-only drag within its slot.
+    let release_id = ui.make_persistent_id("adsr_release_handle");
+    let release_response = ui.interact(handle_rect(p4), release_id, egui::Sense::click_and_drag());
+    if release_response.drag_started() || release_response.clicked() {
+        setter.begin_set_parameter(release);
+    }
+    if release_response.dragged() || release_response.clicked() {
+        if let Some(pos) = release_response.interact_pointer_pos() {
+            setter.set_parameter_normalized(release, ((pos.x - release_start_x) / segment_width).clamp(0.0, 1.0));
+        }
+    }
+    if release_response.drag_stopped() || release_response.clicked() {
+        setter.end_set_parameter(release);
+    }
+}
+
 impl Plugin for FreezePlugin {
     const NAME: &'static str = "SpectralFreeze";
     const VENDOR: &'static str = "John Oestmann";
@@ -315,6 +460,21 @@ impl Plugin for FreezePlugin {
 
                     ui.label("Stereo Width");
                     ui.add(widgets::ParamSlider::for_param(&params.stereo_width, setter));
+
+                    ui.add_space(12.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    ui.label("Envelope (Attack / Decay / Sustain / Release)");
+                    draw_adsr_graph(ui, &params.attack, &params.decay, &params.sustain, &params.release, setter);
+                    ui.label("Attack");
+                    ui.add(widgets::ParamSlider::for_param(&params.attack, setter));
+                    ui.label("Decay");
+                    ui.add(widgets::ParamSlider::for_param(&params.decay, setter));
+                    ui.label("Sustain");
+                    ui.add(widgets::ParamSlider::for_param(&params.sustain, setter));
+                    ui.label("Release");
+                    ui.add(widgets::ParamSlider::for_param(&params.release, setter));
 
                     ui.add_space(12.0);
                     ui.separator();
@@ -437,6 +597,18 @@ impl Plugin for FreezePlugin {
             }
             self.throttle_countdown = ((RENDER_THROTTLE_MS / 1000.0) * self.sample_rate) as i64;
         }
+
+        // Attack/Decay/Sustain/Release are cheap (per-sample, not
+        // render-time like the three above) - no worker/crossfade/throttle
+        // needed, just apply the current values to any voices triggered
+        // from this point on. Like most synths, a change here doesn't
+        // reshape a note already mid-envelope - only affects new note-ons.
+        self.voices.set_adsr(AdsrSettings {
+            attack_ms: self.params.attack.value(),
+            decay_ms: self.params.decay.value(),
+            sustain_level: self.params.sustain.value() / 100.0,
+            release_ms: self.params.release.value(),
+        });
 
         // Block-level MIDI handling: every event pending for this buffer is
         // applied before rendering, rather than split at the exact sample it
