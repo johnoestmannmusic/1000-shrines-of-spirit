@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Technical Handoff:** See the source-of-truth notes below.
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-07 07:02 by Codex A
+**Board Last Updated:** 2026-09-07 07:05 by Codex A
 **Source of Truth:** This project section replaces the retired
 `../../../0006-rust/NEXTSTEPS.md`. Update the relevant card and these handoff
 notes after every feature, bug fix, or material verification result.
@@ -139,8 +139,8 @@ _None currently planned; the final implementation milestone is assigned below._
 - **Description:** Add the folder-based flow for a different Game Boy `.fur` file with matching assets. Validate browser error handling, cache paths, and hosting from a nested website route. Produce and test the final optimized WASM bundle before publishing.
 - **Assigned Agent:** Codex A
 - **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** In progress in Rust-port commit `af4fdde`; folder loading and nested-route bundle preparation are implemented, while acceptance with a second real Game Boy song and live publishing remain.
-- **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain. 2026-09-07 06:56 — Moved from Planned Features to Assigned after completing visual chrome. Audited existing file-input and loader abstractions before adding folder replacement and nested-route release verification. 2026-09-07 07:02 — Added native recursive folder selection and web `webkitdirectory`, validation for exactly one supported `.fur` plus four stems and three source samples, optional Project JSON with a safe generated fallback, and atomic live-state replacement. `Trunk.toml` now emits relative JS/WASM URLs; the optimized bundle loaded successfully from `/dist/` with decoded audio and no browser warnings/errors. All 26 tests and the WASM/release builds pass. A second distinct Game Boy fixture with matching rendered assets is not present in the workspace, so that acceptance check remains open rather than being simulated with the bundled song.
+- **Card Completion Note:** In progress in Rust-port commits `af4fdde` and `017bd9b`; folder loading, active-song downloads, and nested-route bundle preparation are implemented, while acceptance with a second real Game Boy song and live publishing remain.
+- **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain. 2026-09-07 06:56 — Moved from Planned Features to Assigned after completing visual chrome. Audited existing file-input and loader abstractions before adding folder replacement and nested-route release verification. 2026-09-07 07:02 — Added native recursive folder selection and web `webkitdirectory`, validation for exactly one supported `.fur` plus four stems and three source samples, optional Project JSON with a safe generated fallback, and atomic live-state replacement. `Trunk.toml` now emits relative JS/WASM URLs; the optimized bundle loaded successfully from `/dist/` with decoded audio and no browser warnings/errors. All 26 tests and the WASM/release builds pass. A second distinct Game Boy fixture with matching rendered assets is not present in the workspace, so that acceptance check remains open rather than being simulated with the bundled song. 2026-09-07 07:05 — The loader now retains the active `.fur` and optional MIDI, and the release toolbar exposes both downloads; the bundled reference MIDI is packaged. Nested-route browser loading remained clean after the change. The original 38 MB CHIP-mode WAV is still excluded from the optimized bundle and remains a documented parity gap.
 
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
 
