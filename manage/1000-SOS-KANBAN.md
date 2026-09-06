@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Detailed Handoff:** `../../../0006-rust/NEXTSTEPS.md`  
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-06 14:56 by Codex A
+**Board Last Updated:** 2026-09-06 17:40 by Codex A
 
 ### Ideas
 
@@ -61,15 +61,6 @@ _None currently open - see Completed for resolved bugs._
 
 ### Planned Features
 
-#### 0006-PLAN-003 — Pattern, piano, and audition panels
-
-- **Card Title:** Pattern, piano, and audition panels
-- **Description:** Add the pattern order view, tracker cells, follow-playhead behaviour, piano state, and noise display. Implement row, cell, and instrument audition without disturbing transport state. Use the colours, boundary lines, held values, and hover explanations documented in `PARITY.md`.
-- **Assigned Agent:** Unassigned
-- **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** Pending.
-- **Process Comments:** 2026-09-06 07:19 — Furnace parsing and the shared song model already provide the required note data.
-
 #### 0006-PLAN-004 — Mixer meters and instrument quick editing
 
 - **Card Title:** Mixer meters and instrument quick editing
@@ -98,6 +89,15 @@ _None currently open - see Completed for resolved bugs._
 - **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain.
 
 ### Assigned
+
+#### 0006-PLAN-003 — Pattern, piano, and audition panels
+
+- **Card Title:** Pattern, piano, and audition panels
+- **Description:** Add the pattern order view, tracker cells, follow-playhead behaviour, piano state, and noise display. Implement row, cell, and instrument audition without disturbing transport state. Use the colours, boundary lines, held values, and hover explanations documented in `PARITY.md`.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-06 07:19
+- **Card Completion Note:** In progress; the complete four-channel pattern tracker, order/row navigation, mute interaction, colour tinting, and follow-playhead behavior are implemented. Piano/noise visualization and row/cell audition remain on this card.
+- **Process Comments:** 2026-09-06 07:19 — Furnace parsing and the shared song model already provide the required note data. 2026-09-06 17:40 — Moved from Planned Features to Assigned. The release browser renders the bundled 13-order × 64-row NOTE/INS/VOL/FX grid with held-instrument tints and no console warnings or errors; all 22 workspace tests and the release WASM build pass.
 
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
 
