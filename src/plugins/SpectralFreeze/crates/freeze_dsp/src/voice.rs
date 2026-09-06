@@ -24,6 +24,9 @@ pub const BUFFER_CROSSFADE_MS: f32 = 15.0;
 /// them. Confirmed by measurement: RMS held steady while 2 notes overlapped,
 /// then jumped ~1.6x the instant the first note's voice was freed.
 pub const GAIN_COMPENSATION_SMOOTHING_MS: f32 = 30.0;
+/// Default velocity sensitivity: 1.0 reproduces the plugin's original
+/// behavior (gain equals velocity exactly).
+pub const DEFAULT_VELOCITY_SENSITIVITY: f32 = 1.0;
 
 /// Attack/Decay/Sustain/Release timing applied to newly triggered voices
 /// (like most synths, changing these doesn't reshape a note already
@@ -78,6 +81,13 @@ pub struct VoiceManager {
     crossfade_elapsed: usize,
     adsr: AdsrSettings,
     smoothed_gain_compensation: f32,
+    /// How much MIDI velocity affects a newly triggered voice's gain, from
+    /// 0.0 (every note plays at a fixed full gain, ignoring velocity - for
+    /// players/controllers where velocity scaling isn't wanted) to 1.0 (gain
+    /// equals velocity exactly, the original behavior). Like `AdsrSettings`,
+    /// only affects voices triggered after it's set - not already-playing
+    /// ones.
+    velocity_sensitivity: f32,
 }
 
 impl VoiceManager {
@@ -92,6 +102,7 @@ impl VoiceManager {
             crossfade_elapsed: 0,
             adsr: AdsrSettings::default(),
             smoothed_gain_compensation: 1.0,
+            velocity_sensitivity: DEFAULT_VELOCITY_SENSITIVITY,
         }
     }
 
@@ -104,16 +115,25 @@ impl VoiceManager {
         self.adsr = adsr;
     }
 
+    /// Applied to voices triggered from now on - see the `velocity_sensitivity` field.
+    pub fn set_velocity_sensitivity(&mut self, sensitivity: f32) {
+        self.velocity_sensitivity = sensitivity;
+    }
+
     pub fn note_on(&mut self, note: u8, channel: u8, velocity: f32, id: i32) {
         let rate = playback_rate(note, self.root_note);
         let mut env =
             AdsrEnvelope::new(self.sample_rate, self.adsr.attack_ms, self.adsr.decay_ms, self.adsr.sustain_level, self.adsr.release_ms);
         env.note_on();
+        // Linearly blends between a fixed full gain (sensitivity 0.0, e.g.
+        // a controller/player where velocity scaling isn't wanted) and the
+        // original gain-equals-velocity behavior (sensitivity 1.0).
+        let gain = 1.0 - self.velocity_sensitivity * (1.0 - velocity);
         let voice = Voice {
             id,
             note,
             channel,
-            gain: velocity,
+            gain,
             rate,
             reader: PlaybackReader::new(0.0),
             env,
@@ -392,6 +412,39 @@ mod tests {
         for (l, r) in out_left.iter().zip(out_right.iter()) {
             assert!((l - r).abs() < 1e-4, "single-channel buffer should read identically on both outputs");
         }
+    }
+
+    #[test]
+    fn zero_velocity_sensitivity_ignores_velocity() {
+        let mut vm = VoiceManager::new(48000.0, DEFAULT_ROOT_NOTE);
+        vm.set_velocity_sensitivity(0.0);
+        vm.note_on(DEFAULT_ROOT_NOTE, 0, 0.2, 1);
+
+        let buffer = make_buffer();
+        let mut out_left = vec![0.0f32; 4096];
+        let mut out_right = vec![0.0f32; 4096];
+        vm.process_block(&buffer, &mut out_left, &mut out_right);
+
+        // Well past the 10ms default attack, so the envelope has settled at
+        // its sustain level (1.0 by default) - the only thing left to prove
+        // is that a low velocity (0.2) didn't scale the output down at all.
+        let settled = out_left[out_left.len() - 1];
+        assert!((settled - 0.5).abs() < 1e-3, "sensitivity 0.0 should ignore velocity entirely, got {settled}");
+    }
+
+    #[test]
+    fn full_velocity_sensitivity_scales_output_with_velocity() {
+        let mut vm = VoiceManager::new(48000.0, DEFAULT_ROOT_NOTE);
+        vm.set_velocity_sensitivity(1.0);
+        vm.note_on(DEFAULT_ROOT_NOTE, 0, 0.2, 1);
+
+        let buffer = make_buffer();
+        let mut out_left = vec![0.0f32; 4096];
+        let mut out_right = vec![0.0f32; 4096];
+        vm.process_block(&buffer, &mut out_left, &mut out_right);
+
+        let settled = out_left[out_left.len() - 1];
+        assert!((settled - 0.1).abs() < 1e-3, "sensitivity 1.0 should scale output by velocity (0.5 * 0.2 = 0.1), got {settled}");
     }
 
     #[test]

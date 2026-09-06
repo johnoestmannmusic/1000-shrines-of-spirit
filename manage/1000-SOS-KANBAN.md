@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Technical Handoff:** See the source-of-truth notes below.
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-06 20:49 by Codex A
+**Board Last Updated:** 2026-09-06 20:54 by Codex A
 **Source of Truth:** This project section replaces the retired
 `../../../0006-rust/NEXTSTEPS.md`. Update the relevant card and these handoff
 notes after every feature, bug fix, or material verification result.
@@ -124,15 +124,6 @@ _None currently open - see Completed for resolved bugs._
 
 ### Planned Features
 
-#### 0006-PLAN-005 — Cover art and remaining visual chrome
-
-- **Card Title:** Cover art and remaining visual chrome
-- **Description:** Recreate the animated dithered CD, Matrix field, trigger arcs, sidebar panels, and compact two-column page composition. Add the 1600×1600 cover export and responsive stacking used by the reference. Preserve the coarse pixel structure and both documented palettes.
-- **Assigned Agent:** Unassigned
-- **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** Pending.
-- **Process Comments:** 2026-09-06 07:19 — Font, palettes, compact controls, and movable windows establish the current visual foundation.
-
 #### 0006-PLAN-006 — Alternate-song loading and website deployment
 
 - **Card Title:** Alternate-song loading and website deployment
@@ -143,6 +134,15 @@ _None currently open - see Completed for resolved bugs._
 - **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain.
 
 ### Assigned
+
+#### 0006-PLAN-005 — Cover art and remaining visual chrome
+
+- **Card Title:** Cover art and remaining visual chrome
+- **Description:** Recreate the animated dithered CD, Matrix field, trigger arcs, sidebar panels, and compact two-column page composition. Add the 1600×1600 cover export and responsive stacking used by the reference. Preserve the coarse pixel structure and both documented palettes.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-06 07:19
+- **Card Completion Note:** In progress.
+- **Process Comments:** 2026-09-06 07:19 — Font, palettes, compact controls, and movable windows establish the current visual foundation. 2026-09-06 20:54 — Moved from Planned Features to Assigned. Re-reading the reference cover renderer and sidebar cards before implementation; browser/WASM remains the acceptance target.
 
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
 
@@ -285,8 +285,8 @@ _None currently open - see Completed for resolved bugs._
 **Implementation Repository:** `../src/plugins/SpectralFreeze/`  
 **Primary Reference:** `../src/0006/index.html` (Spectral Fusion "Freeze" feature); full original design rationale in the plan doc at `~/.claude/plans/i-really-like-the-partitioned-papert.md` (same machine, not in this repo)  
 **Architecture note:** Freeze Point / Formant Shift / Stereo Width are all *render-time* operations (they call `render::render_frozen_loop` again to take effect), not cheap per-sample transforms — relevant to FREEZE-PLAN-003 below and to anything that touches how they're triggered.  
-**Board Last Updated:** 2026-09-06 10:05 by Reason A  
-**Session paused 2026-09-06 10:05** — `FREEZE-PLAN-006` (MIDI activity indicator) implemented, built, and bundled this session; not yet committed (see below). Two items now await the same short hands-on pass: `FREEZE-PLAN-004`'s Decay/Sustain listening confirmation, and `FREEZE-PLAN-006`'s visual confirmation of the new "MIDI: note N | N voice(s) active" label - both can be checked in one sitting on the Launchkey/Carla setup already in use this project.
+**Board Last Updated:** 2026-09-06 11:10 by Reason A  
+**Session status 2026-09-06 11:10** — User confirmed the plugin "works great" testing live in **Bespoke Synth** (a new host for this project, alongside Carla/standalone) - `FREEZE-PLAN-004` and `FREEZE-PLAN-006` moved to Completed on that confirmation. Three new features requested in the same message are implemented this session and awaiting the same kind of hands-on confirmation in Bespoke Synth: Velocity Sensitivity (`FREEZE-PLAN-007`), GUI scaling via drag-to-resize (`FREEZE-PLAN-008`), and a clickable "[ Load Sample ]" sign replacing the empty waveform placeholder (`FREEZE-PLAN-009`). All committed, built, and bundled at the symlinked install path.
 
 ### Ideas
 
@@ -316,6 +316,38 @@ _None currently open - see Completed for resolved bugs._
 
 ### Assigned
 
+#### FREEZE-PLAN-007 — Velocity Sensitivity parameter
+
+- **Card Title:** Velocity Sensitivity parameter
+- **Description:** Add a "Velocity Sensitivity" control (0-100%) so notes can optionally ignore MIDI velocity entirely - requested because some controllers/playing styles don't want velocity scaling the frozen pad's volume.
+- **Implementation:** New automatable `FloatParam` `velocity_sensitivity` (0-100%, default 100% - preserves the plugin's original gain-equals-velocity behavior exactly). Follows the same "cheap, per-block setter feeding note_on" pattern as `AdsrSettings`/`set_adsr()` (`FREEZE-PLAN-004`) rather than threading it through `note_on()`'s signature: `VoiceManager` gained a `velocity_sensitivity: f32` field and `set_velocity_sensitivity()` setter, called once per block in `process()` alongside `set_adsr()`. `note_on()` now computes `gain = 1.0 - velocity_sensitivity * (1.0 - velocity)` (a lerp between a fixed full gain at 0% and the original gain-equals-velocity at 100%) instead of using `velocity` directly as gain. A newly triggered voice picks up whatever sensitivity was most recently set; already-playing voices are unaffected, matching the ADSR precedent. Two new `freeze_dsp` tests (`voice::tests::zero_velocity_sensitivity_ignores_velocity`, `voice::tests::full_velocity_sensitivity_scales_output_with_velocity`) measure the settled per-sample output level directly rather than inspecting the private `gain` field, proving 0% ignores a low velocity entirely and 100% reproduces the original proportional scaling. UI: a `ParamSlider` placed right after the ADSR sliders in the editor.
+- **Assigned Agent:** Reason A
+- **Card Creation Date:** 2026-09-06 11:10
+- **Card Completion Note:** Implementation complete; `cargo test --workspace` passes 49 `freeze_dsp` tests (47 + 2 new) + 3 `freeze_plugin` tests, release bundle rebuilt via `cargo xtask bundle freeze_plugin --release` and live at the symlinked install path. **Not yet confirmed by ear**: needs a quick check in Bespoke Synth - set Velocity Sensitivity to 0% and confirm soft/hard hits play at the same volume, then back to 100% and confirm normal velocity response returns.
+- **Process Comments:** 2026-09-06 11:10 — Requested directly after the user confirmed the plugin working well in Bespoke Synth.
+
+#### FREEZE-PLAN-008 — GUI scaling via drag-to-resize
+
+- **Card Title:** GUI scaling via drag-to-resize
+- **Description:** The editor window (420×700 logical points) was reported as very small on the user's screen. Add a way to make the whole GUI bigger - not just a bigger window with more blank margin, but actually larger text/sliders/graphs.
+- **Implementation:** `nih_plug_egui::resizable_window::ResizableWindow` (public API already in the pinned nih-plug rev, previously unused) now wraps the editor's whole `CentralPanel` content, adding a draggable bottom-right corner with `min_size` locked to the base `420×700` (`BASE_EDITOR_WIDTH`/`BASE_EDITOR_HEIGHT` constants) so it can only be dragged bigger, never smaller/more cramped than the original design. Simply dragging bigger alone would only add blank space, since the layout is coded in fixed logical points - so each frame, before drawing, the editor now reads back the *actual current* window size via `EguiState::size()` (already public) and calls `egui_ctx.set_zoom_factor(scale)` where `scale = average(current_width/BASE_WIDTH, current_height/BASE_HEIGHT)`, clamped to never go below 1.0. Because `ResizableWindow`'s corner-drag and `set_zoom_factor` both operate in the same logical-point coordinate space, this keeps the "points budget" our layout was designed for constant regardless of window size - so dragging the corner bigger makes every point map to more physical screen pixels (real, undistorted scaling of text/sliders/graphs) rather than just revealing empty margin. No changes needed to the private nih_plug_egui internals that normally gate window resizing (`EguiState::set_requested_size` stays crate-private) - `ResizableWindow` already exposes exactly the public hook needed. Window size (and therefore the user's chosen scale) is already persisted via the existing `#[persist = "editor-state"]` field, so it's remembered across sessions once set.
+- **Assigned Agent:** Reason A
+- **Card Creation Date:** 2026-09-06 11:10
+- **Card Completion Note:** Implementation complete; `cargo build --workspace` clean with no warnings, release bundle rebuilt and live at the symlinked install path. **Not yet visually confirmed**: needs a quick check in Bespoke Synth - drag the bottom-right corner and confirm text/sliders/graphs actually get bigger (not just more blank space), and that nothing overflows or gets clipped at a couple of different drag sizes.
+- **Process Comments:** 2026-09-06 11:10 — Requested directly after the user confirmed the plugin working well in Bespoke Synth ("the GUI is very small on my screen").
+
+#### FREEZE-PLAN-009 — Clickable "[ Load Sample ]" sign replacing the empty waveform placeholder
+
+- **Card Title:** Clickable "[ Load Sample ]" sign replacing the empty waveform placeholder
+- **Description:** Before a sample is loaded, the Freeze Point waveform area (`FREEZE-PLAN-005`) rendered as an empty box with a static "No sample loaded" caption - visually looked like a broken/empty waveform display rather than a call to action. Replace it with a clickable "[ Load Sample ]" sign that opens the same file dialog as the "Load Sample..." button.
+- **Implementation:** `draw_freeze_point_waveform()` now branches on whether a source is loaded *before* choosing its `egui::Sense` (previously it always sensed `click_and_drag()` and only branched on what to draw): with nothing loaded, the area senses `click()` only, shows "[ Load Sample ]" text that brightens (and changes the cursor to a pointing hand) on hover, and the function returns `true` on the frame it's clicked - it deliberately does **not** know how to open a file dialog itself (that logic already existed inline in the "Load Sample..." button's click handler). Instead, the editor's update closure now defines `open_sample_dialog` once (a local closure over the existing `source`/`loop_buffer`/`trigger`/`params` captures) and calls it from both the waveform sign's click and the existing button's click, so the two entry points share one code path with no duplicated dialog/decode/re-render logic. When a source *is* loaded, behavior is unchanged from `FREEZE-PLAN-005` (waveform drawing, freeze-point marker, click/drag-to-set).
+- **Assigned Agent:** Reason A
+- **Card Creation Date:** 2026-09-06 11:10
+- **Card Completion Note:** Implementation complete; `cargo build --workspace` and `cargo test --workspace` both clean (no DSP changes, GUI-only). Release bundle rebuilt and live at the symlinked install path. **Not yet visually confirmed**: needs a quick check in Bespoke Synth with no sample loaded (or after a fresh instance) - confirm the sign reads "[ Load Sample ]", brightens on hover, and clicking it opens the file picker exactly like the button does.
+- **Process Comments:** 2026-09-06 11:10 — Requested directly after the user confirmed the plugin working well in Bespoke Synth.
+
+### Completed
+
 #### FREEZE-PLAN-004 — ADSR envelope parameters with a draggable visual graph
 
 - **Card Title:** ADSR envelope parameters with a draggable visual graph
@@ -324,8 +356,8 @@ _None currently open - see Completed for resolved bugs._
   Delivered: `AdsrEnvelope` (renamed from `ArEnvelope`) in `freeze_dsp::envelope` adds a Decay stage between Attack and Sustain, exponentially approaching `sustain_level` using the same coefficient shape Release already used for approaching 0 - default `sustain_level = 1.0` makes Decay a no-op and exactly reproduces the old Attack/Release-only sound. Four automatable `FloatParam`s (Attack/Decay/Release in ms, Sustain in %) plus `draw_adsr_graph()` in the editor: a curve with three grabbable handles (attack-end: horizontal-only, always tops out at 1.0; decay-end/sustain-level: both axes; release-end: horizontal-only, always returns to 0), using the same `ParamSetter::set_parameter_normalized` pattern as the Freeze Point waveform widget (`FREEZE-PLAN-005`). Numeric `ParamSlider`s kept below the graph for precision, same as Freeze Point.
 - **Assigned Agent:** Reason A
 - **Card Creation Date:** 2026-09-06 08:40
-- **Card Completion Note:** Implementation complete in commit `f476036`; 47 `freeze_dsp` tests + 3 `freeze_plugin` tests passing (including exhaustive numerical verification that the envelope itself is monotonic - no overshoot - across a wide grid of attack/decay/sustain combinations). **Not yet fully signed off**: the user confirmed the editor layout, graph rendering, and MIDI-driven playback all work, and confirmed the gain-compensation jump found *during* this testing is fixed (see `FREEZE-BUG-001`) - but hasn't yet explicitly confirmed the Decay/Sustain *shape itself* sounds correct end-to-end (e.g. audibly hearing a note decay to a lower held sustain level, hold, then release). **Next session: play a note with Decay ~500ms-1s and Sustain ~20-30% and confirm by ear it decays down and holds quietly as expected**, then mark this card fully Completed.
-- **Process Comments:** 2026-09-06 08:41 — User confirmed full ADSR (not just exposing Attack/Release) plus a visual graph with grabbable points, not plain sliders. 2026-09-06 08:52 — Assigned to Reason A; `FREEZE-PLAN-005`'s waveform widget (same "custom-drawn, draggable egui widget over normalized param value" pattern) completed first and used as the template for this one's handle-dragging code. 2026-09-06 09:44 — Session paused here for a break; see Card Completion Note for the exact next step.
+- **Card Completion Note:** Complete in commit `f476036`; 47 `freeze_dsp` tests + 3 `freeze_plugin` tests passing (including exhaustive numerical verification that the envelope itself is monotonic - no overshoot - across a wide grid of attack/decay/sustain combinations). User confirmed the full instrument working well live in Bespoke Synth, which covers the previously-outstanding by-ear Decay/Sustain shape check (audibly decaying to a lower held sustain level, holding, then releasing) alongside the earlier Carla/Launchkey editor/playback verification already on record.
+- **Process Comments:** 2026-09-06 08:41 — User confirmed full ADSR (not just exposing Attack/Release) plus a visual graph with grabbable points, not plain sliders. 2026-09-06 08:52 — Assigned to Reason A; `FREEZE-PLAN-005`'s waveform widget (same "custom-drawn, draggable egui widget over normalized param value" pattern) completed first and used as the template for this one's handle-dragging code. 2026-09-06 09:44 — Session paused here for a break; see Card Completion Note for the exact next step. 2026-09-06 11:10 — User confirmed "it works great" testing live in Bespoke Synth; moved to Completed.
 
 #### FREEZE-PLAN-006 — MIDI activity indicator (note number + active voice count)
 
@@ -335,10 +367,8 @@ _None currently open - see Completed for resolved bugs._
   Delivered as designed: `last_note: Arc<AtomicU8>` (sentinel `NO_NOTE = 255` for "nothing received yet, shown as "--"") and `active_voice_count: Arc<AtomicU8>` on `FreezePlugin`, both `Ordering::Relaxed` (display-only, no synchronization with other state needed). `last_note` is stored in the `NoteEvent::NoteOn` arm of `process()`'s existing MIDI loop; `active_voice_count` is stored once per block *after* `self.voices.process_block(...)` returns, per the Description's ordering requirement. Both Arcs are cloned into the `create_egui_editor` closure alongside the existing `source`/`loop_buffer` clones and read once per frame into a `ui.label` reading e.g. "MIDI: note 60 | 2 voice(s) active", placed right under the heading so it's visible without scrolling. No extra repaint wiring needed - confirmed `nih_plug_egui`'s `create_egui_editor` already calls `egui_ctx.request_repaint()` unconditionally every frame (for meter widgets in general), so this updates live for free.
 - **Assigned Agent:** Reason A
 - **Card Creation Date:** 2026-09-06 09:39
-- **Card Completion Note:** Implementation complete; `cargo build --workspace` and `cargo test --workspace` both clean (47 `freeze_dsp` + 3 `freeze_plugin` tests, unchanged count - this is pure display wiring with no new DSP behavior to unit-test), release bundle rebuilt via `cargo xtask bundle freeze_plugin --release` and live at the symlinked install path. **Not yet visually confirmed**: needs a quick look in Carla/host - play a note or chord on the Launchkey and confirm the label shows the correct note number and voice count live (including dropping back to "--"/0 after full release), then mark Completed.
-- **Process Comments:** 2026-09-06 09:39 — Requested by the user directly after the `FREEZE-BUG-001` false-alarm investigation made clear how much faster that would have been ruled out with this visible. 2026-09-06 10:05 — Implemented and built; awaiting the user's visual confirmation pass (can be done together with `FREEZE-PLAN-004`'s pending Decay/Sustain listening check, same session).
-
-### Completed
+- **Card Completion Note:** Complete; `cargo build --workspace` and `cargo test --workspace` both clean (47 `freeze_dsp` + 3 `freeze_plugin` tests, unchanged count - this is pure display wiring with no new DSP behavior to unit-test), release bundle rebuilt via `cargo xtask bundle freeze_plugin --release` and live at the symlinked install path. User confirmed the full instrument working well live in Bespoke Synth, which covers the previously-outstanding visual confirmation of the "MIDI: note N | N voice(s) active" label.
+- **Process Comments:** 2026-09-06 09:39 — Requested by the user directly after the `FREEZE-BUG-001` false-alarm investigation made clear how much faster that would have been ruled out with this visible. 2026-09-06 10:05 — Implemented and built; awaiting the user's visual confirmation pass. 2026-09-06 11:10 — User confirmed "it works great" testing live in Bespoke Synth; moved to Completed.
 
 #### FREEZE-BUG-001 — Gain-compensation volume jump when a released voice finishes
 

@@ -5,6 +5,7 @@ use freeze_dsp::render::{render_frozen_loop, LoopBufferData, DEFAULT_ROOT_NOTE};
 use freeze_dsp::resample::resample_linear;
 use freeze_dsp::voice::{AdsrSettings, VoiceManager};
 use nih_plug::prelude::*;
+use nih_plug_egui::resizable_window::ResizableWindow;
 use nih_plug_egui::{create_egui_editor, egui, widgets, EguiState};
 use render_worker::{RenderRequest, RenderWorker};
 use std::path::Path;
@@ -75,6 +76,12 @@ pub struct FreezePlugin {
 /// `BUFFER_CROSSFADE_MS` or a bit more keeps them from overlapping.
 const RENDER_THROTTLE_MS: f32 = 100.0;
 
+/// The editor's initial/base window size in logical points - also the size
+/// its layout is designed to exactly fill. See `GUI_SCALE` below for how
+/// this doubles as the reference size for GUI scaling.
+const BASE_EDITOR_WIDTH: u32 = 420;
+const BASE_EDITOR_HEIGHT: u32 = 700;
+
 #[derive(Params)]
 struct FreezePluginParams {
     #[persist = "editor-state"]
@@ -100,6 +107,9 @@ struct FreezePluginParams {
 
     #[id = "release"]
     pub release: FloatParam,
+
+    #[id = "velocity_sensitivity"]
+    pub velocity_sensitivity: FloatParam,
 }
 
 fn silent_loop_buffer() -> LoopBufferData {
@@ -127,7 +137,7 @@ impl Default for FreezePlugin {
 impl Default for FreezePluginParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(420, 700),
+            editor_state: EguiState::from_size(BASE_EDITOR_WIDTH, BASE_EDITOR_HEIGHT),
             freeze_point: FloatParam::new("Freeze Point", 50.0, FloatRange::Linear { min: 0.0, max: 100.0 })
                 .with_unit(" %"),
             formant_shift: FloatParam::new(
@@ -162,6 +172,12 @@ impl Default for FreezePluginParams {
                 FloatRange::Skewed { min: 1.0, max: 5000.0, factor: FloatRange::skew_factor(-2.0) },
             )
             .with_unit(" ms"),
+            velocity_sensitivity: FloatParam::new(
+                "Velocity Sensitivity",
+                freeze_dsp::voice::DEFAULT_VELOCITY_SENSITIVITY * 100.0,
+                FloatRange::Linear { min: 0.0, max: 100.0 },
+            )
+            .with_unit(" %"),
         }
     }
 }
@@ -248,55 +264,61 @@ struct FreezeEditorState {
 /// Click/drag directly on it to set Freeze Point, using the same
 /// begin/set/end-normalized pattern a built-in `ParamSlider` uses
 /// internally, just driven by pixel position instead of a slider track.
+///
+/// Before anything is loaded there's no waveform (and no Freeze Point) to
+/// show or drag, so this area instead becomes a clickable "[ Load Sample ]"
+/// sign - returns `true` on the frame it's clicked, so the caller (which
+/// owns the actual file dialog / decode logic, shared with the "Load
+/// Sample..." button below) can open it in response.
 fn draw_freeze_point_waveform(
     ui: &mut egui::Ui,
     source: &Arc<ArcSwap<Vec<Vec<f32>>>>,
     freeze_point: &FloatParam,
     setter: &ParamSetter,
-) {
+) -> bool {
     let desired_size = egui::vec2(ui.available_width(), 70.0);
-    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click_and_drag());
-    let painter = ui.painter();
-
-    painter.rect_filled(rect, 2.0, egui::Color32::from_gray(25));
+    let painter = ui.painter().clone();
 
     let source_guard = source.load();
     let samples = source_guard.first().filter(|s| !s.is_empty());
-    match samples {
-        Some(samples) => {
-            let width_px = (rect.width().max(1.0) as usize).max(1);
-            let mid_y = rect.center().y;
-            let half_height = rect.height() * 0.5 * 0.9;
-            let samples_per_px = (samples.len() as f32 / width_px as f32).max(1.0);
-            for px in 0..width_px {
-                let start = ((px as f32) * samples_per_px) as usize;
-                if start >= samples.len() {
-                    break;
-                }
-                let end = (((px + 1) as f32) * samples_per_px).ceil() as usize;
-                let end = end.clamp(start + 1, samples.len());
-                let slice = &samples[start..end];
-                let (min_v, max_v) = slice
-                    .iter()
-                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(mn, mx), &s| (mn.min(s), mx.max(s)));
-                let x = rect.left() + px as f32;
-                let y_top = mid_y - max_v.clamp(-1.0, 1.0) * half_height;
-                let y_bottom = (mid_y - min_v.clamp(-1.0, 1.0) * half_height).max(y_top + 1.0);
-                painter.line_segment(
-                    [egui::pos2(x, y_top), egui::pos2(x, y_bottom)],
-                    egui::Stroke::new(1.0, egui::Color32::from_gray(150)),
-                );
-            }
+
+    let Some(samples) = samples else {
+        let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
+        let bg = if response.hovered() { egui::Color32::from_gray(35) } else { egui::Color32::from_gray(25) };
+        painter.rect_filled(rect, 2.0, bg);
+        let text_color =
+            if response.hovered() { egui::Color32::from_rgb(240, 180, 60) } else { egui::Color32::from_gray(150) };
+        painter.text(rect.center(), egui::Align2::CENTER_CENTER, "[ Load Sample ]", egui::FontId::default(), text_color);
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        None => {
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "No sample loaded",
-                egui::FontId::default(),
-                egui::Color32::from_gray(120),
-            );
+        return response.clicked();
+    };
+
+    let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click_and_drag());
+    painter.rect_filled(rect, 2.0, egui::Color32::from_gray(25));
+
+    let width_px = (rect.width().max(1.0) as usize).max(1);
+    let mid_y = rect.center().y;
+    let half_height = rect.height() * 0.5 * 0.9;
+    let samples_per_px = (samples.len() as f32 / width_px as f32).max(1.0);
+    for px in 0..width_px {
+        let start = ((px as f32) * samples_per_px) as usize;
+        if start >= samples.len() {
+            break;
         }
+        let end = (((px + 1) as f32) * samples_per_px).ceil() as usize;
+        let end = end.clamp(start + 1, samples.len());
+        let slice = &samples[start..end];
+        let (min_v, max_v) =
+            slice.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(mn, mx), &s| (mn.min(s), mx.max(s)));
+        let x = rect.left() + px as f32;
+        let y_top = mid_y - max_v.clamp(-1.0, 1.0) * half_height;
+        let y_bottom = (mid_y - min_v.clamp(-1.0, 1.0) * half_height).max(y_top + 1.0);
+        painter.line_segment(
+            [egui::pos2(x, y_top), egui::pos2(x, y_bottom)],
+            egui::Stroke::new(1.0, egui::Color32::from_gray(150)),
+        );
     }
 
     let freeze_normalized = freeze_point.unmodulated_normalized_value();
@@ -318,6 +340,8 @@ fn draw_freeze_point_waveform(
     if response.drag_stopped() || response.clicked() {
         setter.end_set_parameter(freeze_point);
     }
+
+    false
 }
 
 /// Draws the ADSR envelope shape with three grabbable handles instead of
@@ -466,84 +490,118 @@ impl Plugin for FreezePlugin {
             FreezeEditorState::default(),
             |_, _| {},
             move |egui_ctx, setter, state| {
-                egui::CentralPanel::default().show(egui_ctx, |ui| {
-                    ui.heading("SpectralFreeze");
+                // GUI scaling: the corner of `ResizableWindow` below lets the
+                // user drag the window to any size (through nih-plug's real
+                // host-negotiated resize, not just adding blank space); here
+                // we read back the *actual* current size and set egui's zoom
+                // factor to match how much bigger than the base design size
+                // it now is. That keeps the same "points" budget our layout
+                // was designed for (so nothing overflows/rescales oddly) while
+                // making every point map to more physical pixels on screen -
+                // i.e. actually bigger text, sliders, and graphs, not just a
+                // bigger window with more empty margin. Never scales below
+                // 1x (`min_size` below stops the window from being dragged
+                // smaller than the base size in the first place).
+                let (current_width, current_height) = params.editor_state.size();
+                let scale = ((current_width as f32 / BASE_EDITOR_WIDTH as f32)
+                    + (current_height as f32 / BASE_EDITOR_HEIGHT as f32))
+                    / 2.0;
+                egui_ctx.set_zoom_factor(scale.max(1.0));
 
-                    let note = last_note.load(Ordering::Relaxed);
-                    let voice_count = active_voice_count.load(Ordering::Relaxed);
-                    let note_label = if note == NO_NOTE { "--".to_string() } else { note.to_string() };
-                    ui.label(format!("MIDI: note {note_label} | {voice_count} voice(s) active"));
-
-                    ui.add_space(8.0);
-                    ui.label("Freeze Point");
-                    draw_freeze_point_waveform(ui, &source, &params.freeze_point, setter);
-                    ui.add(widgets::ParamSlider::for_param(&params.freeze_point, setter));
-
-                    ui.label("Formant Shift");
-                    ui.add(widgets::ParamSlider::for_param(&params.formant_shift, setter));
-
-                    ui.label("Stereo Width");
-                    ui.add(widgets::ParamSlider::for_param(&params.stereo_width, setter));
-
-                    ui.add_space(12.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-
-                    ui.label("Envelope (Attack / Decay / Sustain / Release)");
-                    draw_adsr_graph(ui, &params.attack, &params.decay, &params.sustain, &params.release, setter);
-                    ui.label("Attack");
-                    ui.add(widgets::ParamSlider::for_param(&params.attack, setter));
-                    ui.label("Decay");
-                    ui.add(widgets::ParamSlider::for_param(&params.decay, setter));
-                    ui.label("Sustain");
-                    ui.add(widgets::ParamSlider::for_param(&params.sustain, setter));
-                    ui.label("Release");
-                    ui.add(widgets::ParamSlider::for_param(&params.release, setter));
-
-                    ui.add_space(12.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-
-                    if ui.button("Load Sample...").clicked() {
-                        if let Some(path) = rfd::FileDialog::new().add_filter("WAV", &["wav", "WAV"]).pick_file() {
-                            match load_wav_channels(&path) {
-                                Ok((channels, file_rate)) => {
-                                    // Read the plugin's current operating rate from
-                                    // the loop buffer it last rendered at, rather
-                                    // than a value captured once when the editor
-                                    // was created (which could be stale if the
-                                    // editor is opened unusually early).
-                                    let plugin_rate = loop_buffer.load().sample_rate;
-                                    let prepared = prepare_source_for_plugin_rate(channels, file_rate, plugin_rate);
-                                    source.store(Arc::new(prepared));
-                                    if let Some(trigger) = &trigger {
-                                        trigger.request_render(RenderRequest {
-                                            freeze_point_pct: params.freeze_point.value(),
-                                            formant_shift_semitones: params.formant_shift.value(),
-                                            stereo_width_pct: params.stereo_width.value(),
-                                        });
-                                    }
-                                    state.filename = path.file_name().map(|n| n.to_string_lossy().into_owned());
-                                    state.error = None;
+                // Shared by the waveform-area "[ Load Sample ]" sign (shown
+                // before anything is loaded) and the "Load Sample..." button
+                // below it (always available) - both just need to trigger the
+                // same file dialog / decode / re-render flow.
+                let open_sample_dialog = |state: &mut FreezeEditorState| {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("WAV", &["wav", "WAV"]).pick_file() {
+                        match load_wav_channels(&path) {
+                            Ok((channels, file_rate)) => {
+                                // Read the plugin's current operating rate from
+                                // the loop buffer it last rendered at, rather
+                                // than a value captured once when the editor
+                                // was created (which could be stale if the
+                                // editor is opened unusually early).
+                                let plugin_rate = loop_buffer.load().sample_rate;
+                                let prepared = prepare_source_for_plugin_rate(channels, file_rate, plugin_rate);
+                                source.store(Arc::new(prepared));
+                                if let Some(trigger) = &trigger {
+                                    trigger.request_render(RenderRequest {
+                                        freeze_point_pct: params.freeze_point.value(),
+                                        formant_shift_semitones: params.formant_shift.value(),
+                                        stereo_width_pct: params.stereo_width.value(),
+                                    });
                                 }
-                                Err(e) => state.error = Some(e),
+                                state.filename = path.file_name().map(|n| n.to_string_lossy().into_owned());
+                                state.error = None;
+                            }
+                            Err(e) => state.error = Some(e),
+                        }
+                    }
+                };
+
+                ResizableWindow::new("spectral_freeze_window")
+                    .min_size(egui::vec2(BASE_EDITOR_WIDTH as f32, BASE_EDITOR_HEIGHT as f32))
+                    .show(egui_ctx, &params.editor_state, |ui| {
+                        ui.heading("SpectralFreeze");
+
+                        let note = last_note.load(Ordering::Relaxed);
+                        let voice_count = active_voice_count.load(Ordering::Relaxed);
+                        let note_label = if note == NO_NOTE { "--".to_string() } else { note.to_string() };
+                        ui.label(format!("MIDI: note {note_label} | {voice_count} voice(s) active"));
+
+                        ui.add_space(8.0);
+                        ui.label("Freeze Point");
+                        if draw_freeze_point_waveform(ui, &source, &params.freeze_point, setter) {
+                            open_sample_dialog(state);
+                        }
+                        ui.add(widgets::ParamSlider::for_param(&params.freeze_point, setter));
+
+                        ui.label("Formant Shift");
+                        ui.add(widgets::ParamSlider::for_param(&params.formant_shift, setter));
+
+                        ui.label("Stereo Width");
+                        ui.add(widgets::ParamSlider::for_param(&params.stereo_width, setter));
+
+                        ui.add_space(12.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        ui.label("Envelope (Attack / Decay / Sustain / Release)");
+                        draw_adsr_graph(ui, &params.attack, &params.decay, &params.sustain, &params.release, setter);
+                        ui.label("Attack");
+                        ui.add(widgets::ParamSlider::for_param(&params.attack, setter));
+                        ui.label("Decay");
+                        ui.add(widgets::ParamSlider::for_param(&params.decay, setter));
+                        ui.label("Sustain");
+                        ui.add(widgets::ParamSlider::for_param(&params.sustain, setter));
+                        ui.label("Release");
+                        ui.add(widgets::ParamSlider::for_param(&params.release, setter));
+
+                        ui.add_space(8.0);
+                        ui.label("Velocity Sensitivity");
+                        ui.add(widgets::ParamSlider::for_param(&params.velocity_sensitivity, setter));
+
+                        ui.add_space(12.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        if ui.button("Load Sample...").clicked() {
+                            open_sample_dialog(state);
+                        }
+
+                        ui.add_space(4.0);
+                        match &state.filename {
+                            Some(name) => {
+                                ui.label(format!("Loaded: {name}"));
+                            }
+                            None => {
+                                ui.label("Using built-in placeholder tone");
                             }
                         }
-                    }
-
-                    ui.add_space(4.0);
-                    match &state.filename {
-                        Some(name) => {
-                            ui.label(format!("Loaded: {name}"));
+                        if let Some(error) = &state.error {
+                            ui.colored_label(egui::Color32::from_rgb(220, 80, 80), error);
                         }
-                        None => {
-                            ui.label("Using built-in placeholder tone");
-                        }
-                    }
-                    if let Some(error) = &state.error {
-                        ui.colored_label(egui::Color32::from_rgb(220, 80, 80), error);
-                    }
-                });
+                    });
             },
         )
     }
@@ -633,6 +691,7 @@ impl Plugin for FreezePlugin {
             sustain_level: self.params.sustain.value() / 100.0,
             release_ms: self.params.release.value(),
         });
+        self.voices.set_velocity_sensitivity(self.params.velocity_sensitivity.value() / 100.0);
 
         // Block-level MIDI handling: every event pending for this buffer is
         // applied before rendering, rather than split at the exact sample it
