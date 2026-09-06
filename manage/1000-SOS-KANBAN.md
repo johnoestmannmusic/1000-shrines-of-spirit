@@ -5,6 +5,8 @@ This file is the shared Kanban Markdown coordination board for active subproject
 When starting on a project, Agents should familiarize themselves with the state of the project as described in that section in this document.
 Agents should only assign themselves to cards that are not already assigned to another agent. They should move cards between buckets instead of duplicating them, preserve
 card IDs, and append dated process comments after each completed feature.
+Each project's buckets: Ideas, Bugs, Planned Features, Assigned, Completed. A found bug gets a card in Bugs (symptom, root cause once known, fix approach); once verified fixed it moves to Completed like any other card, keeping its ID.
+Dates throughout this file include a time (HH:MM), not just a date, since multiple agents may work on the same project on the same day.
 
 ---
 
@@ -194,7 +196,8 @@ priority.
 **Implementation Repository:** `../src/plugins/SpectralFreeze/`  
 **Primary Reference:** `../src/0006/index.html` (Spectral Fusion "Freeze" feature); full original design rationale in the plan doc at `~/.claude/plans/i-really-like-the-partitioned-papert.md` (same machine, not in this repo)  
 **Architecture note:** Freeze Point / Formant Shift / Stereo Width are all *render-time* operations (they call `render::render_frozen_loop` again to take effect), not cheap per-sample transforms — relevant to FREEZE-PLAN-003 below and to anything that touches how they're triggered.  
-**Board Last Updated:** 2026-09-06 08:51 by Reason A
+**Board Last Updated:** 2026-09-06 09:45 by Reason A  
+**Session paused 2026-09-06 09:45** — code and Kanban both committed and in sync (commit `f476036`), nothing uncommitted. Pick up at `FREEZE-PLAN-004`'s Card Completion Note for the exact next step (a short listening confirmation), or `FREEZE-PLAN-006` for the next unstarted feature.
 
 ### Ideas
 
@@ -206,6 +209,10 @@ priority.
 - **Card Creation Date:** 2026-09-06 07:45
 - **Card Completion Note:** Pending; not scheduled.
 - **Process Comments:** 2026-09-06 07:44 — User confirmed the current dip isn't a blocker; explicitly deferred to a later full-instrument listening pass.
+
+### Bugs
+
+_None currently open - see Completed for resolved bugs._
 
 ### Planned Features
 
@@ -223,13 +230,36 @@ priority.
 #### FREEZE-PLAN-004 — ADSR envelope parameters with a draggable visual graph
 
 - **Card Title:** ADSR envelope parameters with a draggable visual graph
-- **Description:** Replace the current fixed, unexposed two-stage envelope (`freeze_dsp::envelope::ArEnvelope`, hardcoded `ATTACK_MS = 10.0` / `RELEASE_MS = 150.0` constants in `voice.rs`) with a real Attack/Decay/Sustain/Release envelope: 4 automatable `FloatParam`s (attack/decay/release time, sustain level), plus a custom-drawn envelope-shape graph in the editor with grabbable points (attack-end point drags horizontally only - it always tops out at 1.0; decay-end/sustain-level point drags both axes; release-end point drags horizontally only, always returns to 0) instead of plain sliders. Unlike Freeze Point/Formant Shift/Stereo Width, ADSR is cheap (per-sample, not render-time) - no `RenderWorker`/crossfade/throttle needed. Values should be read at note-trigger time in `VoiceManager::note_on` (like most synths - changing Attack doesn't reshape a note already mid-decay), so `note_on`'s signature needs to grow to accept the 4 current values (or a small `AdsrSettings` struct) read from the params where `process()` currently handles `NoteEvent::NoteOn`. `ArEnvelope`'s decay math (currently release-only: `level *= release_coeff` each sample, decaying toward 0) generalizes to decay by decaying toward `sustain_level` instead of 0, using the same `exp(-9.2103 / samples)` coefficient shape.
+- **Description:** Implemented as designed, with one deliberate deviation from the original plan below: `note_on()`'s signature was kept **unchanged** (still `note(u8), channel(u8), velocity(f32), id(i32)`) rather than growing to accept ADSR values directly - `VoiceManager` instead gained an `adsr: AdsrSettings` field and a `set_adsr()` setter, called once per block in `process()` before MIDI handling, so `note_on()` just reads `self.adsr` internally. Less invasive (zero changes needed to any existing `note_on()` call site or test) and the effect is identical: a newly triggered voice picks up whatever `set_adsr()` most recently set, and already-playing voices are unaffected by later changes, matching "like most synths, changing Attack doesn't reshape a note already mid-decay."
+
+  Delivered: `AdsrEnvelope` (renamed from `ArEnvelope`) in `freeze_dsp::envelope` adds a Decay stage between Attack and Sustain, exponentially approaching `sustain_level` using the same coefficient shape Release already used for approaching 0 - default `sustain_level = 1.0` makes Decay a no-op and exactly reproduces the old Attack/Release-only sound. Four automatable `FloatParam`s (Attack/Decay/Release in ms, Sustain in %) plus `draw_adsr_graph()` in the editor: a curve with three grabbable handles (attack-end: horizontal-only, always tops out at 1.0; decay-end/sustain-level: both axes; release-end: horizontal-only, always returns to 0), using the same `ParamSetter::set_parameter_normalized` pattern as the Freeze Point waveform widget (`FREEZE-PLAN-005`). Numeric `ParamSlider`s kept below the graph for precision, same as Freeze Point.
 - **Assigned Agent:** Reason A
 - **Card Creation Date:** 2026-09-06 08:40
-- **Card Completion Note:** In progress.
-- **Process Comments:** 2026-09-06 08:41 — User confirmed full ADSR (not just exposing Attack/Release) plus a visual graph with grabbable points, not plain sliders. 2026-09-06 08:52 — Assigned to Reason A; `FREEZE-PLAN-005`'s waveform widget (same "custom-drawn, draggable egui widget over normalized param value" pattern) completed first and used as the template for this one's handle-dragging code.
+- **Card Completion Note:** Implementation complete in commit `f476036`; 47 `freeze_dsp` tests + 3 `freeze_plugin` tests passing (including exhaustive numerical verification that the envelope itself is monotonic - no overshoot - across a wide grid of attack/decay/sustain combinations). **Not yet fully signed off**: the user confirmed the editor layout, graph rendering, and MIDI-driven playback all work, and confirmed the gain-compensation jump found *during* this testing is fixed (see `FREEZE-BUG-001`) - but hasn't yet explicitly confirmed the Decay/Sustain *shape itself* sounds correct end-to-end (e.g. audibly hearing a note decay to a lower held sustain level, hold, then release). **Next session: play a note with Decay ~500ms-1s and Sustain ~20-30% and confirm by ear it decays down and holds quietly as expected**, then mark this card fully Completed.
+- **Process Comments:** 2026-09-06 08:41 — User confirmed full ADSR (not just exposing Attack/Release) plus a visual graph with grabbable points, not plain sliders. 2026-09-06 08:52 — Assigned to Reason A; `FREEZE-PLAN-005`'s waveform widget (same "custom-drawn, draggable egui widget over normalized param value" pattern) completed first and used as the template for this one's handle-dragging code. 2026-09-06 09:44 — Session paused here for a break; see Card Completion Note for the exact next step.
+
+#### FREEZE-PLAN-006 — MIDI activity indicator (note number + active voice count)
+
+- **Card Title:** MIDI activity indicator (note number + active voice count)
+- **Description:** Add a small live indicator to the editor showing whether MIDI is currently being received - last note number and current active voice count - so it's visually obvious when notes aren't reaching the plugin (e.g. a dropped JACK/host MIDI connection, see `FREEZE-BUG-001`'s false-alarm follow-up) versus a real DSP issue. Cross-thread state via `Arc<AtomicU8>` fields on `FreezePlugin` (matching the pattern nih-plug's own `gain_gui_egui` example uses for its peak meter), updated in `process()`'s existing MIDI-handling loop and after `VoiceManager::process_block` (voice count must be read *after* that call to reflect voices that just finished this block).
+- **Assigned Agent:** Reason A
+- **Card Creation Date:** 2026-09-06 09:39
+- **Card Completion Note:** Not started - scoped only. A first attempt at the imports/sentinel constant was reverted (session ended before the fields/wiring/UI label were added) so the tree stayed warning-free; nothing to build on yet, start fresh from the Description above.
+- **Process Comments:** 2026-09-06 09:39 — Requested by the user directly after the `FREEZE-BUG-001` false-alarm investigation made clear how much faster that would have been ruled out with this visible.
 
 ### Completed
+
+#### FREEZE-BUG-001 — Gain-compensation volume jump when a released voice finishes
+
+- **Card Title:** Gain-compensation volume jump when a released voice finishes
+- **Symptom:** Found by ear while testing ADSR (`FREEZE-PLAN-004`) on a real MIDI controller: playing overlapping notes, a still-sounding voice would suddenly jump in volume (~1.6x measured) at some point after an earlier note was released - not at release-start, at some later moment.
+- **Root cause:** `VoiceManager::process_block`'s polyphony gain compensation (`1/active_count`, see `FREEZE-DONE-003`) recomputed its divisor fresh every block with no smoothing. Releasing voices are still "active" (correctly compensated for) right up until their envelope actually crosses the finish threshold and their slot is freed - at that exact instant the divisor steps (e.g. 0.5 -> 1.0 for 2 voices dropping to 1), and every *other* still-sounding voice gets that new multiplier instantly, an audible discontinuity. Confirmed by deterministic measurement: `aplaymidi` + `jack_capture` on two staggered notes showed RMS holding steady at ~0.037 while both played, then jumping to ~0.06 in the exact block where the released voice's slot freed.
+- **Fix:** `VoiceManager` now smooths the compensation multiplier itself with a one-pole filter (`GAIN_COMPENSATION_SMOOTHING_MS = 30.0`), applied once per block as a post-sum multiply on the already-mixed output rather than per-voice inside the mixing loop - mathematically identical for a constant multiplier, but it's the only way to *smooth* a value that can change between blocks. The target is read from the voice count *before* that block's voices are processed (a voice finishing partway through a block was still contributing real signal for most of it, so that block must still be compensated as if it were active - using the post-removal count would apply the new divisor retroactively to audio that still included that voice). Test: `voice::tests::gain_compensation_ramps_smoothly_when_a_voice_finishes`, which processes one sample at a time to pinpoint the exact transition sample and isolate it from the envelope's own (legitimate) ongoing decay - verified to fail with `jump=0.5` against the old unsmoothed code and pass against the fix.
+- **False-alarm follow-up worth knowing about**: after this fix, the user twice reported "the jump is back" after touching Decay/Sustain, including with just one held note. Exhaustively testing `AdsrEnvelope` itself across attack/decay/sustain combinations found zero non-monotonic behavior (mathematically can't overshoot - decay/release are both simple exponential approaches). The actual cause: unplugging and replugging the Launchkey MIDI controller during testing silently dropped its JACK connection to the plugin's MIDI input (`jack_lsp -c` showed zero connections afterward) - once reconnected, the "bug" was gone. Same category as the JACK-client-collision and stale-binary gotchas already on this board: before trusting a "still broken" report, check the physical/routing state hasn't quietly changed, not just the code.
+- **Assigned Agent:** Reason A
+- **Card Creation Date:** 2026-09-06 09:39
+- **Card Completion Note:** Complete in commit `f476036`; regression test passing (47 `freeze_dsp` tests total), user confirmed live on real overlapping notes via a Launchkey Mini MK3 controller with no jump.
+- **Process Comments:** 2026-09-06 09:39 — Prompted the user to request a MIDI-in activity indicator (note number + active voice count) in the GUI, both as a nice-to-have and as exactly the kind of diagnostic that would have made the false-alarm follow-up above faster to rule out - see `FREEZE-PLAN-006`.
 
 #### FREEZE-PLAN-005 — Freeze Point waveform display with position marker
 
