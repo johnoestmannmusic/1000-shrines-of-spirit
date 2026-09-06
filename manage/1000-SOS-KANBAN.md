@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Detailed Handoff:** `../../../0006-rust/NEXTSTEPS.md`  
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-06 13:06 by Codex A
+**Board Last Updated:** 2026-09-06 14:56 by Codex A
 
 ### Ideas
 
@@ -60,15 +60,6 @@ priority.
 _None currently open - see Completed for resolved bugs._
 
 ### Planned Features
-
-#### 0006-PLAN-002 — Source sample library and import workflow
-
-- **Card Title:** Source sample library and import workflow
-- **Description:** Build the six-slot source panel with waveforms, duration, playback, loading, editing, packaging, and clearing. Ensure imported samples update affected instruments and invalidate Fusion and loop caches safely. Match the original source metadata and comments workflow.
-- **Assigned Agent:** Unassigned
-- **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** Pending.
-- **Process Comments:** 2026-09-06 07:19 — Three bundled sources currently load without the complete library UI.
 
 #### 0006-PLAN-003 — Pattern, piano, and audition panels
 
@@ -118,6 +109,15 @@ _None currently open - see Completed for resolved bugs._
 - **Process Comments:** 2026-09-06 07:19 — Browser integration, generation cancellation, preview updates, and clean completion have been verified. 2026-09-06 12:51 — Production-worker fingerprints on the real bundled sources exactly match original Freeze, Cross-Synth, Ring Mod, and Frequency Shift; Convolve passes at 1.397% within its 2% engine tolerance, randomized Smear passes at 20.089% within its 40% statistical bound, and native real-source regression bounds pass. No discrepancy met the threshold for a Bugs card.
 
 ### Completed
+
+#### 0006-PLAN-002 — Source sample library and import workflow
+
+- **Card Title:** Source sample library and import workflow
+- **Description:** Build the six-slot source panel with waveforms, duration, playback, loading, editing, packaging, and clearing. Ensure imported samples update affected instruments and invalidate Fusion and loop caches safely. Match the original source metadata and comments workflow.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-06 07:19
+- **Card Completion Note:** Complete; six sparse source slots now support waveform and duration display, full-source preview, WAV/Ogg/MP3 loading, editable metadata, packaging, and a confirmed clear/reset workflow on native and web backends.
+- **Process Comments:** 2026-09-06 07:19 — Three bundled sources currently load without the complete library UI. 2026-09-06 14:28 — Moved from Planned Features to Assigned after the project/export milestone was completed in Rust commit `deb9e5e`. 2026-09-06 14:56 — Browser verification loaded an Ogg into empty slot 3 without shifting existing indices, saved a renamed slot, played a full source, and opened/cancelled the clear confirmation with no console warnings or errors; workspace tests, WASM check, and release build pass.
 
 #### 0006-PLAN-001 — Complete project JSON and audio exports
 
