@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Detailed Handoff:** `../../../0006-rust/NEXTSTEPS.md`  
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-06 07:19 by Codex A
+**Board Last Updated:** 2026-09-06 12:51 by Codex A
 
 ### Ideas
 
@@ -123,8 +123,8 @@ _None currently open - see Completed for resolved bugs._
 - **Description:** Compare worker and native Rust outputs with controlled original-JavaScript renders for all six algorithms. Resolve material numerical differences and then collect user listening feedback on the bundled default settings. Record accepted limits for Smear randomness and platform-specific convolution behaviour.
 - **Assigned Agent:** Codex A
 - **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** In progress; implementation and responsiveness are complete, but golden comparison and audible approval remain.
-- **Process Comments:** 2026-09-06 07:19 — Browser integration, generation cancellation, preview updates, and clean completion have been verified.
+- **Card Completion Note:** In progress; implementation, responsiveness, and golden numerical comparison are complete, but audible approval remains.
+- **Process Comments:** 2026-09-06 07:19 — Browser integration, generation cancellation, preview updates, and clean completion have been verified. 2026-09-06 12:51 — Production-worker fingerprints on the real bundled sources exactly match original Freeze, Cross-Synth, Ring Mod, and Frequency Shift; Convolve passes at 1.397% within its 2% engine tolerance, randomized Smear passes at 20.089% within its 40% statistical bound, and native real-source regression bounds pass. No discrepancy met the threshold for a Bugs card.
 
 ### Completed
 
