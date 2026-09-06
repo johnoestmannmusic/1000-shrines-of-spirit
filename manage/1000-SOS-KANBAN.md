@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Detailed Handoff:** `../../../0006-rust/NEXTSTEPS.md`  
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-06 17:40 by Codex A
+**Board Last Updated:** 2026-09-06 17:55 by Codex A
 
 ### Ideas
 
@@ -90,15 +90,6 @@ _None currently open - see Completed for resolved bugs._
 
 ### Assigned
 
-#### 0006-PLAN-003 — Pattern, piano, and audition panels
-
-- **Card Title:** Pattern, piano, and audition panels
-- **Description:** Add the pattern order view, tracker cells, follow-playhead behaviour, piano state, and noise display. Implement row, cell, and instrument audition without disturbing transport state. Use the colours, boundary lines, held values, and hover explanations documented in `PARITY.md`.
-- **Assigned Agent:** Codex A
-- **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** In progress; the complete four-channel pattern tracker, order/row navigation, mute interaction, colour tinting, and follow-playhead behavior are implemented. Piano/noise visualization and row/cell audition remain on this card.
-- **Process Comments:** 2026-09-06 07:19 — Furnace parsing and the shared song model already provide the required note data. 2026-09-06 17:40 — Moved from Planned Features to Assigned. The release browser renders the bundled 13-order × 64-row NOTE/INS/VOL/FX grid with held-instrument tints and no console warnings or errors; all 22 workspace tests and the release WASM build pass.
-
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
 
 - **Card Title:** Spectral Fusion numerical and listening validation
@@ -109,6 +100,15 @@ _None currently open - see Completed for resolved bugs._
 - **Process Comments:** 2026-09-06 07:19 — Browser integration, generation cancellation, preview updates, and clean completion have been verified. 2026-09-06 12:51 — Production-worker fingerprints on the real bundled sources exactly match original Freeze, Cross-Synth, Ring Mod, and Frequency Shift; Convolve passes at 1.397% within its 2% engine tolerance, randomized Smear passes at 20.089% within its 40% statistical bound, and native real-source regression bounds pass. No discrepancy met the threshold for a Bugs card.
 
 ### Completed
+
+#### 0006-PLAN-003 — Pattern, piano, and audition panels
+
+- **Card Title:** Pattern, piano, and audition panels
+- **Description:** Add the pattern order view, tracker cells, follow-playhead behaviour, piano state, and noise display. Implement row, cell, and instrument audition without disturbing transport state. Use the colours, boundary lines, held values, and hover explanations documented in `PARITY.md`.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-06 07:19
+- **Card Completion Note:** Complete; the four-channel tracker, order/row navigation, live piano and Noise state, trigger flashes, and independent row/cell audition now work in both playback modes.
+- **Process Comments:** 2026-09-06 07:19 — Furnace parsing and the shared song model already provide the required note data. 2026-09-06 17:40 — Moved from Planned Features to Assigned. The release browser renders the bundled 13-order × 64-row NOTE/INS/VOL/FX grid with held-instrument tints and no console warnings or errors; all 22 workspace tests and the release WASM build pass. 2026-09-06 17:55 — Live playback verified three coloured tonal keys plus the separate Noise readout. Paused cell audition left transport at 24.5 seconds, row audition sought precisely to order 3 row 8, CHIP and SAMPLER audition produced no console warnings/errors, and all 22 tests plus the release build pass.
 
 #### 0006-PLAN-002 — Source sample library and import workflow
 
