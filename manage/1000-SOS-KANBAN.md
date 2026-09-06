@@ -22,9 +22,72 @@ are a development convenience; browser behaviour and audio fidelity take
 priority.  
 **Implementation Repository:** `../../../0006-rust/`  
 **Primary Reference:** `../src/0006/index.html`  
-**Detailed Handoff:** `../../../0006-rust/NEXTSTEPS.md`  
+**Technical Handoff:** See the source-of-truth notes below.
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-06 17:55 by Codex A
+**Board Last Updated:** 2026-09-06 20:49 by Codex A
+**Source of Truth:** This project section replaces the retired
+`../../../0006-rust/NEXTSTEPS.md`. Update the relevant card and these handoff
+notes after every feature, bug fix, or material verification result.
+
+### Technical Handoff Notes
+
+- **Scope and priority:** This is a Rust/egui port of the complete 0006 browser
+  experience. Web/WASM is the production target; native playback is a
+  development convenience with accepted lower timing and audio fidelity. The
+  extension beyond the original is runtime loading of another Game Boy `.fur`
+  song with matching assets; support for other chip systems is outside the
+  current parity scope.
+- **Current implementation:** CHIP and SAMPLER transport, the Game Boy Furnace
+  parser, full sampler voice/editor behaviour, all six Spectral Fusion
+  algorithms, non-blocking browser rendering, complete Project JSON, sampler
+  WAV and sample ZIP exports, the six-slot source library, tracker/piano/noise
+  views, row/cell/instrument audition, mixer meters, and main-table instrument
+  editing are implemented. The Assigned and Planned buckets below are the
+  authoritative remaining-work list.
+- **Verification baseline:** `cargo test --workspace` passes 22 tests;
+  `cargo check -p lantern-app --target wasm32-unknown-unknown` and
+  `trunk build --release` pass. Release-browser checks cover transport,
+  sampler and Fusion editing, import/export, tracker audition, live Web Audio
+  meters, and quick instrument edits. Existing `lantern-fur` unused-code
+  warnings are known. Numerical Fusion parity is recorded in `PARITY.md`;
+  musical listening approval remains on `0006-ASGN-001`.
+- **Reference workflow:** Read `../../../0006-rust/PARITY.md` and inspect
+  `../src/0006/index.html` through a web server before changing appearance or
+  behaviour. The original is the authority, with movable egui windows an
+  accepted adaptation. A release preview can be built in `lantern-app` with
+  `trunk build --release` and served from `lantern-app/dist`; browser sessions
+  and local servers may not survive a handoff.
+- **Parser facts:** Furnace format 251 `PATN` channel indices are one byte even
+  though the prose documentation says 16-bit for format 240 and later. Trust
+  fixture bytes and the validated parser comments. On-disk note sentinels are
+  180=off, 181=release, 182=macro release, and 183=raw frequency override; do
+  not replace them with the original HTML converter's 253 note-off sentinel.
+  `INS2` macros are intentionally skipped because playback uses rendered stems
+  or samples rather than live Game Boy synthesis.
+- **Audio invariants:** Web stem looping deliberately uses Web Audio's native
+  `AudioBufferSourceNode.loop` for sample-accurate looping. Sampler playback,
+  preview, audition, and offline export share trim, transpose, ADSR, loop,
+  ping-pong, pan, polyphony, and fused-source semantics. Loop buffers use 5 ms
+  edge fades; mono/channel stealing uses an independent 8 ms cutoff. Fusion
+  DSP must remain in `fusion-worker.js`: synchronous WASM FFT work previously
+  caused multi-second UI hangs. Generation tokens reject stale worker results.
+- **Fusion facts:** The STFT is 2048 points with a 1024 hop and sine analysis /
+  synthesis windows. Saved Cross-Synth uses the legacy key
+  `spectral-blend`. The production worker matches the reference fingerprints
+  exactly for Freeze, Cross-Synth, Ring Modulate, and Frequency Shift;
+  Convolve differs by 1.397% within its browser-engine tolerance, and randomized
+  Smear passes its statistical bound. The repeatable browser comparison is
+  `../../../0006-rust/tests/fusion_web_parity.html`.
+- **Build facts:** The Trunk Rust link requires
+  `data-target-name="lantern_app"` because the crate emits both a native binary
+  and a `cdylib`. Web assets are fetched at runtime. Generated downloads must
+  retain their Blob URL briefly after clicking; immediate revocation was the
+  cause of resolved bug `0006-BUG-001`.
+- **Persistence boundary:** Full Project JSON stores the reference version-1
+  schema and audio filenames. egui storage also preserves local editor state,
+  mutes, theme, instrument display names, and colours for the bundled session.
+  Project files do not embed decoded audio bytes; source packaging remains the
+  companion workflow.
 
 ### Ideas
 
@@ -61,15 +124,6 @@ _None currently open - see Completed for resolved bugs._
 
 ### Planned Features
 
-#### 0006-PLAN-004 — Mixer meters and instrument quick editing
-
-- **Card Title:** Mixer meters and instrument quick editing
-- **Description:** Complete editable dB controls, live peak and clipping meters, and default-project mixer restoration. Add instrument colour, name, transpose, volume, source, preview, and shortcut editing to the main table. Keep edits synchronized with movable Sampler and Spectral windows.
-- **Assigned Agent:** Unassigned
-- **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** Pending.
-- **Process Comments:** 2026-09-06 07:19 — Linear gains, channel mute, master volume, preview, and editor shortcuts already exist.
-
 #### 0006-PLAN-005 — Cover art and remaining visual chrome
 
 - **Card Title:** Cover art and remaining visual chrome
@@ -101,6 +155,15 @@ _None currently open - see Completed for resolved bugs._
 
 ### Completed
 
+#### 0006-PLAN-004 — Mixer meters and instrument quick editing
+
+- **Card Title:** Mixer meters and instrument quick editing
+- **Description:** Complete editable dB controls, live peak and clipping meters, and default-project mixer restoration. Add instrument colour, name, transpose, volume, source, preview, and shortcut editing to the main table. Keep edits synchronized with movable Sampler and Spectral windows.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-06 07:19
+- **Card Completion Note:** Complete in Rust-port commit `03e5d47`; the web mixer now exposes synchronized linear and dB controls with post-gain channel/master peak meters, while the always-visible instrument table provides every reference quick edit and both movable-editor shortcuts.
+- **Process Comments:** 2026-09-06 07:19 — Linear gains, channel mute, master volume, preview, and editor shortcuts already existed. 2026-09-06 20:49 — Browser-verified live meters, clipping colour, direct dB entry, editable names/colours, transpose audition, volume/source changes, and Sampler/Spectral buttons. CHIP mode table audition uses a real matching tracker slice; SAMPLER mode uses the processed sample voice. Instrument names and colours persist through egui storage, all 22 workspace tests pass, the WASM check and release Trunk build pass, and `PARITY.md` now records completion.
+
 #### 0006-PLAN-003 — Pattern, piano, and audition panels
 
 - **Card Title:** Pattern, piano, and audition panels
@@ -126,7 +189,7 @@ _None currently open - see Completed for resolved bugs._
 - **Assigned Agent:** Codex A
 - **Card Creation Date:** 2026-09-06 07:19
 - **Card Completion Note:** Complete; full Project JSON Copy/Apply, deterministic sampler WAV rendering, and numbered PCM-WAV sample ZIP packaging work in native and web builds.
-- **Process Comments:** 2026-09-06 07:19 — Identified in `NEXTSTEPS.md` as the next implementation milestone. 2026-09-06 12:54 — Moved from Planned Features to Assigned after commit `e743c5d` completed the numerical portion of Fusion validation. 2026-09-06 13:06 — The original version-1 fixture round-trips through the shared serde schema; browser testing generated a three-sample ZIP and a 105.8-second sampler WAV in about 1.2 seconds with visible success feedback and no console warnings/errors. Default mode, mixer, mutes, metadata, sampler state, and Fusion reconstruction are now applied rather than partially ignored.
+- **Process Comments:** 2026-09-06 07:19 — Identified in the previous handoff as the next implementation milestone. 2026-09-06 12:54 — Moved from Planned Features to Assigned after commit `e743c5d` completed the numerical portion of Fusion validation. 2026-09-06 13:06 — The original version-1 fixture round-trips through the shared serde schema; browser testing generated a three-sample ZIP and a 105.8-second sampler WAV in about 1.2 seconds with visible success feedback and no console warnings/errors. Default mode, mixer, mutes, metadata, sampler state, and Fusion reconstruction are now applied rather than partially ignored.
 
 #### 0006-BUG-001 — Browser download URL revoked before consumption
 
