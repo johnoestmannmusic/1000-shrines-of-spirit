@@ -116,6 +116,13 @@ const DEFAULT_SCALE: f32 = 1.875;
 /// default made the two columns visibly mismatched.
 const GRAPH_HEIGHT: f32 = 70.0;
 
+/// Blank space around the outside of the whole editor's content, in 1x-scale
+/// points (multiplied by `scale` like everything else) - requested directly
+/// in Reaper, where content was otherwise touching the window edges.
+/// `16.0 * DEFAULT_SCALE` (1.875) is exactly 30px, matching what was asked
+/// for at the default scale.
+const EDITOR_MARGIN: f32 = 16.0;
+
 /// Light palette lifted from `src/0006/index.html`'s light-mode `:root`
 /// overrides (`--bg`/`--panel`/`--edge`/`--edge-hover`/`--ink`/`--dim`/
 /// `--surface-deep`) - this plugin's own visual reference, see
@@ -882,6 +889,7 @@ impl Plugin for PrismPlugin {
                 ResizableWindow::new("spectral_prism_window")
                     .min_size(egui::vec2(BASE_EDITOR_WIDTH as f32, BASE_EDITOR_HEIGHT as f32))
                     .show(egui_ctx, &params.editor_state, |ui| {
+                        egui::Frame::default().inner_margin(egui::Margin::same((EDITOR_MARGIN * scale) as i8)).show(ui, |ui| {
                         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                         ui.heading("SpectralPrism");
 
@@ -1008,6 +1016,7 @@ impl Plugin for PrismPlugin {
                         if let Some(error) = &state.error {
                             ui.colored_label(COLOR_ERROR, error);
                         }
+                        });
                         });
                     });
             },
