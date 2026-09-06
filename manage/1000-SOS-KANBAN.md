@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Technical Handoff:** See the source-of-truth notes below.
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-07 06:54 by Codex A
+**Board Last Updated:** 2026-09-07 07:02 by Codex A
 **Source of Truth:** This project section replaces the retired
 `../../../0006-rust/NEXTSTEPS.md`. Update the relevant card and these handoff
 notes after every feature, bug fix, or material verification result.
@@ -45,13 +45,15 @@ notes after every feature, bug fix, or material verification result.
   editing, animated cover art, reference sidebar, hover Explainer, and
   responsive stacking are implemented. The Assigned and Planned buckets below
   are the authoritative remaining-work list.
-- **Verification baseline:** `cargo test --workspace` passes 24 tests;
+- **Verification baseline:** `cargo test --workspace` passes 26 tests;
   `cargo check -p lantern-app --target wasm32-unknown-unknown` and
   `trunk build --release` pass. Release-browser checks cover transport,
   sampler and Fusion editing, import/export, tracker audition, live Web Audio
   meters, quick instrument edits, the desktop/sidebar composition, and narrow
-  stacking. Cover tests verify the 1600×1600 RGBA PNG and real tracker-note
-  scan generation. Existing `lantern-fur` unused-code warnings are known.
+  stacking, and a release bundle served below a nested URL. Cover tests verify
+  the 1600×1600 RGBA PNG and real tracker-note scan generation; folder tests
+  verify valid layout assembly and actionable missing-asset errors. Existing
+  `lantern-fur` unused-code warnings are known.
   Numerical Fusion parity is recorded in `PARITY.md`;
   musical listening approval remains on `0006-ASGN-001`.
 - **Reference workflow:** Read `../../../0006-rust/PARITY.md` and inspect
@@ -127,16 +129,18 @@ _None currently open - see Completed for resolved bugs._
 
 ### Planned Features
 
+_None currently planned; the final implementation milestone is assigned below._
+
+### Assigned
+
 #### 0006-PLAN-006 — Alternate-song loading and website deployment
 
 - **Card Title:** Alternate-song loading and website deployment
 - **Description:** Add the folder-based flow for a different Game Boy `.fur` file with matching assets. Validate browser error handling, cache paths, and hosting from a nested website route. Produce and test the final optimized WASM bundle before publishing.
-- **Assigned Agent:** Unassigned
+- **Assigned Agent:** Codex A
 - **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** Pending.
-- **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain.
-
-### Assigned
+- **Card Completion Note:** In progress in Rust-port commit `af4fdde`; folder loading and nested-route bundle preparation are implemented, while acceptance with a second real Game Boy song and live publishing remain.
+- **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain. 2026-09-07 06:56 — Moved from Planned Features to Assigned after completing visual chrome. Audited existing file-input and loader abstractions before adding folder replacement and nested-route release verification. 2026-09-07 07:02 — Added native recursive folder selection and web `webkitdirectory`, validation for exactly one supported `.fur` plus four stems and three source samples, optional Project JSON with a safe generated fallback, and atomic live-state replacement. `Trunk.toml` now emits relative JS/WASM URLs; the optimized bundle loaded successfully from `/dist/` with decoded audio and no browser warnings/errors. All 26 tests and the WASM/release builds pass. A second distinct Game Boy fixture with matching rendered assets is not present in the workspace, so that acceptance check remains open rather than being simulated with the bundled song.
 
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
 
