@@ -55,6 +55,10 @@ priority.
 - **Card Completion Note:** Pending; idea has not been scheduled.
 - **Process Comments:** 2026-09-06 07:19 — Original CSS stacks below 900 pixels, providing the starting reference.
 
+### Bugs
+
+_None currently open - see Completed for resolved bugs._
+
 ### Planned Features
 
 #### 0006-PLAN-001 — Complete project JSON and audio exports
