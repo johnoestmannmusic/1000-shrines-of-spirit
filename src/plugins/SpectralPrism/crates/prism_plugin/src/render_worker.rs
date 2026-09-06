@@ -1,5 +1,5 @@
 use arc_swap::ArcSwap;
-use freeze_dsp::render::{render_frozen_loop, LoopBufferData};
+use prism_dsp::render::{render_frozen_loop, LoopBufferData};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
@@ -120,7 +120,7 @@ impl Drop for RenderWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use freeze_dsp::render::DEFAULT_ROOT_NOTE;
+    use prism_dsp::render::DEFAULT_ROOT_NOTE;
     use std::time::{Duration, Instant};
 
     fn make_source(sample_rate: f32, seconds: f32) -> Arc<ArcSwap<Vec<Vec<f32>>>> {

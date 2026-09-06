@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/freeze_dsp", "crates/freeze_cli", "crates/freeze_plugin", "xtask"]
+members = ["crates/prism_dsp", "crates/prism_cli", "crates/prism_plugin", "xtask"]
 
 [workspace.package]
 version = "0.1.0"

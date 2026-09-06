@@ -1,5 +1,5 @@
 [package]
-name = "freeze_dsp"
+name = "prism_dsp"
 version.workspace = true
 edition.workspace = true
 

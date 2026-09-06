@@ -1,16 +1,16 @@
-//! Renders a WAV file through the SpectralFreeze algorithm for offline
+//! Renders a WAV file through the SpectralPrism plugin's Freeze algorithm for offline
 //! listening tests (Phase A - before any plugin/GUI code exists).
 //!
 //! Note: `clap` here is the Rust argument-parsing crate, unrelated to the
-//! CLAP plugin format this project will also target later in freeze_plugin.
+//! CLAP plugin format this project will also target later in prism_plugin.
 
 use clap::Parser;
-use freeze_dsp::render::{render_frozen_loop, DEFAULT_ROOT_NOTE};
-use freeze_dsp::voice::VoiceManager;
+use prism_dsp::render::{render_frozen_loop, DEFAULT_ROOT_NOTE};
+use prism_dsp::voice::VoiceManager;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "freeze_cli")]
+#[command(name = "prism_cli")]
 struct Args {
     /// Input WAV file to freeze.
     #[arg(long)]

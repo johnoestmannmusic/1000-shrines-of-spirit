@@ -1242,36 +1242,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "freeze_cli"
-version = "0.1.0"
-dependencies = [
- "clap",
- "freeze_dsp",
- "hound",
-]
-
-[[package]]
-name = "freeze_dsp"
-version = "0.1.0"
-dependencies = [
- "realfft",
-]
-
-[[package]]
-name = "freeze_plugin"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "freeze_dsp",
- "hound",
- "nih_plug",
- "nih_plug_egui",
- "rfd",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "futures-channel"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2624,6 +2594,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc0d895b311e3af9902528fbb8f928688abbd95872819320517cc24ca6b2bd08"
 dependencies = [
  "num-integer",
+]
+
+[[package]]
+name = "prism_cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "hound",
+ "prism_dsp",
+]
+
+[[package]]
+name = "prism_dsp"
+version = "0.1.0"
+dependencies = [
+ "realfft",
+]
+
+[[package]]
+name = "prism_plugin"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "hound",
+ "nih_plug",
+ "nih_plug_egui",
+ "prism_dsp",
+ "rfd",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

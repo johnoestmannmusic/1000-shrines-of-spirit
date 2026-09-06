@@ -1,5 +1,5 @@
 [package]
-name = "freeze_plugin"
+name = "prism_plugin"
 version.workspace = true
 edition.workspace = true
 
@@ -8,11 +8,11 @@ edition.workspace = true
 crate-type = ["cdylib", "lib"]
 
 [[bin]]
-name = "freeze_plugin_standalone"
+name = "prism_plugin_standalone"
 path = "src/main.rs"
 
 [dependencies]
-freeze_dsp = { path = "../freeze_dsp" }
+prism_dsp = { path = "../prism_dsp" }
 nih_plug = { workspace = true, features = ["standalone"] }
 nih_plug_egui = { workspace = true }
 arc-swap = "1"

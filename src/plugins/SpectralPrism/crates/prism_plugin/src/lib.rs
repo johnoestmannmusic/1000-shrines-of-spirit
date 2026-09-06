@@ -1,9 +1,9 @@
 mod render_worker;
 
 use arc_swap::{ArcSwap, ArcSwapOption};
-use freeze_dsp::render::{render_frozen_loop, LoopBufferData, DEFAULT_ROOT_NOTE};
-use freeze_dsp::resample::resample_linear;
-use freeze_dsp::voice::{AdsrSettings, VoiceManager};
+use prism_dsp::render::{render_frozen_loop, LoopBufferData, DEFAULT_ROOT_NOTE};
+use prism_dsp::resample::resample_linear;
+use prism_dsp::voice::{AdsrSettings, VoiceManager};
 use nih_plug::prelude::*;
 use nih_plug_egui::resizable_window::ResizableWindow;
 use nih_plug_egui::{create_egui_editor, egui, widgets, EguiState};
@@ -25,8 +25,8 @@ const NO_NOTE: u8 = 255;
 /// change and hands it to a background `RenderWorker`, which publishes the
 /// new loop into `loop_buffer` (an `ArcSwap` so the audio thread can read
 /// the latest version lock-free without ever blocking on the render).
-pub struct FreezePlugin {
-    params: Arc<FreezePluginParams>,
+pub struct PrismPlugin {
+    params: Arc<PrismPluginParams>,
     /// The audio being frozen. An `ArcSwap` (not a plain `Arc`) so the
     /// editor's "Load Sample" button can swap in newly loaded audio without
     /// touching the audio thread - `RenderWorker` always reads whatever is
@@ -34,9 +34,9 @@ pub struct FreezePlugin {
     source: Arc<ArcSwap<Vec<Vec<f32>>>>,
     /// The real file's name once the user has loaded one, `None` while
     /// still on the built-in placeholder tone. Kept on the plugin (not in
-    /// `FreezeEditorState`) specifically so it survives the editor window
+    /// `PrismEditorState`) specifically so it survives the editor window
     /// being closed and reopened within the same plugin instance -
-    /// `FreezeEditorState` is recreated fresh every time `editor()` is
+    /// `PrismEditorState` is recreated fresh every time `editor()` is
     /// called, but `source` itself (and therefore what's actually loaded)
     /// is not. Also doubles as the "[ Load Sample ]" sign's gate in
     /// `draw_freeze_point_waveform`.
@@ -181,7 +181,7 @@ fn apply_theme(ctx: &egui::Context) {
 }
 
 #[derive(Params)]
-struct FreezePluginParams {
+struct PrismPluginParams {
     #[persist = "editor-state"]
     editor_state: Arc<EguiState>,
 
@@ -191,7 +191,7 @@ struct FreezePluginParams {
     /// files - see `FREEZE-PLAN-010`). Without this, reopening a saved
     /// project or preset would restore every param correctly but silently
     /// revert to the built-in placeholder tone. Re-decoded from disk in
-    /// `FreezePlugin::initialize()`/`apply_preset()` when present - if the
+    /// `PrismPlugin::initialize()`/`apply_preset()` when present - if the
     /// file has since moved or been deleted, that just falls back to
     /// whatever's already loaded rather than failing outright.
     #[persist = "sample-path"]
@@ -226,10 +226,10 @@ fn silent_loop_buffer() -> LoopBufferData {
     LoopBufferData { channels: Vec::new(), sample_rate: 1.0, root_note: DEFAULT_ROOT_NOTE }
 }
 
-impl Default for FreezePlugin {
+impl Default for PrismPlugin {
     fn default() -> Self {
         Self {
-            params: Arc::new(FreezePluginParams::default()),
+            params: Arc::new(PrismPluginParams::default()),
             source: Arc::new(ArcSwap::new(Arc::new(Vec::new()))),
             loaded_filename: Arc::new(ArcSwapOption::from(None)),
             loop_buffer: Arc::new(ArcSwap::new(Arc::new(silent_loop_buffer()))),
@@ -245,7 +245,7 @@ impl Default for FreezePlugin {
     }
 }
 
-impl Default for FreezePluginParams {
+impl Default for PrismPluginParams {
     fn default() -> Self {
         Self {
             editor_state: EguiState::from_size(BASE_EDITOR_WIDTH, BASE_EDITOR_HEIGHT),
@@ -262,31 +262,31 @@ impl Default for FreezePluginParams {
                 .with_unit(" %"),
             attack: FloatParam::new(
                 "Attack",
-                freeze_dsp::voice::ATTACK_MS,
+                prism_dsp::voice::ATTACK_MS,
                 FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) },
             )
             .with_unit(" ms"),
             decay: FloatParam::new(
                 "Decay",
-                freeze_dsp::voice::DECAY_MS,
+                prism_dsp::voice::DECAY_MS,
                 FloatRange::Skewed { min: 1.0, max: 2000.0, factor: FloatRange::skew_factor(-2.0) },
             )
             .with_unit(" ms"),
             sustain: FloatParam::new(
                 "Sustain",
-                freeze_dsp::voice::SUSTAIN_LEVEL * 100.0,
+                prism_dsp::voice::SUSTAIN_LEVEL * 100.0,
                 FloatRange::Linear { min: 0.0, max: 100.0 },
             )
             .with_unit(" %"),
             release: FloatParam::new(
                 "Release",
-                freeze_dsp::voice::RELEASE_MS,
+                prism_dsp::voice::RELEASE_MS,
                 FloatRange::Skewed { min: 1.0, max: 5000.0, factor: FloatRange::skew_factor(-2.0) },
             )
             .with_unit(" ms"),
             velocity_sensitivity: FloatParam::new(
                 "Velocity Sensitivity",
-                freeze_dsp::voice::DEFAULT_VELOCITY_SENSITIVITY * 100.0,
+                prism_dsp::voice::DEFAULT_VELOCITY_SENSITIVITY * 100.0,
                 FloatRange::Linear { min: 0.0, max: 100.0 },
             )
             .with_unit(" %"),
@@ -373,7 +373,7 @@ fn load_and_prepare_sample(path: &Path, plugin_rate: f32) -> Result<Vec<Vec<f32>
 /// The full "a real file has just been chosen" flow, shared by the
 /// interactive file dialog (`open_sample_dialog`) and preset recall
 /// (`apply_preset`, when a preset references a sample): decode/resample it,
-/// swap it into `source`, persist the path (`FreezePluginParams::
+/// swap it into `source`, persist the path (`PrismPluginParams::
 /// sample_path`, see its doc comment) so it survives a host project
 /// save/reload, trigger a re-render at the current Freeze Point/Formant
 /// Shift/Stereo Width, and update `loaded_filename` plus any editor error
@@ -383,9 +383,9 @@ fn load_sample_from_path(
     source: &Arc<ArcSwap<Vec<Vec<f32>>>>,
     loop_buffer: &Arc<ArcSwap<LoopBufferData>>,
     trigger: &Option<RenderTrigger>,
-    params: &FreezePluginParams,
+    params: &PrismPluginParams,
     loaded_filename: &Arc<ArcSwapOption<String>>,
-    state: &mut FreezeEditorState,
+    state: &mut PrismEditorState,
 ) {
     match load_and_prepare_sample(path, loop_buffer.load().sample_rate) {
         Ok(prepared) => {
@@ -427,7 +427,7 @@ struct Preset {
 }
 
 impl Preset {
-    fn capture(params: &FreezePluginParams) -> Self {
+    fn capture(params: &PrismPluginParams) -> Self {
         Self {
             freeze_point_pct: params.freeze_point.value(),
             formant_shift_semitones: params.formant_shift.value(),
@@ -449,7 +449,7 @@ impl Preset {
 /// panicking - there's nowhere sensible to fall back to.
 fn presets_dir() -> Option<PathBuf> {
     let home = std::env::var_os("HOME")?;
-    let dir = PathBuf::from(home).join(".config").join("SpectralFreeze").join("presets");
+    let dir = PathBuf::from(home).join(".config").join("SpectralPrism").join("presets");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
 }
@@ -487,13 +487,13 @@ fn load_preset(dir: &Path, name: &str) -> Result<Preset, String> {
 
 /// GUI-thread-only state for the editor - not shared with the audio thread
 /// and not persisted. Which file is loaded lives on the plugin itself
-/// (`FreezePlugin::loaded_filename`) instead, so it survives the editor
+/// (`PrismPlugin::loaded_filename`) instead, so it survives the editor
 /// window being closed and reopened; only the load-error message and the
 /// preset-browser's own UI state (fine to forget when the editor is
 /// reopened - they're just a cursor position and a text field, not sound-
 /// affecting state) stay here.
 #[derive(Default)]
-struct FreezeEditorState {
+struct PrismEditorState {
     error: Option<String>,
     /// Name of the preset last loaded/saved, if any - drives the combo
     /// box's displayed selection and Prev/Next's starting point.
@@ -752,8 +752,8 @@ fn draw_adsr_graph(
     }
 }
 
-impl Plugin for FreezePlugin {
-    const NAME: &'static str = "SpectralFreeze";
+impl Plugin for PrismPlugin {
+    const NAME: &'static str = "SpectralPrism";
     const VENDOR: &'static str = "John Oestmann";
     const URL: &'static str = "https://johnoestmannmusic.com";
     const EMAIL: &'static str = "contact@johnoestmannmusic.com";
@@ -787,7 +787,7 @@ impl Plugin for FreezePlugin {
 
         create_egui_editor(
             self.params.editor_state.clone(),
-            FreezeEditorState::default(),
+            PrismEditorState::default(),
             |ctx, _state| apply_theme(ctx),
             move |egui_ctx, setter, state| {
                 // GUI scaling: the corner of `ResizableWindow` below lets the
@@ -812,7 +812,7 @@ impl Plugin for FreezePlugin {
                 // before anything is loaded) and the "Load Sample..." button
                 // below it (always available) - both just need to trigger the
                 // same file dialog / decode / re-render flow.
-                let open_sample_dialog = |state: &mut FreezeEditorState| {
+                let open_sample_dialog = |state: &mut PrismEditorState| {
                     if let Some(path) = rfd::FileDialog::new().add_filter("WAV", &["wav", "WAV"]).pick_file() {
                         load_sample_from_path(&path, &source, &loop_buffer, &trigger, &params, &loaded_filename, state);
                     }
@@ -826,7 +826,7 @@ impl Plugin for FreezePlugin {
                 // dialog so both paths persist `sample_path` and re-render
                 // identically. A preset saved without a sample (`None`)
                 // leaves whatever's currently loaded untouched.
-                let apply_preset = |preset: &Preset, state: &mut FreezeEditorState| {
+                let apply_preset = |preset: &Preset, state: &mut PrismEditorState| {
                     let set = |param: &FloatParam, value: f32| {
                         setter.begin_set_parameter(param);
                         setter.set_parameter(param, value);
@@ -845,17 +845,17 @@ impl Plugin for FreezePlugin {
                     }
                 };
 
-                ResizableWindow::new("spectral_freeze_window")
+                ResizableWindow::new("spectral_prism_window")
                     .min_size(egui::vec2(BASE_EDITOR_WIDTH as f32, BASE_EDITOR_HEIGHT as f32))
                     .show(egui_ctx, &params.editor_state, |ui| {
-                        ui.heading("SpectralFreeze");
+                        ui.heading("SpectralPrism");
 
                         let presets_dir = presets_dir();
                         let preset_names = presets_dir.as_deref().map(list_presets).unwrap_or_default();
                         let current_preset_idx =
                             state.selected_preset.as_ref().and_then(|name| preset_names.iter().position(|n| n == name));
 
-                        let load_preset_at = |idx: usize, state: &mut FreezeEditorState| {
+                        let load_preset_at = |idx: usize, state: &mut PrismEditorState| {
                             let (Some(name), Some(dir)) = (preset_names.get(idx), &presets_dir) else { return };
                             match load_preset(dir, name) {
                                 Ok(preset) => {
@@ -873,7 +873,7 @@ impl Plugin for FreezePlugin {
                                 load_preset_at(idx, state);
                             }
                             let combo_label = state.selected_preset.as_deref().unwrap_or("(no preset)");
-                            egui::ComboBox::from_id_salt("spectral_freeze_preset_combo").selected_text(combo_label).show_ui(
+                            egui::ComboBox::from_id_salt("spectral_prism_preset_combo").selected_text(combo_label).show_ui(
                                 ui,
                                 |ui| {
                                     for (idx, name) in preset_names.iter().enumerate() {
@@ -995,7 +995,7 @@ impl Plugin for FreezePlugin {
                 self.loaded_filename.store(path.file_name().map(|n| Arc::new(n.to_string_lossy().into_owned())));
             }
             Some((path, Err(e))) => {
-                nih_log!("SpectralFreeze: couldn't restore sample from {}: {e}", path.display());
+                nih_log!("SpectralPrism: couldn't restore sample from {}: {e}", path.display());
                 self.source.store(Arc::new(vec![synthetic_source(sample_rate, 1.0)]));
                 self.loaded_filename.store(None);
             }
@@ -1116,7 +1116,7 @@ impl Plugin for FreezePlugin {
     }
 }
 
-impl ClapPlugin for FreezePlugin {
+impl ClapPlugin for PrismPlugin {
     const CLAP_ID: &'static str = "com.johnoestmannmusic.spectral-prism";
     const CLAP_DESCRIPTION: Option<&'static str> =
         Some("Freezes a spectral snapshot of a sample into a sustained pad/drone");
@@ -1129,7 +1129,7 @@ impl ClapPlugin for FreezePlugin {
     ];
 }
 
-impl Vst3Plugin for FreezePlugin {
+impl Vst3Plugin for PrismPlugin {
     // Deliberately different from the old "SpectralFreeze01" - this is a
     // rename (SpectralPrism), not just a relabeling, and a new class ID is
     // the correct way to signal that to a host (a host distinguishes VST3
@@ -1140,8 +1140,8 @@ impl Vst3Plugin for FreezePlugin {
         &[Vst3SubCategory::Instrument, Vst3SubCategory::Synth];
 }
 
-nih_export_clap!(FreezePlugin);
-nih_export_vst3!(FreezePlugin);
+nih_export_clap!(PrismPlugin);
+nih_export_vst3!(PrismPlugin);
 
 #[cfg(test)]
 mod preset_tests {
@@ -1154,7 +1154,7 @@ mod preset_tests {
     /// for that to matter.
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
-            "spectralfreeze_test_{name}_{}",
+            "spectralprism_test_{name}_{}",
             std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
         ));
         std::fs::create_dir_all(&dir).expect("failed to create temp test dir");
@@ -1220,7 +1220,7 @@ mod preset_tests {
 
     #[test]
     fn list_presets_on_missing_directory_returns_empty() {
-        let dir = std::env::temp_dir().join("spectralfreeze_test_definitely_does_not_exist");
+        let dir = std::env::temp_dir().join("spectralprism_test_definitely_does_not_exist");
         assert!(list_presets(&dir).is_empty());
     }
 

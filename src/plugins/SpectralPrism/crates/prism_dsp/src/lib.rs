@@ -1,4 +1,4 @@
-//! Pure-Rust DSP core for the SpectralFreeze plugin. No dependency on audio
+//! Pure-Rust DSP core for the SpectralPrism plugin. No dependency on audio
 //! hardware, a DAW host, or nih-plug - every algorithm here is a plain
 //! function/struct over `Vec<f32>`/`&[f32]` that `cargo test` can verify
 //! numerically. Ports the phase-vocoder freeze + cepstral formant-shift
