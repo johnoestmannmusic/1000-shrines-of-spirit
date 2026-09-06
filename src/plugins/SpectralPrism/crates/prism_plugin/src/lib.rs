@@ -42,6 +42,12 @@ pub struct PrismPlugin {
     /// `draw_freeze_point_waveform`.
     loaded_filename: Arc<ArcSwapOption<String>>,
     loop_buffer: Arc<ArcSwap<LoopBufferData>>,
+    /// Exists from construction, independent of `worker` (which is only
+    /// spawned once `initialize()` runs) - see `RenderWorker::spawn`'s doc
+    /// comment for why that independence matters. The editor captures a
+    /// clone of *this*, not something derived from `worker`, so it can
+    /// trigger a render even if it was created before `initialize()` ran.
+    trigger: RenderTrigger,
     worker: Option<RenderWorker>,
     voices: VoiceManager,
     sample_rate: f32,
@@ -92,13 +98,23 @@ const RENDER_THROTTLE_MS: f32 = 100.0;
 /// at `DEFAULT_SCALE` times this (see `EguiState::from_size` below), not at
 /// this size directly - this is just the floor `ResizableWindow`'s
 /// `min_size` won't let it shrink past.
-const BASE_EDITOR_WIDTH: u32 = 620;
-const BASE_EDITOR_HEIGHT: u32 = 560;
+/// Widened and shortened from an earlier (620x560) guess, which was too
+/// narrow for the two-column layout at scale (elements got cut off
+/// horizontally) while leaving too much unused vertical space.
+const BASE_EDITOR_WIDTH: u32 = 800;
+const BASE_EDITOR_HEIGHT: u32 = 460;
 /// The editor opens at this multiple of the base size by default (matching
 /// `apply_gui_scale`'s scale factor, since the two are computed from the
-/// same base) - requested directly ("too small to read" at 1x). Still
-/// freely resizable larger (or back down to 1x) afterward via the corner.
-const DEFAULT_SCALE: f32 = 1.5;
+/// same base) - requested directly ("too small to read" at 1x, then a
+/// further +25% on top of the first bump). Still freely resizable larger
+/// (or back down to 1x) afterward via the corner.
+const DEFAULT_SCALE: f32 = 1.875;
+
+/// Shared by `draw_freeze_point_waveform` and `draw_adsr_graph` so the two
+/// side-by-side graph boxes always line up at the same height, regardless
+/// of scale - requested directly after the ADSR graph's own (taller) 90.0
+/// default made the two columns visibly mismatched.
+const GRAPH_HEIGHT: f32 = 70.0;
 
 /// Light palette lifted from `src/0006/index.html`'s light-mode `:root`
 /// overrides (`--bg`/`--panel`/`--edge`/`--edge-hover`/`--ink`/`--dim`/
@@ -249,6 +265,7 @@ impl Default for PrismPlugin {
             source: Arc::new(ArcSwap::new(Arc::new(Vec::new()))),
             loaded_filename: Arc::new(ArcSwapOption::from(None)),
             loop_buffer: Arc::new(ArcSwap::new(Arc::new(silent_loop_buffer()))),
+            trigger: RenderTrigger::new(),
             worker: None,
             voices: VoiceManager::new(1.0, DEFAULT_ROOT_NOTE),
             sample_rate: 1.0,
@@ -401,7 +418,7 @@ fn load_sample_from_path(
     path: &Path,
     source: &Arc<ArcSwap<Vec<Vec<f32>>>>,
     loop_buffer: &Arc<ArcSwap<LoopBufferData>>,
-    trigger: &Option<RenderTrigger>,
+    trigger: &RenderTrigger,
     params: &PrismPluginParams,
     loaded_filename: &Arc<ArcSwapOption<String>>,
     state: &mut PrismEditorState,
@@ -410,13 +427,11 @@ fn load_sample_from_path(
         Ok(prepared) => {
             source.store(Arc::new(prepared));
             *params.sample_path.lock().unwrap() = Some(path.to_path_buf());
-            if let Some(trigger) = trigger {
-                trigger.request_render(RenderRequest {
-                    freeze_point_pct: params.freeze_point.value(),
-                    formant_shift_semitones: params.formant_shift.value(),
-                    stereo_width_pct: params.stereo_width.value(),
-                });
-            }
+            trigger.request_render(RenderRequest {
+                freeze_point_pct: params.freeze_point.value(),
+                formant_shift_semitones: params.formant_shift.value(),
+                stereo_width_pct: params.stereo_width.value(),
+            });
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
             loaded_filename.store(name.map(Arc::new));
             state.error = None;
@@ -581,7 +596,7 @@ fn draw_freeze_point_waveform(
     has_loaded_sample: bool,
     scale: f32,
 ) -> bool {
-    let desired_size = egui::vec2(ui.available_width(), 70.0 * scale);
+    let desired_size = egui::vec2(ui.available_width(), GRAPH_HEIGHT * scale);
     let painter = ui.painter().clone();
 
     if !has_loaded_sample {
@@ -677,7 +692,7 @@ fn draw_adsr_graph(
     setter: &ParamSetter,
     scale: f32,
 ) {
-    let desired_size = egui::vec2(ui.available_width(), 90.0 * scale);
+    let desired_size = egui::vec2(ui.available_width(), GRAPH_HEIGHT * scale);
     let (rect, _response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 2.0, COLOR_SURFACE_DEEP);
@@ -799,7 +814,7 @@ impl Plugin for PrismPlugin {
         let params = self.params.clone();
         let source = self.source.clone();
         let loop_buffer = self.loop_buffer.clone();
-        let trigger = self.worker.as_ref().map(|worker| worker.trigger());
+        let trigger = self.trigger.clone();
         let last_note = self.last_note.clone();
         let active_voice_count = self.active_voice_count.clone();
         let loaded_filename = self.loaded_filename.clone();
@@ -1049,8 +1064,13 @@ impl Plugin for PrismPlugin {
         )));
         self.last_requested = request;
 
-        self.worker =
-            Some(RenderWorker::spawn(self.source.clone(), sample_rate, DEFAULT_ROOT_NOTE, self.loop_buffer.clone()));
+        self.worker = Some(RenderWorker::spawn(
+            self.trigger.clone(),
+            self.source.clone(),
+            sample_rate,
+            DEFAULT_ROOT_NOTE,
+            self.loop_buffer.clone(),
+        ));
         self.voices = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
         self.sample_rate = sample_rate;
         self.pending_request = None;
@@ -1088,9 +1108,7 @@ impl Plugin for PrismPlugin {
         self.throttle_countdown -= buffer.samples() as i64;
         if self.throttle_countdown <= 0 {
             if let Some(request) = self.pending_request.take() {
-                if let Some(worker) = &self.worker {
-                    worker.request_render(request);
-                }
+                self.trigger.request_render(request);
                 self.last_requested = request;
             }
             self.throttle_countdown = ((RENDER_THROTTLE_MS / 1000.0) * self.sample_rate) as i64;

@@ -28,11 +28,25 @@ pub struct RenderTrigger {
 }
 
 impl RenderTrigger {
+    /// Creates a standalone mailbox, independent of any `RenderWorker` -
+    /// see `RenderWorker::spawn`'s doc comment for why this independence
+    /// matters (a request sent before the worker thread even exists yet is
+    /// simply the first thing it processes once it does).
+    pub fn new() -> Self {
+        Self { pending: Arc::new((Mutex::new(None), Condvar::new())) }
+    }
+
     /// Overwrites any not-yet-started pending request with this one.
     pub fn request_render(&self, request: RenderRequest) {
         let (lock, cvar) = &*self.pending;
         *lock.lock().unwrap() = Some(request);
         cvar.notify_one();
+    }
+}
+
+impl Default for RenderTrigger {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -52,13 +66,29 @@ pub struct RenderWorker {
 }
 
 impl RenderWorker {
+    /// Spawns the background thread reusing `trigger`'s own mailbox rather
+    /// than creating a fresh one - so a `RenderTrigger` created up front
+    /// (e.g. `PrismPlugin::default()`, before `initialize()` has spawned
+    /// this worker at all) and handed to the editor keeps working
+    /// regardless of whether the editor or `initialize()` runs first. A
+    /// request sent before this thread exists just sits in the mailbox
+    /// (`pending` starts `Some` in that case, not `None`) and is the first
+    /// thing the loop below picks up once it does start. This is exactly
+    /// what closed the real bug this fixes: nih-plug hosts aren't
+    /// guaranteed to call `initialize()` before creating the editor, so a
+    /// `RenderTrigger` captured only from `self.worker` (`None` until
+    /// `initialize()` runs) could end up permanently unusable for a given
+    /// editor session - loading a sample would swap the source in but never
+    /// actually trigger a re-render, silently continuing to play whatever
+    /// was frozen before.
     pub fn spawn(
+        trigger: RenderTrigger,
         source: Arc<ArcSwap<Vec<Vec<f32>>>>,
         sample_rate: f32,
         root_note: u8,
         output: Arc<ArcSwap<LoopBufferData>>,
     ) -> Self {
-        let pending = Arc::new((Mutex::new(None::<RenderRequest>), Condvar::new()));
+        let pending = trigger.pending.clone();
         let stop = Arc::new(AtomicBool::new(false));
 
         let pending_thread = pending.clone();
@@ -90,18 +120,7 @@ impl RenderWorker {
             }
         });
 
-        Self { trigger: RenderTrigger { pending }, stop, handle: Some(handle) }
-    }
-
-    /// A cheap-to-clone handle that can request a render without holding
-    /// (or being able to stop) the worker itself.
-    pub fn trigger(&self) -> RenderTrigger {
-        self.trigger.clone()
-    }
-
-    /// Overwrites any not-yet-started pending request with this one.
-    pub fn request_render(&self, request: RenderRequest) {
-        self.trigger.request_render(request);
+        Self { trigger, stop, handle: Some(handle) }
     }
 }
 
@@ -152,11 +171,38 @@ mod tests {
         })));
         assert!(output.load().channels.is_empty());
 
-        let worker = RenderWorker::spawn(make_source(sample_rate, 1.0), sample_rate, DEFAULT_ROOT_NOTE, output.clone());
-        worker.request_render(RenderRequest { freeze_point_pct: 50.0, formant_shift_semitones: 0.0, stereo_width_pct: 30.0 });
+        let trigger = RenderTrigger::new();
+        let _worker = RenderWorker::spawn(trigger.clone(), make_source(sample_rate, 1.0), sample_rate, DEFAULT_ROOT_NOTE, output.clone());
+        trigger.request_render(RenderRequest { freeze_point_pct: 50.0, formant_shift_semitones: 0.0, stereo_width_pct: 30.0 });
 
         assert!(wait_for_render(&output, Duration::from_secs(2)), "worker did not publish a render in time");
         assert_eq!(output.load().channels.len(), 2, "render_frozen_loop always outputs stereo");
+    }
+
+    #[test]
+    fn request_sent_before_spawn_is_still_processed() {
+        // Regression test for a real bug: a request sent through a
+        // `RenderTrigger` created up front (e.g. `PrismPlugin::default()`)
+        // must still get processed even if `RenderWorker::spawn` (which
+        // reuses that same trigger's mailbox, see its doc comment) hasn't
+        // been called yet - this is exactly what happens if a host creates
+        // the editor before calling `initialize()` (which is what actually
+        // spawns the worker). Before the trigger/worker were decoupled, the
+        // editor could only ever capture a trigger from an already-`Some`
+        // `self.worker`, so a request made this early was simply lost.
+        let sample_rate = 48000.0;
+        let trigger = RenderTrigger::new();
+        trigger.request_render(RenderRequest { freeze_point_pct: 50.0, formant_shift_semitones: 0.0, stereo_width_pct: 30.0 });
+
+        let output = Arc::new(ArcSwap::new(Arc::new(LoopBufferData {
+            channels: Vec::new(),
+            sample_rate,
+            root_note: DEFAULT_ROOT_NOTE,
+        })));
+        let _worker = RenderWorker::spawn(trigger, make_source(sample_rate, 1.0), sample_rate, DEFAULT_ROOT_NOTE, output.clone());
+
+        assert!(wait_for_render(&output, Duration::from_secs(2)), "the pre-spawn request was never processed");
+        assert_eq!(output.load().channels.len(), 2);
     }
 
     #[test]
@@ -168,11 +214,12 @@ mod tests {
             root_note: DEFAULT_ROOT_NOTE,
         })));
 
-        let worker = RenderWorker::spawn(make_source(sample_rate, 1.0), sample_rate, DEFAULT_ROOT_NOTE, output.clone());
+        let trigger = RenderTrigger::new();
+        let _worker = RenderWorker::spawn(trigger.clone(), make_source(sample_rate, 1.0), sample_rate, DEFAULT_ROOT_NOTE, output.clone());
         // Fire a burst of superseding requests - the mailbox should collapse
         // these down rather than queueing every one of them.
         for freeze_point_pct in [10.0, 20.0, 30.0, 40.0, 50.0] {
-            worker.request_render(RenderRequest { freeze_point_pct, formant_shift_semitones: 0.0, stereo_width_pct: 0.0 });
+            trigger.request_render(RenderRequest { freeze_point_pct, formant_shift_semitones: 0.0, stereo_width_pct: 0.0 });
         }
 
         assert!(wait_for_render(&output, Duration::from_secs(2)), "worker did not publish a render in time");
@@ -196,21 +243,21 @@ mod tests {
             root_note: DEFAULT_ROOT_NOTE,
         })));
 
-        let worker = RenderWorker::spawn(source.clone(), sample_rate, DEFAULT_ROOT_NOTE, output.clone());
+        let trigger = RenderTrigger::new();
+        let _worker = RenderWorker::spawn(trigger.clone(), source.clone(), sample_rate, DEFAULT_ROOT_NOTE, output.clone());
         let request = RenderRequest { freeze_point_pct: 50.0, formant_shift_semitones: 0.0, stereo_width_pct: 0.0 };
-        worker.request_render(request);
+        trigger.request_render(request);
         assert!(wait_for_render(&output, Duration::from_secs(2)), "worker did not publish the first render in time");
         let first_len = output.load().channels[0].len();
 
         // Swap in a much longer source (loop length scales with source
-        // length up to the 8s cap) and request again via a cloned trigger,
-        // mirroring how the GUI thread would use it.
+        // length up to the 8s cap) and request again via the same cloned
+        // trigger, mirroring how the GUI thread would use it.
         let longer_len = (sample_rate * 6.0) as usize;
         let longer_source: Vec<f32> =
             (0..longer_len).map(|i| (i as f32 / sample_rate * 220.0 * std::f32::consts::TAU).sin()).collect();
         source.store(Arc::new(vec![longer_source]));
 
-        let trigger = worker.trigger();
         // Force a fresh publish to detect: clear the output first so we can
         // tell a *new* render landed rather than reading the still-valid
         // previous one during the wait.
