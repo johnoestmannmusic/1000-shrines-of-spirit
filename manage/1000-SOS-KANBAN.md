@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Technical Handoff:** See the source-of-truth notes below.
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-06 20:54 by Codex A
+**Board Last Updated:** 2026-09-07 06:54 by Codex A
 **Source of Truth:** This project section replaces the retired
 `../../../0006-rust/NEXTSTEPS.md`. Update the relevant card and these handoff
 notes after every feature, bug fix, or material verification result.
@@ -41,15 +41,18 @@ notes after every feature, bug fix, or material verification result.
   parser, full sampler voice/editor behaviour, all six Spectral Fusion
   algorithms, non-blocking browser rendering, complete Project JSON, sampler
   WAV and sample ZIP exports, the six-slot source library, tracker/piano/noise
-  views, row/cell/instrument audition, mixer meters, and main-table instrument
-  editing are implemented. The Assigned and Planned buckets below are the
-  authoritative remaining-work list.
-- **Verification baseline:** `cargo test --workspace` passes 22 tests;
+  views, row/cell/instrument audition, mixer meters, main-table instrument
+  editing, animated cover art, reference sidebar, hover Explainer, and
+  responsive stacking are implemented. The Assigned and Planned buckets below
+  are the authoritative remaining-work list.
+- **Verification baseline:** `cargo test --workspace` passes 24 tests;
   `cargo check -p lantern-app --target wasm32-unknown-unknown` and
   `trunk build --release` pass. Release-browser checks cover transport,
   sampler and Fusion editing, import/export, tracker audition, live Web Audio
-  meters, and quick instrument edits. Existing `lantern-fur` unused-code
-  warnings are known. Numerical Fusion parity is recorded in `PARITY.md`;
+  meters, quick instrument edits, the desktop/sidebar composition, and narrow
+  stacking. Cover tests verify the 1600×1600 RGBA PNG and real tracker-note
+  scan generation. Existing `lantern-fur` unused-code warnings are known.
+  Numerical Fusion parity is recorded in `PARITY.md`;
   musical listening approval remains on `0006-ASGN-001`.
 - **Reference workflow:** Read `../../../0006-rust/PARITY.md` and inspect
   `../src/0006/index.html` through a web server before changing appearance or
@@ -135,15 +138,6 @@ _None currently open - see Completed for resolved bugs._
 
 ### Assigned
 
-#### 0006-PLAN-005 — Cover art and remaining visual chrome
-
-- **Card Title:** Cover art and remaining visual chrome
-- **Description:** Recreate the animated dithered CD, Matrix field, trigger arcs, sidebar panels, and compact two-column page composition. Add the 1600×1600 cover export and responsive stacking used by the reference. Preserve the coarse pixel structure and both documented palettes.
-- **Assigned Agent:** Codex A
-- **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** In progress.
-- **Process Comments:** 2026-09-06 07:19 — Font, palettes, compact controls, and movable windows establish the current visual foundation. 2026-09-06 20:54 — Moved from Planned Features to Assigned. Re-reading the reference cover renderer and sidebar cards before implementation; browser/WASM remains the acceptance target.
-
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
 
 - **Card Title:** Spectral Fusion numerical and listening validation
@@ -154,6 +148,15 @@ _None currently open - see Completed for resolved bugs._
 - **Process Comments:** 2026-09-06 07:19 — Browser integration, generation cancellation, preview updates, and clean completion have been verified. 2026-09-06 12:51 — Production-worker fingerprints on the real bundled sources exactly match original Freeze, Cross-Synth, Ring Mod, and Frequency Shift; Convolve passes at 1.397% within its 2% engine tolerance, randomized Smear passes at 20.089% within its 40% statistical bound, and native real-source regression bounds pass. No discrepancy met the threshold for a Bugs card.
 
 ### Completed
+
+#### 0006-PLAN-005 — Cover art and remaining visual chrome
+
+- **Card Title:** Cover art and remaining visual chrome
+- **Description:** Recreate the animated dithered CD, Matrix field, trigger arcs, sidebar panels, and compact two-column page composition. Add the 1600×1600 cover export and responsive stacking used by the reference. Preserve the coarse pixel structure and both documented palettes.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-06 07:19
+- **Card Completion Note:** Complete in Rust-port commit `6ea1f89`; the app now has the animated pixel cover, reference sidebar, live Explainer, responsive composition, and cover PNG export.
+- **Process Comments:** 2026-09-06 07:19 — Font, palettes, compact controls, and movable windows established the visual foundation. 2026-09-06 20:54 — Moved from Planned Features to Assigned and re-read the reference renderer and sidebar implementation. 2026-09-07 06:54 — Implemented the deterministic 32×32 Matrix field, four-second spinning steel CD, instrument-coloured tracker-note scans, nearest-neighbour 1600×1600 RGBA PNG export, comments/timing/chips/license cards, sidebar mixer, and hover explanations for reference cards, tracker channels/rows/cells, and instrument names. The 300 px desktop sidebar and under-900 px stacked layout were browser-verified; all 24 tests, the WASM check, and release Trunk build pass.
 
 #### 0006-PLAN-004 — Mixer meters and instrument quick editing
 
