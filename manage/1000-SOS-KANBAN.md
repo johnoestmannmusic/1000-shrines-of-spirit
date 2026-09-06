@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Detailed Handoff:** `../../../0006-rust/NEXTSTEPS.md`  
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-06 12:54 by Codex A
+**Board Last Updated:** 2026-09-06 13:06 by Codex A
 
 ### Ideas
 
@@ -108,15 +108,6 @@ _None currently open - see Completed for resolved bugs._
 
 ### Assigned
 
-#### 0006-PLAN-001 — Complete project JSON and audio exports
-
-- **Card Title:** Complete project JSON and audio exports
-- **Description:** Implement the original complete project schema rather than extending the current local-settings subset. Add compatible JSON import/export plus sampler WAV and numbered-sample ZIP generation. Preserve legacy field names, null source slots, metadata, and referenced audio filenames.
-- **Assigned Agent:** Codex A
-- **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** In progress; numerical Fusion validation is complete and schema/export implementation has started.
-- **Process Comments:** 2026-09-06 07:19 — Identified in `NEXTSTEPS.md` as the next implementation milestone. 2026-09-06 12:54 — Moved from Planned Features to Assigned after commit `e743c5d` completed the numerical portion of Fusion validation.
-
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
 
 - **Card Title:** Spectral Fusion numerical and listening validation
@@ -127,6 +118,37 @@ _None currently open - see Completed for resolved bugs._
 - **Process Comments:** 2026-09-06 07:19 — Browser integration, generation cancellation, preview updates, and clean completion have been verified. 2026-09-06 12:51 — Production-worker fingerprints on the real bundled sources exactly match original Freeze, Cross-Synth, Ring Mod, and Frequency Shift; Convolve passes at 1.397% within its 2% engine tolerance, randomized Smear passes at 20.089% within its 40% statistical bound, and native real-source regression bounds pass. No discrepancy met the threshold for a Bugs card.
 
 ### Completed
+
+#### 0006-PLAN-001 — Complete project JSON and audio exports
+
+- **Card Title:** Complete project JSON and audio exports
+- **Description:** Implement the original complete project schema rather than extending the current local-settings subset. Add compatible JSON import/export plus sampler WAV and numbered-sample ZIP generation. Preserve legacy field names, null source slots, metadata, and referenced audio filenames.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-06 07:19
+- **Card Completion Note:** Complete; full Project JSON Copy/Apply, deterministic sampler WAV rendering, and numbered PCM-WAV sample ZIP packaging work in native and web builds.
+- **Process Comments:** 2026-09-06 07:19 — Identified in `NEXTSTEPS.md` as the next implementation milestone. 2026-09-06 12:54 — Moved from Planned Features to Assigned after commit `e743c5d` completed the numerical portion of Fusion validation. 2026-09-06 13:06 — The original version-1 fixture round-trips through the shared serde schema; browser testing generated a three-sample ZIP and a 105.8-second sampler WAV in about 1.2 seconds with visible success feedback and no console warnings/errors. Default mode, mixer, mutes, metadata, sampler state, and Fusion reconstruction are now applied rather than partially ignored.
+
+#### 0006-BUG-001 — Browser download URL revoked before consumption
+
+- **Card Title:** Browser download URL revoked before consumption
+- **Symptom:** The initial browser export implementation could report a successful sample package while the in-app browser did not accept a corresponding download event. This affected generated ZIP and WAV files that use temporary Blob URLs. Static assets and native save dialogs were unaffected.
+- **Root cause:** The Rust download helper revoked its object URL in the same JavaScript task immediately after clicking the temporary anchor. A browser may consume the click asynchronously, by which point the URL is already invalid.
+- **Fix approach:** Keep the Blob URL alive for one second after the click, matching the delayed cleanup in the original HTML, then revoke it through a one-shot callback.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-06 13:01
+- **Card Completion Note:** Resolved and browser-verified; package and sampler-WAV actions complete with visible success feedback and no console error.
+- **Process Comments:** 2026-09-06 13:02 — Found during release-browser verification of `0006-PLAN-001`; fixed immediately before milestone sign-off.
+
+#### 0006-BUG-002 — Project JSON controls clipped below viewport
+
+- **Card Title:** Project JSON controls clipped below viewport
+- **Symptom:** The first movable Project JSON window allowed its long multiline editor to grow past the browser viewport, leaving Copy and Apply unavailable below the canvas edge. The JSON itself generated correctly, but the import workflow was not usable at the tested window size. Resizing the outer browser was an avoidable workaround.
+- **Root cause:** The editor was placed directly in the window with a large requested row count and no clipping scroll container. egui honored the text editor's content size beyond the available vertical space.
+- **Fix approach:** Place the multiline editor inside a height-limited vertical ScrollArea so the JSON scrolls independently and the Copy/Apply row remains inside the movable window.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-06 13:04
+- **Card Completion Note:** Resolved; the editor now has a bounded scrolling region and the action row remains part of the visible window layout.
+- **Process Comments:** 2026-09-06 13:05 — Found while visually testing the release WASM build after Project JSON generation passed.
 
 #### 0006-DONE-001 — Rust workspace and Furnace Game Boy parser
 
