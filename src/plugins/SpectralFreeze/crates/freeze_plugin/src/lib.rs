@@ -8,7 +8,12 @@ use nih_plug::prelude::*;
 use nih_plug_egui::{create_egui_editor, egui, widgets, EguiState};
 use render_worker::{RenderRequest, RenderWorker};
 use std::path::Path;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+
+/// Sentinel for "no note has been received yet" in `last_note`, distinct from
+/// any real MIDI note number (0-127).
+const NO_NOTE: u8 = 255;
 
 /// The loop buffer is baked from a source sample (the built-in placeholder
 /// tone until a real file is loaded via the editor's "Load Sample" button)
@@ -42,6 +47,16 @@ pub struct FreezePlugin {
     /// Counts down in samples; a new render is only actually requested once
     /// this reaches zero. See `RENDER_THROTTLE_MS` for why this exists.
     throttle_countdown: i64,
+    /// Last MIDI note number received (`NO_NOTE` until the first one
+    /// arrives), and the voice count read after this block's
+    /// `VoiceManager::process_block` call - so a voice that just finished
+    /// this block is already reflected. Shared with the editor via `Arc` so
+    /// the GUI can poll them each frame without touching the audio thread,
+    /// matching the pattern nih-plug's own `gain_gui_egui` example uses for
+    /// its peak meter. Purely a diagnostic display (see FREEZE-BUG-001's
+    /// false-alarm follow-up) - not read anywhere in the DSP path itself.
+    last_note: Arc<AtomicU8>,
+    active_voice_count: Arc<AtomicU8>,
 }
 
 /// Minimum spacing between actual render requests, regardless of how often
@@ -103,6 +118,8 @@ impl Default for FreezePlugin {
             last_requested: RenderRequest { freeze_point_pct: 50.0, formant_shift_semitones: 0.0, stereo_width_pct: 30.0 },
             pending_request: None,
             throttle_countdown: 0,
+            last_note: Arc::new(AtomicU8::new(NO_NOTE)),
+            active_voice_count: Arc::new(AtomicU8::new(0)),
         }
     }
 }
@@ -441,6 +458,8 @@ impl Plugin for FreezePlugin {
         let source = self.source.clone();
         let loop_buffer = self.loop_buffer.clone();
         let trigger = self.worker.as_ref().map(|worker| worker.trigger());
+        let last_note = self.last_note.clone();
+        let active_voice_count = self.active_voice_count.clone();
 
         create_egui_editor(
             self.params.editor_state.clone(),
@@ -449,6 +468,11 @@ impl Plugin for FreezePlugin {
             move |egui_ctx, setter, state| {
                 egui::CentralPanel::default().show(egui_ctx, |ui| {
                     ui.heading("SpectralFreeze");
+
+                    let note = last_note.load(Ordering::Relaxed);
+                    let voice_count = active_voice_count.load(Ordering::Relaxed);
+                    let note_label = if note == NO_NOTE { "--".to_string() } else { note.to_string() };
+                    ui.label(format!("MIDI: note {note_label} | {voice_count} voice(s) active"));
 
                     ui.add_space(8.0);
                     ui.label("Freeze Point");
@@ -619,6 +643,7 @@ impl Plugin for FreezePlugin {
             match event {
                 NoteEvent::NoteOn { note, channel, velocity, voice_id, .. } => {
                     self.voices.note_on(note, channel, velocity, voice_id.unwrap_or(note as i32));
+                    self.last_note.store(note, Ordering::Relaxed);
                 }
                 NoteEvent::NoteOff { note, channel, .. } => {
                     self.voices.note_off(note, channel);
@@ -634,6 +659,9 @@ impl Plugin for FreezePlugin {
         let channels = buffer.as_slice();
         let (left, right) = channels.split_at_mut(1);
         self.voices.process_block(&loop_buffer, left[0], right[0]);
+        // Read *after* process_block so a voice that finished this block is
+        // already reflected, not the stale pre-block count.
+        self.active_voice_count.store(self.voices.active_voice_count() as u8, Ordering::Relaxed);
 
         ProcessStatus::Normal
     }

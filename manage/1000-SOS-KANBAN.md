@@ -222,8 +222,8 @@ _None currently open - see Completed for resolved bugs._
 **Implementation Repository:** `../src/plugins/SpectralFreeze/`  
 **Primary Reference:** `../src/0006/index.html` (Spectral Fusion "Freeze" feature); full original design rationale in the plan doc at `~/.claude/plans/i-really-like-the-partitioned-papert.md` (same machine, not in this repo)  
 **Architecture note:** Freeze Point / Formant Shift / Stereo Width are all *render-time* operations (they call `render::render_frozen_loop` again to take effect), not cheap per-sample transforms — relevant to FREEZE-PLAN-003 below and to anything that touches how they're triggered.  
-**Board Last Updated:** 2026-09-06 09:45 by Reason A  
-**Session paused 2026-09-06 09:45** — code and Kanban both committed and in sync (commit `f476036`), nothing uncommitted. Pick up at `FREEZE-PLAN-004`'s Card Completion Note for the exact next step (a short listening confirmation), or `FREEZE-PLAN-006` for the next unstarted feature.
+**Board Last Updated:** 2026-09-06 10:05 by Reason A  
+**Session paused 2026-09-06 10:05** — `FREEZE-PLAN-006` (MIDI activity indicator) implemented, built, and bundled this session; not yet committed (see below). Two items now await the same short hands-on pass: `FREEZE-PLAN-004`'s Decay/Sustain listening confirmation, and `FREEZE-PLAN-006`'s visual confirmation of the new "MIDI: note N | N voice(s) active" label - both can be checked in one sitting on the Launchkey/Carla setup already in use this project.
 
 ### Ideas
 
@@ -268,10 +268,12 @@ _None currently open - see Completed for resolved bugs._
 
 - **Card Title:** MIDI activity indicator (note number + active voice count)
 - **Description:** Add a small live indicator to the editor showing whether MIDI is currently being received - last note number and current active voice count - so it's visually obvious when notes aren't reaching the plugin (e.g. a dropped JACK/host MIDI connection, see `FREEZE-BUG-001`'s false-alarm follow-up) versus a real DSP issue. Cross-thread state via `Arc<AtomicU8>` fields on `FreezePlugin` (matching the pattern nih-plug's own `gain_gui_egui` example uses for its peak meter), updated in `process()`'s existing MIDI-handling loop and after `VoiceManager::process_block` (voice count must be read *after* that call to reflect voices that just finished this block).
+
+  Delivered as designed: `last_note: Arc<AtomicU8>` (sentinel `NO_NOTE = 255` for "nothing received yet, shown as "--"") and `active_voice_count: Arc<AtomicU8>` on `FreezePlugin`, both `Ordering::Relaxed` (display-only, no synchronization with other state needed). `last_note` is stored in the `NoteEvent::NoteOn` arm of `process()`'s existing MIDI loop; `active_voice_count` is stored once per block *after* `self.voices.process_block(...)` returns, per the Description's ordering requirement. Both Arcs are cloned into the `create_egui_editor` closure alongside the existing `source`/`loop_buffer` clones and read once per frame into a `ui.label` reading e.g. "MIDI: note 60 | 2 voice(s) active", placed right under the heading so it's visible without scrolling. No extra repaint wiring needed - confirmed `nih_plug_egui`'s `create_egui_editor` already calls `egui_ctx.request_repaint()` unconditionally every frame (for meter widgets in general), so this updates live for free.
 - **Assigned Agent:** Reason A
 - **Card Creation Date:** 2026-09-06 09:39
-- **Card Completion Note:** Not started - scoped only. A first attempt at the imports/sentinel constant was reverted (session ended before the fields/wiring/UI label were added) so the tree stayed warning-free; nothing to build on yet, start fresh from the Description above.
-- **Process Comments:** 2026-09-06 09:39 — Requested by the user directly after the `FREEZE-BUG-001` false-alarm investigation made clear how much faster that would have been ruled out with this visible.
+- **Card Completion Note:** Implementation complete; `cargo build --workspace` and `cargo test --workspace` both clean (47 `freeze_dsp` + 3 `freeze_plugin` tests, unchanged count - this is pure display wiring with no new DSP behavior to unit-test), release bundle rebuilt via `cargo xtask bundle freeze_plugin --release` and live at the symlinked install path. **Not yet visually confirmed**: needs a quick look in Carla/host - play a note or chord on the Launchkey and confirm the label shows the correct note number and voice count live (including dropping back to "--"/0 after full release), then mark Completed.
+- **Process Comments:** 2026-09-06 09:39 — Requested by the user directly after the `FREEZE-BUG-001` false-alarm investigation made clear how much faster that would have been ruled out with this visible. 2026-09-06 10:05 — Implemented and built; awaiting the user's visual confirmation pass (can be done together with `FREEZE-PLAN-004`'s pending Decay/Sustain listening check, same session).
 
 ### Completed
 
