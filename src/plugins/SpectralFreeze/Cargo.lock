@@ -1267,6 +1267,8 @@ dependencies = [
  "nih_plug",
  "nih_plug_egui",
  "rfd",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
