@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Detailed Handoff:** `../../../0006-rust/NEXTSTEPS.md`  
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-06 12:51 by Codex A
+**Board Last Updated:** 2026-09-06 12:54 by Codex A
 
 ### Ideas
 
@@ -60,15 +60,6 @@ priority.
 _None currently open - see Completed for resolved bugs._
 
 ### Planned Features
-
-#### 0006-PLAN-001 — Complete project JSON and audio exports
-
-- **Card Title:** Complete project JSON and audio exports
-- **Description:** Implement the original complete project schema rather than extending the current local-settings subset. Add compatible JSON import/export plus sampler WAV and numbered-sample ZIP generation. Preserve legacy field names, null source slots, metadata, and referenced audio filenames.
-- **Assigned Agent:** Codex A
-- **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** Pending; scheduled after final Spectral Fusion validation.
-- **Process Comments:** 2026-09-06 07:19 — Identified in `NEXTSTEPS.md` as the next implementation milestone.
 
 #### 0006-PLAN-002 — Source sample library and import workflow
 
@@ -116,6 +107,15 @@ _None currently open - see Completed for resolved bugs._
 - **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain.
 
 ### Assigned
+
+#### 0006-PLAN-001 — Complete project JSON and audio exports
+
+- **Card Title:** Complete project JSON and audio exports
+- **Description:** Implement the original complete project schema rather than extending the current local-settings subset. Add compatible JSON import/export plus sampler WAV and numbered-sample ZIP generation. Preserve legacy field names, null source slots, metadata, and referenced audio filenames.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-06 07:19
+- **Card Completion Note:** In progress; numerical Fusion validation is complete and schema/export implementation has started.
+- **Process Comments:** 2026-09-06 07:19 — Identified in `NEXTSTEPS.md` as the next implementation milestone. 2026-09-06 12:54 — Moved from Planned Features to Assigned after commit `e743c5d` completed the numerical portion of Fusion validation.
 
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
 
