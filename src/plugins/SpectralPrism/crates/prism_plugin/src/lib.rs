@@ -85,26 +85,40 @@ pub struct PrismPlugin {
 /// `BUFFER_CROSSFADE_MS` or a bit more keeps them from overlapping.
 const RENDER_THROTTLE_MS: f32 = 100.0;
 
-/// The editor's initial/base window size in logical points - also the size
-/// its layout is designed to exactly fill. See `GUI_SCALE` below for how
-/// this doubles as the reference size for GUI scaling.
-const BASE_EDITOR_WIDTH: u32 = 420;
-const BASE_EDITOR_HEIGHT: u32 = 700;
+/// The editor's base (1x scale, minimum-drag-size) window size in logical
+/// points - the size its two-column layout is designed to exactly fill.
+/// Also the reference size `apply_gui_scale` divides the *actual* window
+/// size by to compute the current scale factor. The window actually opens
+/// at `DEFAULT_SCALE` times this (see `EguiState::from_size` below), not at
+/// this size directly - this is just the floor `ResizableWindow`'s
+/// `min_size` won't let it shrink past.
+const BASE_EDITOR_WIDTH: u32 = 620;
+const BASE_EDITOR_HEIGHT: u32 = 560;
+/// The editor opens at this multiple of the base size by default (matching
+/// `apply_gui_scale`'s scale factor, since the two are computed from the
+/// same base) - requested directly ("too small to read" at 1x). Still
+/// freely resizable larger (or back down to 1x) afterward via the corner.
+const DEFAULT_SCALE: f32 = 1.5;
 
-/// Dark palette lifted directly from `src/0006/index.html`'s `:root` (the
-/// original/default look for that project, and this plugin's own visual
-/// reference - see `FREEZE-PLAN-011`). 0006 also has a light palette for
-/// when the OS/user prefers light, but this editor has no theme toggle of
-/// its own, so only the dark one is used here.
-const COLOR_BG: egui::Color32 = egui::Color32::from_rgb(0x10, 0x10, 0x12);
-const COLOR_PANEL: egui::Color32 = egui::Color32::from_rgb(0x17, 0x17, 0x1a);
-const COLOR_EDGE: egui::Color32 = egui::Color32::from_rgb(0x2a, 0x2a, 0x2e);
-const COLOR_EDGE_HOVER: egui::Color32 = egui::Color32::from_rgb(0x55, 0x55, 0x55);
-const COLOR_INK: egui::Color32 = egui::Color32::from_rgb(0xe9, 0xe6, 0xdb);
-const COLOR_DIM: egui::Color32 = egui::Color32::from_rgb(0x8a, 0x87, 0x7c);
-const COLOR_AMBER: egui::Color32 = egui::Color32::from_rgb(0xc9, 0x97, 0x3a);
-const COLOR_SURFACE_DEEP: egui::Color32 = egui::Color32::from_rgb(0x0a, 0x0a, 0x0b);
-const COLOR_ERROR: egui::Color32 = egui::Color32::from_rgb(0xc9, 0x6a, 0x6a);
+/// Light palette lifted from `src/0006/index.html`'s light-mode `:root`
+/// overrides (`--bg`/`--panel`/`--edge`/`--edge-hover`/`--ink`/`--dim`/
+/// `--surface-deep`) - this plugin's own visual reference, see
+/// `FREEZE-PLAN-011`/`FREEZE-PLAN-013`. `COLOR_BG`/`COLOR_PANEL` are pure
+/// white rather than 0006's own slightly-off-white `--bg` (`#fafafa`), per
+/// explicit request. The accent is `COLOR_ACCENT`, not 0006's light-mode
+/// `--amber` - see that constant's own doc comment.
+const COLOR_BG: egui::Color32 = egui::Color32::from_rgb(0xff, 0xff, 0xff);
+const COLOR_PANEL: egui::Color32 = egui::Color32::from_rgb(0xff, 0xff, 0xff);
+const COLOR_EDGE: egui::Color32 = egui::Color32::from_rgb(0xdc, 0xdd, 0xe0);
+const COLOR_EDGE_HOVER: egui::Color32 = egui::Color32::from_rgb(0xb3, 0xb8, 0xbd);
+const COLOR_INK: egui::Color32 = egui::Color32::from_rgb(0x2e, 0x34, 0x40);
+const COLOR_DIM: egui::Color32 = egui::Color32::from_rgb(0x5e, 0x64, 0x70);
+/// Not 0006's own light-theme accent (`#3f9e0e`) - the specific green the
+/// user asked for, which 0006 actually uses elsewhere as a hardcoded
+/// "on/active" highlight (`.spectral-btn.fusion-on`, the mode-switch toggle).
+const COLOR_ACCENT: egui::Color32 = egui::Color32::from_rgb(0x6c, 0xd7, 0x3c);
+const COLOR_SURFACE_DEEP: egui::Color32 = egui::Color32::from_rgb(0xee, 0xf0, 0xe9);
+const COLOR_ERROR: egui::Color32 = egui::Color32::from_rgb(0xc0, 0x36, 0x2f);
 
 /// Bundled locally (copied from `src/0006/ASSETS/`) rather than referenced
 /// across projects by relative path, so this plugin doesn't depend on the
@@ -132,7 +146,7 @@ fn install_medodica_font(ctx: &egui::Context) {
 }
 
 /// Recolors every default `egui::Visuals` field this editor actually uses
-/// to 0006's dark palette (see the `COLOR_*` constants above), so buttons,
+/// to 0006's light palette (see the `COLOR_*` constants above), so buttons,
 /// sliders, panels, and text match that project's look instead of egui's
 /// stock dark theme. Called once, from the editor's `build` callback - the
 /// palette itself never changes at runtime, only `apply_gui_scale` (sizes)
@@ -141,17 +155,17 @@ fn apply_theme(ctx: &egui::Context) {
     install_medodica_font(ctx);
     ctx.all_styles_mut(|style| {
         let v = &mut style.visuals;
-        v.dark_mode = true;
+        v.dark_mode = false;
         v.window_fill = COLOR_BG;
         v.panel_fill = COLOR_BG;
         v.faint_bg_color = COLOR_PANEL;
         v.extreme_bg_color = COLOR_SURFACE_DEEP;
         v.code_bg_color = COLOR_SURFACE_DEEP;
         v.error_fg_color = COLOR_ERROR;
-        v.warn_fg_color = COLOR_AMBER;
-        v.hyperlink_color = COLOR_AMBER;
-        v.selection.bg_fill = COLOR_AMBER;
-        v.selection.stroke = egui::Stroke::new(1.0, COLOR_AMBER);
+        v.warn_fg_color = COLOR_ACCENT;
+        v.hyperlink_color = COLOR_ACCENT;
+        v.selection.bg_fill = COLOR_ACCENT;
+        v.selection.stroke = egui::Stroke::new(1.0, COLOR_ACCENT);
 
         v.widgets.noninteractive.bg_fill = COLOR_PANEL;
         v.widgets.noninteractive.weak_bg_fill = COLOR_PANEL;
@@ -168,14 +182,16 @@ fn apply_theme(ctx: &egui::Context) {
         v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, COLOR_EDGE_HOVER);
         v.widgets.hovered.fg_stroke = egui::Stroke::new(1.0, COLOR_INK);
 
-        v.widgets.active.bg_fill = COLOR_AMBER;
-        v.widgets.active.weak_bg_fill = COLOR_AMBER;
-        v.widgets.active.bg_stroke = egui::Stroke::new(1.0, COLOR_AMBER);
-        v.widgets.active.fg_stroke = egui::Stroke::new(1.0, COLOR_BG);
+        v.widgets.active.bg_fill = COLOR_ACCENT;
+        v.widgets.active.weak_bg_fill = COLOR_ACCENT;
+        v.widgets.active.bg_stroke = egui::Stroke::new(1.0, COLOR_ACCENT);
+        // Dark ink on the light-green accent fill reads better than white -
+        // the accent is bright enough that white text washes out on it.
+        v.widgets.active.fg_stroke = egui::Stroke::new(1.0, COLOR_INK);
 
         v.widgets.open.bg_fill = COLOR_SURFACE_DEEP;
         v.widgets.open.weak_bg_fill = COLOR_SURFACE_DEEP;
-        v.widgets.open.bg_stroke = egui::Stroke::new(1.0, COLOR_AMBER);
+        v.widgets.open.bg_stroke = egui::Stroke::new(1.0, COLOR_ACCENT);
         v.widgets.open.fg_stroke = egui::Stroke::new(1.0, COLOR_INK);
     });
 }
@@ -248,7 +264,10 @@ impl Default for PrismPlugin {
 impl Default for PrismPluginParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(BASE_EDITOR_WIDTH, BASE_EDITOR_HEIGHT),
+            editor_state: EguiState::from_size(
+                (BASE_EDITOR_WIDTH as f32 * DEFAULT_SCALE) as u32,
+                (BASE_EDITOR_HEIGHT as f32 * DEFAULT_SCALE) as u32,
+            ),
             sample_path: Mutex::new(None),
             freeze_point: FloatParam::new("Freeze Point", 50.0, FloatRange::Linear { min: 0.0, max: 100.0 })
                 .with_unit(" %"),
@@ -570,7 +589,7 @@ fn draw_freeze_point_waveform(
         let bg = if response.hovered() { COLOR_EDGE } else { COLOR_SURFACE_DEEP };
         painter.rect_filled(rect, 2.0, bg);
         painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.0, COLOR_EDGE), egui::StrokeKind::Inside);
-        let text_color = if response.hovered() { COLOR_AMBER } else { COLOR_DIM };
+        let text_color = if response.hovered() { COLOR_ACCENT } else { COLOR_DIM };
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -622,7 +641,7 @@ fn draw_freeze_point_waveform(
     let marker_x = rect.left() + freeze_normalized * rect.width();
     painter.line_segment(
         [egui::pos2(marker_x, rect.top()), egui::pos2(marker_x, rect.bottom())],
-        egui::Stroke::new(2.0, COLOR_AMBER),
+        egui::Stroke::new(2.0, COLOR_ACCENT),
     );
 
     if response.drag_started() || response.clicked() {
@@ -689,14 +708,14 @@ fn draw_adsr_graph(
     let p3 = egui::pos2(sustain_start_x + sustain_plateau_width, y_for_level(sustain_norm));
     let p4 = egui::pos2(release_start_x + segment_width * release_norm, y_for_level(0.0));
 
-    let curve_stroke = egui::Stroke::new(2.0, COLOR_AMBER);
+    let curve_stroke = egui::Stroke::new(2.0, COLOR_ACCENT);
     painter.line_segment([p0, p1], curve_stroke);
     painter.line_segment([p1, p2], curve_stroke);
     painter.line_segment([p2, p3], curve_stroke);
     painter.line_segment([p3, p4], curve_stroke);
 
     let handle_radius = 5.0 * scale;
-    let handle_color = COLOR_AMBER;
+    let handle_color = COLOR_ACCENT;
     painter.circle_filled(p1, handle_radius, handle_color);
     painter.circle_filled(p2, handle_radius, handle_color);
     painter.circle_filled(p4, handle_radius, handle_color);
@@ -848,6 +867,7 @@ impl Plugin for PrismPlugin {
                 ResizableWindow::new("spectral_prism_window")
                     .min_size(egui::vec2(BASE_EDITOR_WIDTH as f32, BASE_EDITOR_HEIGHT as f32))
                     .show(egui_ctx, &params.editor_state, |ui| {
+                        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                         ui.heading("SpectralPrism");
 
                         let presets_dir = presets_dir();
@@ -916,37 +936,42 @@ impl Plugin for PrismPlugin {
                         ui.colored_label(COLOR_DIM, format!("MIDI: note {note_label} | {voice_count} voice(s) active"));
 
                         ui.add_space(8.0);
-                        ui.label("Freeze Point");
-                        let has_loaded_sample = loaded_filename.load().is_some();
-                        if draw_freeze_point_waveform(ui, &source, &params.freeze_point, setter, has_loaded_sample, scale) {
-                            open_sample_dialog(state);
-                        }
-                        ui.add(widgets::ParamSlider::for_param(&params.freeze_point, setter));
 
-                        ui.label("Formant Shift");
-                        ui.add(widgets::ParamSlider::for_param(&params.formant_shift, setter));
+                        // The two main sections side by side rather than
+                        // stacked - requested directly, and it also keeps
+                        // the window from getting extremely tall now that
+                        // everything renders at `DEFAULT_SCALE`.
+                        ui.columns(2, |columns| {
+                            let left = &mut columns[0];
+                            left.label("Freeze Point");
+                            let has_loaded_sample = loaded_filename.load().is_some();
+                            if draw_freeze_point_waveform(left, &source, &params.freeze_point, setter, has_loaded_sample, scale) {
+                                open_sample_dialog(state);
+                            }
+                            left.add(widgets::ParamSlider::for_param(&params.freeze_point, setter));
 
-                        ui.label("Stereo Width");
-                        ui.add(widgets::ParamSlider::for_param(&params.stereo_width, setter));
+                            left.label("Formant Shift");
+                            left.add(widgets::ParamSlider::for_param(&params.formant_shift, setter));
 
-                        ui.add_space(12.0);
-                        ui.separator();
-                        ui.add_space(8.0);
+                            left.label("Stereo Width");
+                            left.add(widgets::ParamSlider::for_param(&params.stereo_width, setter));
 
-                        ui.label("Envelope (Attack / Decay / Sustain / Release)");
-                        draw_adsr_graph(ui, &params.attack, &params.decay, &params.sustain, &params.release, setter, scale);
-                        ui.label("Attack");
-                        ui.add(widgets::ParamSlider::for_param(&params.attack, setter));
-                        ui.label("Decay");
-                        ui.add(widgets::ParamSlider::for_param(&params.decay, setter));
-                        ui.label("Sustain");
-                        ui.add(widgets::ParamSlider::for_param(&params.sustain, setter));
-                        ui.label("Release");
-                        ui.add(widgets::ParamSlider::for_param(&params.release, setter));
+                            let right = &mut columns[1];
+                            right.label("Envelope (Attack / Decay / Sustain / Release)");
+                            draw_adsr_graph(right, &params.attack, &params.decay, &params.sustain, &params.release, setter, scale);
+                            right.label("Attack");
+                            right.add(widgets::ParamSlider::for_param(&params.attack, setter));
+                            right.label("Decay");
+                            right.add(widgets::ParamSlider::for_param(&params.decay, setter));
+                            right.label("Sustain");
+                            right.add(widgets::ParamSlider::for_param(&params.sustain, setter));
+                            right.label("Release");
+                            right.add(widgets::ParamSlider::for_param(&params.release, setter));
 
-                        ui.add_space(8.0);
-                        ui.label("Velocity Sensitivity");
-                        ui.add(widgets::ParamSlider::for_param(&params.velocity_sensitivity, setter));
+                            right.add_space(8.0);
+                            right.label("Velocity Sensitivity");
+                            right.add(widgets::ParamSlider::for_param(&params.velocity_sensitivity, setter));
+                        });
 
                         ui.add_space(12.0);
                         ui.separator();
@@ -968,6 +993,7 @@ impl Plugin for PrismPlugin {
                         if let Some(error) = &state.error {
                             ui.colored_label(COLOR_ERROR, error);
                         }
+                        });
                     });
             },
         )
