@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Technical Handoff:** See the source-of-truth notes below.
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-07 17:48 by Codex A
+**Board Last Updated:** 2026-09-07 18:27 by Codex A
 **Source of Truth:** This project section replaces the retired
 `../../../0006-rust/NEXTSTEPS.md`. Update the relevant card and these handoff
 notes after every feature, bug fix, or material verification result.
@@ -43,14 +43,18 @@ notes after every feature, bug fix, or material verification result.
   WAV, original CHIP-mix, and sample ZIP exports, the six-slot source library, tracker/piano/noise
   views, row/cell/instrument audition, mixer meters, main-table instrument
   editing, animated cover art, reference sidebar, hover Explainer, and
-  responsive stacking are implemented. The Assigned and Planned buckets below
+  responsive stacking are implemented. Pattern/page scrolling is separated;
+  dynamic sidebar and keyboard regions are size-stable; Source Sample and
+  Sampler waveforms show instrument-coloured, numbered playheads with an orange
+  raw-preview fallback. The Assigned and Planned buckets below
   are the authoritative remaining-work list.
 - **Verification baseline:** `cargo test --workspace` passes 30 tests;
   `cargo check -p lantern-app --target wasm32-unknown-unknown` and
   `trunk build --release` pass. Release-browser checks cover transport,
   sampler and Fusion editing, import/export, tracker audition, live Web Audio
   meters, quick instrument edits, the desktop/sidebar composition, and narrow
-  stacking, mode-dependent WAV exports, and a release bundle served below a nested URL. Cover tests verify
+  stacking, mode-dependent WAV exports, stable dynamic panels, tracker scrolling,
+  live waveform playheads, and a release bundle served below a nested URL. Cover tests verify
   the 1600×1600 RGBA PNG and real tracker-note scan generation; folder tests
   verify valid layout assembly, one-based CHIP-only stem folders, and actionable
   missing-asset errors. `tests/golden-battletrain` browser-loads as a 16-order,
@@ -149,7 +153,7 @@ _None currently planned; the final implementation milestone is assigned below._
 - **Description:** Add the folder-based flow for a different Game Boy `.fur` file with matching assets. Validate browser error handling, cache paths, and hosting from a nested website route. Produce and test the final optimized WASM bundle before publishing.
 - **Assigned Agent:** Codex A
 - **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** In progress in Rust-port commits `af4fdde`, `017bd9b`, `2e42c85`, `f3b7100`, and `db94ea4`; folder loading, active-song downloads, nested-route preparation, effect-aware playback, real alternate-song acceptance, both WAV export modes, and reproducible release packaging are implemented. The verified upload archive is ready; live website transfer remains.
+- **Card Completion Note:** In progress in Rust-port commits `af4fdde`, `017bd9b`, `2e42c85`, `f3b7100`, `db94ea4`, and `b27e01e`; folder loading, active-song downloads, nested-route preparation, effect-aware playback, real alternate-song acceptance, both WAV export modes, reproducible release packaging, and the first live upload are complete. The verified `b27e01e` bug-fix archive is ready for the next website transfer.
 - **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain. 2026-09-07 06:56 — Moved from Planned Features to Assigned after completing visual chrome. Audited existing file-input and loader abstractions before adding folder replacement and nested-route release verification. 2026-09-07 07:02 — Added native recursive folder selection and web `webkitdirectory`, validation for exactly one supported `.fur` plus four stems and three source samples, optional Project JSON with a safe generated fallback, and atomic live-state replacement. `Trunk.toml` now emits relative JS/WASM URLs; the optimized bundle loaded successfully from `/dist/` with decoded audio and no browser warnings/errors. All 26 tests and the WASM/release builds pass. A second distinct Game Boy fixture with matching rendered assets is not present in the workspace, so that acceptance check remains open rather than being simulated with the bundled song. 2026-09-07 07:05 — The loader now retains the active `.fur` and optional MIDI, and the release toolbar exposes both downloads; the bundled reference MIDI is packaged. Nested-route browser loading remained clean after the change. The original 38 MB CHIP-mode WAV is still excluded from the optimized bundle and remains a documented parity gap. 2026-09-07 07:37 — Accepted the user-supplied `golden-battletrain` folder directly in the release browser. The loader now supports Furnace v181 `INFO`, one-based root WAV stems, and missing sampler sources for CHIP-only projects; its 16-order, 94.4-second transport played and tracked rows without browser warnings/errors. Added a shared effect-aware row clock plus continuous `01xx`/`02xx` pitch ramps across web, native, and offline sampler playback. All 30 tests, WASM check, and optimized build pass; live publishing remains the final deployment step. 2026-09-07 17:38 — Added the supplied full Furnace mix as a copied release asset without inflating the WASM module, retained named full mixes from runtime-loaded folders, and made `Save .WAV` follow the active engine: direct supplied-mix download in CHIP mode and offline render in SAMPLER mode. Both paths were exercised in the release browser; CHIP reported `Saved flight_school_night_shift.wav`, SAMPLER reported `Sampler WAV rendered`, and browser diagnostics remained clean. All 30 tests, the WASM check, and the release build pass. 2026-09-07 17:48 — Added a reproducible optimized release packager and host-neutral deployment checklist. `release/lantern-player-0006-db94ea4.zip` is a 30 MB archive containing the 47 MB static site; its archive checksum, every per-file checksum, and ZIP integrity all pass. The public route is LiteSpeed behind Cloudflare, but no hosting credentials or deployment connection exist in this workspace, so transfer to `/1000-SOS/0006/` is the sole remaining step on this card.
 
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
@@ -241,6 +245,50 @@ _None currently planned; the final implementation milestone is assigned below._
 - **Card Creation Date:** 2026-09-07 07:37
 - **Card Completion Note:** Resolved in Rust-port commit `2e42c85` and browser-verified with the real folder; the song loads as 16 orders and 94.4 seconds, plays with row tracking, and produces no warnings/errors.
 - **Process Comments:** 2026-09-07 07:37 — The binary parser reports Furnace v181, six instruments, two wavetables, and real effect cells. The computed 94.420-second timeline matches all four 94.416-second Furnace stem exports within 4 ms; 30 workspace tests, WASM check, and release build pass.
+
+#### 0006-BUG-004 — Pattern scrollbar overlapped page scrolling
+
+- **Card Title:** Pattern scrollbar overlapped page scrolling
+- **Symptom:** The Pattern grid's vertical scrollbar occupied the same far-right edge as the main page scrollbar. This made it easy for the tracker to capture the wheel when the user intended to move down the page. The competing scroll regions were especially awkward on a wide desktop viewport.
+- **Root cause:** The Pattern `ScrollArea` expanded to the full central-panel width even though its four channel columns used substantially less space.
+- **Fix approach:** Cap the tracker viewport at 680 px, just beyond the row index and four 150 px channel columns, while allowing narrower responsive layouts to use their available width.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-07 18:27
+- **Card Completion Note:** Resolved in Rust-port commit `b27e01e`; the tracker scrollbar now sits beside the channel grid and the main scrollbar remains at the window edge.
+- **Process Comments:** 2026-09-07 18:27 — Browser-verified independent wheel scrolling with the tracker ending around x=680 and the page scrollbar remaining at the central panel's far edge.
+
+#### 0006-BUG-005 — Noise readout changed keyboard width
+
+- **Card Title:** Noise readout changed keyboard width
+- **Symptom:** Showing a Noise note and instrument name widened the readout beyond its empty-state size. The keyboard and surrounding content shifted horizontally as Noise notes started and stopped. Longer instrument names made the movement more noticeable.
+- **Root cause:** The readout inherited the surrounding horizontal layout and specified only a minimum width, so its labels expanded the frame.
+- **Fix approach:** Put the Noise content in a vertical child layout with an exact 110 px content width and fixed 58 px content height.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-07 18:27
+- **Card Completion Note:** Resolved in Rust-port commit `b27e01e`; empty and active Noise states retain the same dimensions.
+- **Process Comments:** 2026-09-07 18:27 — Browser-compared the empty readout with `E-5 / Perc Long` and `C-4 / Perc 1`; the keyboard and frame edges remained fixed.
+
+#### 0006-BUG-006 — Explainer descriptions shifted the sidebar
+
+- **Card Title:** Explainer descriptions shifted the sidebar
+- **Symptom:** Hover descriptions of different lengths changed the Explainer card's height. Cards below it moved whenever the pointer crossed between tracker cells, panels, or cover art. The shifting made the reference sidebar visually unstable.
+- **Root cause:** The card specified only a minimum height, leaving longer wrapped text free to enlarge it.
+- **Fix approach:** Give the card a fixed 150 px body and place description text in its own bounded vertical scroll region.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-07 18:27
+- **Card Completion Note:** Resolved in Rust-port commit `b27e01e`; browser checks across short and long descriptions keep the same outer frame height.
+- **Process Comments:** 2026-09-07 18:27 — Verified cover/default and tracker-effect descriptions without movement in the cards below.
+
+#### 0006-BUG-007 — Source and Sampler waveforms lacked readable playheads
+
+- **Card Title:** Source and Sampler waveforms lacked readable playheads
+- **Symptom:** Source Sample strips showed no cursor during raw preview or sampler voices, while the Sampler editor used a low-contrast white cursor. Multiple instruments sharing a source could not be identified. This differed from the original HTML's coloured, numbered playheads.
+- **Root cause:** The audio trait exposed only one instrument-preview position and no visual state for live transport voices, pattern auditions, or raw Source Sample previews.
+- **Fix approach:** Expose visual-only playheads with source, instrument, position, Fusion timebase, and level; draw every matching raw voice in its instrument colour with a number left of the line, and use orange for an unassigned raw preview.
+- **Assigned Agent:** Codex A
+- **Card Creation Date:** 2026-09-07 18:27
+- **Card Completion Note:** Resolved in Rust-port commit `b27e01e`; Source Sample, Sampler, and Fusion result waveforms share the new playhead renderer.
+- **Process Comments:** 2026-09-07 18:27 — Browser-verified a moving orange raw-source cursor and an instrument-0 cursor in its red colour with `0` at the line's upper-left; browser diagnostics remained empty. All 30 tests, WASM check, release build, new archive checksums, and ZIP integrity pass.
 
 #### 0006-DONE-001 — Rust workspace and Furnace Game Boy parser
 
