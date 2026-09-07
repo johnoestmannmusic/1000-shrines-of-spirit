@@ -24,7 +24,7 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Technical Handoff:** See the source-of-truth notes below.
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-07 07:37 by Codex A
+**Board Last Updated:** 2026-09-07 17:38 by Codex A
 **Source of Truth:** This project section replaces the retired
 `../../../0006-rust/NEXTSTEPS.md`. Update the relevant card and these handoff
 notes after every feature, bug fix, or material verification result.
@@ -40,7 +40,7 @@ notes after every feature, bug fix, or material verification result.
 - **Current implementation:** CHIP and SAMPLER transport, the Game Boy Furnace
   parser, full sampler voice/editor behaviour, all six Spectral Fusion
   algorithms, non-blocking browser rendering, complete Project JSON, sampler
-  WAV and sample ZIP exports, the six-slot source library, tracker/piano/noise
+  WAV, original CHIP-mix, and sample ZIP exports, the six-slot source library, tracker/piano/noise
   views, row/cell/instrument audition, mixer meters, main-table instrument
   editing, animated cover art, reference sidebar, hover Explainer, and
   responsive stacking are implemented. The Assigned and Planned buckets below
@@ -50,7 +50,7 @@ notes after every feature, bug fix, or material verification result.
   `trunk build --release` pass. Release-browser checks cover transport,
   sampler and Fusion editing, import/export, tracker audition, live Web Audio
   meters, quick instrument edits, the desktop/sidebar composition, and narrow
-  stacking, and a release bundle served below a nested URL. Cover tests verify
+  stacking, mode-dependent WAV exports, and a release bundle served below a nested URL. Cover tests verify
   the 1600×1600 RGBA PNG and real tracker-note scan generation; folder tests
   verify valid layout assembly, one-based CHIP-only stem folders, and actionable
   missing-asset errors. `tests/golden-battletrain` browser-loads as a 16-order,
@@ -149,8 +149,8 @@ _None currently planned; the final implementation milestone is assigned below._
 - **Description:** Add the folder-based flow for a different Game Boy `.fur` file with matching assets. Validate browser error handling, cache paths, and hosting from a nested website route. Produce and test the final optimized WASM bundle before publishing.
 - **Assigned Agent:** Codex A
 - **Card Creation Date:** 2026-09-06 07:19
-- **Card Completion Note:** In progress in Rust-port commits `af4fdde`, `017bd9b`, and `2e42c85`; folder loading, active-song downloads, nested-route preparation, effect-aware playback, and real alternate-song acceptance are implemented. Live website publishing and the bundled CHIP-mix download remain.
-- **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain. 2026-09-07 06:56 — Moved from Planned Features to Assigned after completing visual chrome. Audited existing file-input and loader abstractions before adding folder replacement and nested-route release verification. 2026-09-07 07:02 — Added native recursive folder selection and web `webkitdirectory`, validation for exactly one supported `.fur` plus four stems and three source samples, optional Project JSON with a safe generated fallback, and atomic live-state replacement. `Trunk.toml` now emits relative JS/WASM URLs; the optimized bundle loaded successfully from `/dist/` with decoded audio and no browser warnings/errors. All 26 tests and the WASM/release builds pass. A second distinct Game Boy fixture with matching rendered assets is not present in the workspace, so that acceptance check remains open rather than being simulated with the bundled song. 2026-09-07 07:05 — The loader now retains the active `.fur` and optional MIDI, and the release toolbar exposes both downloads; the bundled reference MIDI is packaged. Nested-route browser loading remained clean after the change. The original 38 MB CHIP-mode WAV is still excluded from the optimized bundle and remains a documented parity gap. 2026-09-07 07:37 — Accepted the user-supplied `golden-battletrain` folder directly in the release browser. The loader now supports Furnace v181 `INFO`, one-based root stems, and missing sampler sources for CHIP-only projects; its 16-order, 94.4-second transport played and tracked rows without browser warnings/errors. Added a shared effect-aware row clock plus continuous `01xx`/`02xx` pitch ramps across web, native, and offline sampler playback. All 30 tests, WASM check, and optimized build pass; live publishing remains the final deployment step.
+- **Card Completion Note:** In progress in Rust-port commits `af4fdde`, `017bd9b`, `2e42c85`, and `f3b7100`; folder loading, active-song downloads, nested-route preparation, effect-aware playback, real alternate-song acceptance, and both WAV export modes are implemented. Live website publishing remains.
+- **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain. 2026-09-07 06:56 — Moved from Planned Features to Assigned after completing visual chrome. Audited existing file-input and loader abstractions before adding folder replacement and nested-route release verification. 2026-09-07 07:02 — Added native recursive folder selection and web `webkitdirectory`, validation for exactly one supported `.fur` plus four stems and three source samples, optional Project JSON with a safe generated fallback, and atomic live-state replacement. `Trunk.toml` now emits relative JS/WASM URLs; the optimized bundle loaded successfully from `/dist/` with decoded audio and no browser warnings/errors. All 26 tests and the WASM/release builds pass. A second distinct Game Boy fixture with matching rendered assets is not present in the workspace, so that acceptance check remains open rather than being simulated with the bundled song. 2026-09-07 07:05 — The loader now retains the active `.fur` and optional MIDI, and the release toolbar exposes both downloads; the bundled reference MIDI is packaged. Nested-route browser loading remained clean after the change. The original 38 MB CHIP-mode WAV is still excluded from the optimized bundle and remains a documented parity gap. 2026-09-07 07:37 — Accepted the user-supplied `golden-battletrain` folder directly in the release browser. The loader now supports Furnace v181 `INFO`, one-based root WAV stems, and missing sampler sources for CHIP-only projects; its 16-order, 94.4-second transport played and tracked rows without browser warnings/errors. Added a shared effect-aware row clock plus continuous `01xx`/`02xx` pitch ramps across web, native, and offline sampler playback. All 30 tests, WASM check, and optimized build pass; live publishing remains the final deployment step. 2026-09-07 17:38 — Added the supplied full Furnace mix as a copied release asset without inflating the WASM module, retained named full mixes from runtime-loaded folders, and made `Save .WAV` follow the active engine: direct supplied-mix download in CHIP mode and offline render in SAMPLER mode. Both paths were exercised in the release browser; CHIP reported `Saved flight_school_night_shift.wav`, SAMPLER reported `Sampler WAV rendered`, and browser diagnostics remained clean. All 30 tests, the WASM check, and the release build pass; only publishing the prepared bundle remains on this card.
 
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
 
