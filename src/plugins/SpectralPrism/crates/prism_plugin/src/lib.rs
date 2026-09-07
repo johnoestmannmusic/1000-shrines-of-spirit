@@ -106,9 +106,14 @@ const RENDER_THROTTLE_MS: f32 = 100.0;
 /// `min_size` won't let it shrink past.
 /// Widened and shortened from an earlier (620x560) guess, which was too
 /// narrow for the two-column layout at scale (elements got cut off
-/// horizontally) while leaving too much unused vertical space.
+/// horizontally) while leaving too much unused vertical space. Height
+/// bumped again (460->600) after Pitch Bend Range/Pan Center/Pan Width
+/// (`FREEZE-PLAN-019`/`FREEZE-PLAN-020`) added three more rows to the right
+/// column without a corresponding size update, forcing a scroll to see them
+/// at the default size - the `ScrollArea` safety net (see `editor()`) meant
+/// nothing was actually clipped/lost, just not visible without scrolling.
 const BASE_EDITOR_WIDTH: u32 = 800;
-const BASE_EDITOR_HEIGHT: u32 = 460;
+const BASE_EDITOR_HEIGHT: u32 = 600;
 /// The editor opens at this multiple of the base size by default (matching
 /// `apply_gui_scale`'s scale factor, since the two are computed from the
 /// same base) - requested directly ("too small to read" at 1x, then a
