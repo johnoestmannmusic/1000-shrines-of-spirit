@@ -24,10 +24,20 @@ priority.
 **Primary Reference:** `../src/0006/index.html`  
 **Technical Handoff:** See the source-of-truth notes below.
 **Parity Checklist:** `../../../0006-rust/PARITY.md`  
-**Board Last Updated:** 2026-09-07 18:27 by Codex A
+**Board Last Updated:** 2026-09-07 18:36 by Codex A
 **Source of Truth:** This project section replaces the retired
 `../../../0006-rust/NEXTSTEPS.md`. Update the relevant card and these handoff
 notes after every feature, bug fix, or material verification result.
+
+**Next-agent takeover:** No card is currently assigned. Start with
+`0006-PLAN-006`: upload
+`../../../0006-rust/release/lantern-player-0006-b27e01e.zip` over the current
+`/1000-SOS/0006/` deployment, hard-refresh or purge that Cloudflare route if
+the old hashed JavaScript remains, and smoke-test resolved bugs 004–007 plus
+both audio modes on the live site. Then address `0006-ASGN-001` by asking the
+user whether the deployed Spectral Fusion sound is accepted; move it to
+Completed if yes, or record the exact audible mismatch as a new Bugs card
+before changing DSP.
 
 ### Technical Handoff Notes
 
@@ -143,27 +153,27 @@ _None currently open - see Completed for resolved bugs._
 
 ### Planned Features
 
-_None currently planned; the final implementation milestone is assigned below._
-
-### Assigned
-
 #### 0006-PLAN-006 — Alternate-song loading and website deployment
 
 - **Card Title:** Alternate-song loading and website deployment
 - **Description:** Add the folder-based flow for a different Game Boy `.fur` file with matching assets. Validate browser error handling, cache paths, and hosting from a nested website route. Produce and test the final optimized WASM bundle before publishing.
-- **Assigned Agent:** Codex A
+- **Assigned Agent:** Unassigned
 - **Card Creation Date:** 2026-09-06 07:19
 - **Card Completion Note:** In progress in Rust-port commits `af4fdde`, `017bd9b`, `2e42c85`, `f3b7100`, `db94ea4`, and `b27e01e`; folder loading, active-song downloads, nested-route preparation, effect-aware playback, real alternate-song acceptance, both WAV export modes, reproducible release packaging, and the first live upload are complete. The verified `b27e01e` bug-fix archive is ready for the next website transfer.
-- **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain. 2026-09-07 06:56 — Moved from Planned Features to Assigned after completing visual chrome. Audited existing file-input and loader abstractions before adding folder replacement and nested-route release verification. 2026-09-07 07:02 — Added native recursive folder selection and web `webkitdirectory`, validation for exactly one supported `.fur` plus four stems and three source samples, optional Project JSON with a safe generated fallback, and atomic live-state replacement. `Trunk.toml` now emits relative JS/WASM URLs; the optimized bundle loaded successfully from `/dist/` with decoded audio and no browser warnings/errors. All 26 tests and the WASM/release builds pass. A second distinct Game Boy fixture with matching rendered assets is not present in the workspace, so that acceptance check remains open rather than being simulated with the bundled song. 2026-09-07 07:05 — The loader now retains the active `.fur` and optional MIDI, and the release toolbar exposes both downloads; the bundled reference MIDI is packaged. Nested-route browser loading remained clean after the change. The original 38 MB CHIP-mode WAV is still excluded from the optimized bundle and remains a documented parity gap. 2026-09-07 07:37 — Accepted the user-supplied `golden-battletrain` folder directly in the release browser. The loader now supports Furnace v181 `INFO`, one-based root WAV stems, and missing sampler sources for CHIP-only projects; its 16-order, 94.4-second transport played and tracked rows without browser warnings/errors. Added a shared effect-aware row clock plus continuous `01xx`/`02xx` pitch ramps across web, native, and offline sampler playback. All 30 tests, WASM check, and optimized build pass; live publishing remains the final deployment step. 2026-09-07 17:38 — Added the supplied full Furnace mix as a copied release asset without inflating the WASM module, retained named full mixes from runtime-loaded folders, and made `Save .WAV` follow the active engine: direct supplied-mix download in CHIP mode and offline render in SAMPLER mode. Both paths were exercised in the release browser; CHIP reported `Saved flight_school_night_shift.wav`, SAMPLER reported `Sampler WAV rendered`, and browser diagnostics remained clean. All 30 tests, the WASM check, and the release build pass. 2026-09-07 17:48 — Added a reproducible optimized release packager and host-neutral deployment checklist. `release/lantern-player-0006-db94ea4.zip` is a 30 MB archive containing the 47 MB static site; its archive checksum, every per-file checksum, and ZIP integrity all pass. The public route is LiteSpeed behind Cloudflare, but no hosting credentials or deployment connection exist in this workspace, so transfer to `/1000-SOS/0006/` is the sole remaining step on this card.
+- **Process Comments:** 2026-09-06 07:19 — Runtime parser exists; user-facing selection and production deployment remain. 2026-09-07 06:56 — Moved from Planned Features to Assigned after completing visual chrome. Audited existing file-input and loader abstractions before adding folder replacement and nested-route release verification. 2026-09-07 07:02 — Added native recursive folder selection and web `webkitdirectory`, validation for exactly one supported `.fur` plus four stems and three source samples, optional Project JSON with a safe generated fallback, and atomic live-state replacement. `Trunk.toml` now emits relative JS/WASM URLs; the optimized bundle loaded successfully from `/dist/` with decoded audio and no browser warnings/errors. All 26 tests and the WASM/release builds pass. A second distinct Game Boy fixture with matching rendered assets is not present in the workspace, so that acceptance check remains open rather than being simulated with the bundled song. 2026-09-07 07:05 — The loader now retains the active `.fur` and optional MIDI, and the release toolbar exposes both downloads; the bundled reference MIDI is packaged. Nested-route browser loading remained clean after the change. The original 38 MB CHIP-mode WAV is still excluded from the optimized bundle and remains a documented parity gap. 2026-09-07 07:37 — Accepted the user-supplied `golden-battletrain` folder directly in the release browser. The loader now supports Furnace v181 `INFO`, one-based root WAV stems, and missing sampler sources for CHIP-only projects; its 16-order, 94.4-second transport played and tracked rows without browser warnings/errors. Added a shared effect-aware row clock plus continuous `01xx`/`02xx` pitch ramps across web, native, and offline sampler playback. All 30 tests, WASM check, and optimized build pass; live publishing remains the final deployment step. 2026-09-07 17:38 — Added the supplied full Furnace mix as a copied release asset without inflating the WASM module, retained named full mixes from runtime-loaded folders, and made `Save .WAV` follow the active engine: direct supplied-mix download in CHIP mode and offline render in SAMPLER mode. Both paths were exercised in the release browser; CHIP reported `Saved flight_school_night_shift.wav`, SAMPLER reported `Sampler WAV rendered`, and browser diagnostics remained clean. All 30 tests, the WASM check, and the release build pass. 2026-09-07 17:48 — Added a reproducible optimized release packager and host-neutral deployment checklist. `release/lantern-player-0006-db94ea4.zip` is a 30 MB archive containing the 47 MB static site; its archive checksum, every per-file checksum, and ZIP integrity all pass. The public route is LiteSpeed behind Cloudflare, but no hosting credentials or deployment connection exist in this workspace, so transfer to `/1000-SOS/0006/` is the sole remaining step on this card. 2026-09-07 18:36 — Released by Codex A for takeover after the user's first live upload succeeded. Upload and live-smoke-test the newer `b27e01e` archive, which contains resolved bugs 004–007.
 
 #### 0006-ASGN-001 — Spectral Fusion numerical and listening validation
 
 - **Card Title:** Spectral Fusion numerical and listening validation
 - **Description:** Compare worker and native Rust outputs with controlled original-JavaScript renders for all six algorithms. Resolve material numerical differences and then collect user listening feedback on the bundled default settings. Record accepted limits for Smear randomness and platform-specific convolution behaviour.
-- **Assigned Agent:** Codex A
+- **Assigned Agent:** Unassigned
 - **Card Creation Date:** 2026-09-06 07:19
 - **Card Completion Note:** In progress; implementation, responsiveness, and golden numerical comparison are complete, but audible approval remains.
-- **Process Comments:** 2026-09-06 07:19 — Browser integration, generation cancellation, preview updates, and clean completion have been verified. 2026-09-06 12:51 — Production-worker fingerprints on the real bundled sources exactly match original Freeze, Cross-Synth, Ring Mod, and Frequency Shift; Convolve passes at 1.397% within its 2% engine tolerance, randomized Smear passes at 20.089% within its 40% statistical bound, and native real-source regression bounds pass. No discrepancy met the threshold for a Bugs card.
+- **Process Comments:** 2026-09-06 07:19 — Browser integration, generation cancellation, preview updates, and clean completion have been verified. 2026-09-06 12:51 — Production-worker fingerprints on the real bundled sources exactly match original Freeze, Cross-Synth, Ring Mod, and Frequency Shift; Convolve passes at 1.397% within its 2% engine tolerance, randomized Smear passes at 20.089% within its 40% statistical bound, and native real-source regression bounds pass. No discrepancy met the threshold for a Bugs card. 2026-09-07 18:36 — Released by Codex A for takeover; next agent should collect the user's by-ear verdict against the deployed build rather than repeat the completed numerical work.
+
+### Assigned
+
+_None currently assigned._
 
 ### Completed
 
