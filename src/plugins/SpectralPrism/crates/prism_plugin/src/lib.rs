@@ -16,6 +16,11 @@ use std::sync::{Arc, Mutex};
 /// any real MIDI note number (0-127).
 const NO_NOTE: u8 = 255;
 
+/// YYYYMMDD, stamped at compile time by `build.rs` - shown in the editor's
+/// bottom-right corner and saved into every exported preset, so it's
+/// possible to tell which plugin version made a given sound.
+const BUILD_NUMBER: &str = env!("SPECTRALPRISM_BUILD_NUMBER");
+
 /// The loop buffer is baked from a source sample (the built-in placeholder
 /// tone until a real file is loaded via the editor's "Load Sample" button)
 /// and played polyphonically through `VoiceManager`, driven by real MIDI
@@ -109,11 +114,14 @@ const RENDER_THROTTLE_MS: f32 = 100.0;
 /// horizontally) while leaving too much unused vertical space. Height
 /// bumped again (460->600) after Pitch Bend Range/Pan Center/Pan Width
 /// (`FREEZE-PLAN-019`/`FREEZE-PLAN-020`) added three more rows to the right
-/// column without a corresponding size update, forcing a scroll to see them
-/// at the default size - the `ScrollArea` safety net (see `editor()`) meant
-/// nothing was actually clipped/lost, just not visible without scrolling.
+/// column, then once more (600->640) after the Import/Export Preset row
+/// (`FREEZE-PLAN-022`) added one more row above the two-column section -
+/// each time forcing a scroll to see the new controls at the default size
+/// until bumped. The `ScrollArea` safety net (see `editor()`) means nothing
+/// is ever actually clipped/lost in the meantime, just not visible without
+/// scrolling.
 const BASE_EDITOR_WIDTH: u32 = 800;
-const BASE_EDITOR_HEIGHT: u32 = 600;
+const BASE_EDITOR_HEIGHT: u32 = 640;
 /// The editor opens at this multiple of the base size by default (matching
 /// `apply_gui_scale`'s scale factor, since the two are computed from the
 /// same base) - requested directly ("too small to read" at 1x, then a
@@ -494,6 +502,37 @@ fn load_sample_from_path(
     }
 }
 
+/// Writes the currently-playing frozen loop (`LoopBufferData`, the actual
+/// rendered spectral snapshot - not the original source sample) to a WAV
+/// file, for a downloader to import into another program (e.g. OpenMPT).
+/// 16-bit PCM int, not 32-bit float, to match this project's existing
+/// PCM-WAV export convention (0006's own sampler/sample-ZIP exports) and
+/// for the widest possible compatibility with trackers/samplers - matching
+/// `prism_cli`'s own WAV writer isn't done here since that one deliberately
+/// stays float (a fast-iteration DSP test harness, not a distributable
+/// export), and the two have no shared dependency to justify merging over.
+fn write_loop_buffer_wav(path: &Path, buffer: &LoopBufferData) -> Result<(), String> {
+    let Some(left) = buffer.channels.first() else {
+        return Err("nothing has been frozen yet - load a sample first".to_string());
+    };
+    let right = buffer.channels.get(1).unwrap_or(left);
+
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: buffer.sample_rate as u32,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).map_err(|e| format!("couldn't create WAV file: {e}"))?;
+    for (&l, &r) in left.iter().zip(right.iter()) {
+        let l_i16 = (l.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+        let r_i16 = (r.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+        writer.write_sample(l_i16).map_err(|e| format!("couldn't write sample: {e}"))?;
+        writer.write_sample(r_i16).map_err(|e| format!("couldn't write sample: {e}"))?;
+    }
+    writer.finalize().map_err(|e| format!("couldn't finalize WAV file: {e}"))
+}
+
 /// A named snapshot of every DSP-relevant param, plus the sample it was
 /// made with (if any) - see `FREEZE-PLAN-010`. Deliberately doesn't include
 /// `editor_state` (window geometry has nothing to do with the sound) or any
@@ -523,6 +562,14 @@ struct Preset {
     /// placeholder tone - recalling it then leaves whatever sample is
     /// already loaded untouched rather than resetting to the placeholder.
     sample_path: Option<PathBuf>,
+    /// Which `BUILD_NUMBER` (YYYYMMDD) made this preset, so it's possible to
+    /// tell which plugin version to blame if it doesn't sound right after
+    /// importing into a later one. `#[serde(default)]` (an empty string)
+    /// for presets saved before this existed - displayed as "unknown"
+    /// rather than a blank/confusing value. Purely informational - never
+    /// applied to anything, and never blocks an import.
+    #[serde(default)]
+    build_number: String,
 }
 
 impl Preset {
@@ -540,6 +587,7 @@ impl Preset {
             pan_center_pct: params.pan_center_pct.value(),
             pan_width_pct: params.pan_width_pct.value(),
             sample_path: params.sample_path.lock().unwrap().clone(),
+            build_number: BUILD_NUMBER.to_string(),
         }
     }
 }
@@ -577,14 +625,29 @@ fn list_presets(dir: &Path) -> Vec<String> {
     names
 }
 
-fn save_preset(dir: &Path, name: &str, preset: &Preset) -> Result<(), String> {
+/// Writes a preset to an arbitrary path - shared by the named on-disk
+/// library (`save_preset`, always under `presets_dir()`) and the
+/// interactive "Export Preset..." file dialog (any path the user picks).
+/// JSON, via the same `Preset`/serde type either route captures - see that
+/// struct's `#[serde(default)]` fields for how this stays readable by
+/// future plugin versions that add more parameters, and by past ones.
+fn write_preset_file(path: &Path, preset: &Preset) -> Result<(), String> {
     let json = serde_json::to_string_pretty(preset).map_err(|e| format!("couldn't serialize preset: {e}"))?;
-    std::fs::write(preset_file_path(dir, name), json).map_err(|e| format!("couldn't write preset file: {e}"))
+    std::fs::write(path, json).map_err(|e| format!("couldn't write preset file: {e}"))
+}
+
+/// Reads a preset from an arbitrary path - see `write_preset_file`.
+fn read_preset_file(path: &Path) -> Result<Preset, String> {
+    let json = std::fs::read_to_string(path).map_err(|e| format!("couldn't read preset file: {e}"))?;
+    serde_json::from_str(&json).map_err(|e| format!("couldn't parse preset file: {e}"))
+}
+
+fn save_preset(dir: &Path, name: &str, preset: &Preset) -> Result<(), String> {
+    write_preset_file(&preset_file_path(dir, name), preset)
 }
 
 fn load_preset(dir: &Path, name: &str) -> Result<Preset, String> {
-    let json = std::fs::read_to_string(preset_file_path(dir, name)).map_err(|e| format!("couldn't read preset file: {e}"))?;
-    serde_json::from_str(&json).map_err(|e| format!("couldn't parse preset file: {e}"))
+    read_preset_file(&preset_file_path(dir, name))
 }
 
 /// GUI-thread-only state for the editor - not shared with the audio thread
@@ -928,7 +991,18 @@ impl Plugin for PrismPlugin {
                 // dialog so both paths persist `sample_path` and re-render
                 // identically. A preset saved without a sample (`None`)
                 // leaves whatever's currently loaded untouched.
-                let apply_preset = |preset: &Preset, state: &mut PrismEditorState| {
+                //
+                // Presets deliberately still store the sample's full
+                // absolute path (privacy tradeoff accepted, since stripping
+                // it would break the common case of reloading your *own*
+                // presets) - but a shared preset's path naturally won't
+                // resolve on someone else's machine. Rather than just
+                // failing, a missing sample prompts the user to locate it
+                // via a file dialog; if they do, that corrected path is
+                // returned here so the caller can write it back into
+                // whichever preset file this came from, so it doesn't have
+                // to be re-located every time on this machine specifically.
+                let apply_preset = |preset: &Preset, state: &mut PrismEditorState| -> Option<PathBuf> {
                     let set = |param: &FloatParam, value: f32| {
                         setter.begin_set_parameter(param);
                         setter.set_parameter(param, value);
@@ -945,10 +1019,40 @@ impl Plugin for PrismPlugin {
                     set(&params.pitch_bend_range_semitones, preset.pitch_bend_range_semitones);
                     set(&params.pan_center_pct, preset.pan_center_pct);
                     set(&params.pan_width_pct, preset.pan_width_pct);
-                    if let Some(path) = &preset.sample_path {
-                        load_sample_from_path(path, &source, &loop_buffer, &trigger, &params, &loaded_filename, state);
+
+                    let Some(path) = &preset.sample_path else { return None };
+                    load_sample_from_path(path, &source, &loop_buffer, &trigger, &params, &loaded_filename, state);
+                    if state.error.is_none() {
+                        return None;
                     }
+
+                    rfd::MessageDialog::new()
+                        .set_title("Sample not found")
+                        .set_description(format!(
+                            "This preset's sample couldn't be found:\n{}\n\nLocate it to continue.",
+                            path.display()
+                        ))
+                        .show();
+                    let relocated = rfd::FileDialog::new().add_filter("WAV", &["wav", "WAV"]).pick_file()?;
+                    load_sample_from_path(&relocated, &source, &loop_buffer, &trigger, &params, &loaded_filename, state);
+                    state.error.is_none().then_some(relocated)
                 };
+
+                // A persistent bottom strip, added *before* the central
+                // content below (egui panels must be added before
+                // `CentralPanel` - which `ResizableWindow` uses internally -
+                // so it can shrink to leave room) so the build number stays
+                // fixed in the corner regardless of the content's own
+                // scroll position, rather than just being the last thing in
+                // the scrollable area.
+                egui::TopBottomPanel::bottom("spectral_prism_build_number")
+                    .frame(egui::Frame::default().inner_margin(egui::Margin::symmetric((6.0 * scale) as i8, (3.0 * scale) as i8)))
+                    .show_separator_line(false)
+                    .show(egui_ctx, |ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(egui::RichText::new(format!("Build {BUILD_NUMBER}")).small().color(COLOR_DIM));
+                        });
+                    });
 
                 ResizableWindow::new("spectral_prism_window")
                     .min_size(egui::vec2(BASE_EDITOR_WIDTH as f32, BASE_EDITOR_HEIGHT as f32))
@@ -971,10 +1075,21 @@ impl Plugin for PrismPlugin {
                         let load_preset_at = |idx: usize, state: &mut PrismEditorState| {
                             let (Some(name), Some(dir)) = (preset_names.get(idx), &presets_dir) else { return };
                             match load_preset(dir, name) {
-                                Ok(preset) => {
-                                    apply_preset(&preset, state);
+                                Ok(mut preset) => {
+                                    // `apply_preset` already leaves `state.error`
+                                    // in the right final state (set if the
+                                    // sample couldn't be found/relocated,
+                                    // cleared otherwise) - not overwritten here.
+                                    if let Some(relocated) = apply_preset(&preset, state) {
+                                        preset.sample_path = Some(relocated);
+                                        // Best-effort: a failed resave isn't
+                                        // worth surfacing as an error - the
+                                        // preset still applied correctly this
+                                        // time, it just won't remember the fix
+                                        // for next time.
+                                        let _ = save_preset(dir, name, &preset);
+                                    }
                                     *params.selected_preset.lock().unwrap() = Some(name.clone());
-                                    state.error = None;
                                 }
                                 Err(e) => state.error = Some(e),
                             }
@@ -1019,6 +1134,45 @@ impl Plugin for PrismPlugin {
                                         Err(e) => state.error = Some(e),
                                     },
                                     None => state.error = Some("couldn't find a presets directory ($HOME not set?)".to_string()),
+                                }
+                            }
+                        });
+                        ui.horizontal(|ui| {
+                            // Separate from the named on-disk library above
+                            // (Save/◀/▶/combo, all under `presets_dir()`) -
+                            // these go to/from any file the user picks, for
+                            // sharing a preset outside this machine (e.g.
+                            // alongside a sample-pack WAV export, see
+                            // "Export WAV Sample..." below).
+                            if ui.button("Import Preset...").clicked() {
+                                if let Some(path) =
+                                    rfd::FileDialog::new().add_filter("SpectralPrism Preset", &["json"]).pick_file()
+                                {
+                                    match read_preset_file(&path) {
+                                        Ok(mut preset) => {
+                                            // See `load_preset_at` for why
+                                            // `state.error` isn't touched here.
+                                            if let Some(relocated) = apply_preset(&preset, state) {
+                                                preset.sample_path = Some(relocated);
+                                                let _ = write_preset_file(&path, &preset);
+                                            }
+                                            *params.selected_preset.lock().unwrap() =
+                                                path.file_stem().map(|s| s.to_string_lossy().into_owned());
+                                        }
+                                        Err(e) => state.error = Some(e),
+                                    }
+                                }
+                            }
+                            if ui.button("Export Preset...").clicked() {
+                                if let Some(path) = rfd::FileDialog::new()
+                                    .add_filter("SpectralPrism Preset", &["json"])
+                                    .set_file_name("preset.json")
+                                    .save_file()
+                                {
+                                    match write_preset_file(&path, &Preset::capture(&params)) {
+                                        Ok(()) => state.error = None,
+                                        Err(e) => state.error = Some(e),
+                                    }
                                 }
                             }
                         });
@@ -1080,9 +1234,23 @@ impl Plugin for PrismPlugin {
                         ui.separator();
                         ui.add_space(8.0);
 
-                        if ui.button("Load Sample...").clicked() {
-                            open_sample_dialog(state);
-                        }
+                        ui.horizontal(|ui| {
+                            if ui.button("Load Sample...").clicked() {
+                                open_sample_dialog(state);
+                            }
+                            if ui.button("Export WAV Sample...").clicked() {
+                                if let Some(path) = rfd::FileDialog::new()
+                                    .add_filter("WAV", &["wav"])
+                                    .set_file_name("SpectralPrism-export.wav")
+                                    .save_file()
+                                {
+                                    match write_loop_buffer_wav(&path, &loop_buffer.load()) {
+                                        Ok(()) => state.error = None,
+                                        Err(e) => state.error = Some(e),
+                                    }
+                                }
+                            }
+                        });
 
                         ui.add_space(4.0);
                         match loaded_filename.load().as_deref() {
@@ -1320,6 +1488,7 @@ mod preset_tests {
             pan_center_pct: -10.0,
             pan_width_pct: 35.0,
             sample_path,
+            build_number: "20260101".to_string(),
         }
     }
 
@@ -1341,6 +1510,7 @@ mod preset_tests {
         assert_eq!(restored.pan_center_pct, original.pan_center_pct);
         assert_eq!(restored.pan_width_pct, original.pan_width_pct);
         assert_eq!(restored.sample_path, original.sample_path);
+        assert_eq!(restored.build_number, original.build_number);
     }
 
     #[test]
@@ -1348,7 +1518,9 @@ mod preset_tests {
         // Regression test for backward compatibility: a preset saved before
         // FREEZE-PLAN-018 added these fields must still load, defaulting to
         // pitch bend disabled and no panning (see the `Preset` struct's doc
-        // comment on why 0.0 is an acceptable fallback for both).
+        // comment on why 0.0 is an acceptable fallback for both), and
+        // before FREEZE-PLAN-023 added build_number, defaulting to an empty
+        // string (displayed as "unknown", never applied to anything).
         let old_json = r#"{
             "freeze_point_pct": 42.0,
             "formant_shift_semitones": -3.5,
@@ -1364,6 +1536,7 @@ mod preset_tests {
         assert_eq!(restored.pitch_bend_range_semitones, 0.0);
         assert_eq!(restored.pan_center_pct, 0.0);
         assert_eq!(restored.pan_width_pct, 0.0);
+        assert_eq!(restored.build_number, "");
     }
 
     #[test]
@@ -1403,5 +1576,53 @@ mod preset_tests {
         let dir = temp_dir("missing_preset");
         let result = load_preset(&dir, "does_not_exist");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn write_then_read_preset_file_round_trips_at_an_arbitrary_path() {
+        // The file-dialog Import/Export flow, as opposed to save_preset/
+        // load_preset's fixed presets_dir()-relative naming.
+        let dir = temp_dir("preset_file");
+        let path = dir.join("my-shared-preset.json");
+        let original = sample_preset(Some(PathBuf::from("/some/sample.wav")));
+
+        write_preset_file(&path, &original).expect("write should succeed");
+        let restored = read_preset_file(&path).expect("read should succeed");
+
+        assert_eq!(restored.freeze_point_pct, original.freeze_point_pct);
+        assert_eq!(restored.pan_width_pct, original.pan_width_pct);
+        assert_eq!(restored.sample_path, original.sample_path);
+    }
+
+    #[test]
+    fn write_loop_buffer_wav_produces_a_readable_stereo_wav() {
+        let dir = temp_dir("wav_export");
+        let path = dir.join("export.wav");
+        let buffer = LoopBufferData {
+            channels: vec![vec![0.5f32; 100], vec![-0.25f32; 100]],
+            sample_rate: 48000.0,
+            root_note: DEFAULT_ROOT_NOTE,
+        };
+
+        write_loop_buffer_wav(&path, &buffer).expect("export should succeed");
+
+        let mut reader = hound::WavReader::open(&path).expect("exported file should be a valid WAV");
+        let spec = reader.spec();
+        assert_eq!(spec.channels, 2);
+        assert_eq!(spec.sample_rate, 48000);
+        let samples: Vec<i32> = reader.samples::<i32>().map(|s| s.unwrap()).collect();
+        // Interleaved L/R - spot-check the first frame rather than every
+        // sample, converting back from i16 to approximately the original
+        // f32 range to allow for quantization rounding.
+        assert!((samples[0] as f32 / i16::MAX as f32 - 0.5).abs() < 1e-3);
+        assert!((samples[1] as f32 / i16::MAX as f32 - -0.25).abs() < 1e-3);
+    }
+
+    #[test]
+    fn write_loop_buffer_wav_fails_with_message_when_nothing_frozen() {
+        let dir = temp_dir("wav_export_empty");
+        let path = dir.join("export.wav");
+        let buffer = LoopBufferData { channels: Vec::new(), sample_rate: 48000.0, root_note: DEFAULT_ROOT_NOTE };
+        assert!(write_loop_buffer_wav(&path, &buffer).is_err());
     }
 }
