@@ -1,7 +1,0 @@
-[package]
-name = "xtask"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-nih_plug_xtask = { workspace = true }

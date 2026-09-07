@@ -1,5 +1,0 @@
-# Metadata for `cargo xtask bundle <package_name>`. See
-# https://github.com/robbert-vdh/nih-plug's own bundler.toml for the format.
-
-[prism_plugin]
-name = "SpectralPrism"

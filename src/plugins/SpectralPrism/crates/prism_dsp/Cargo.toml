@@ -1,7 +1,0 @@
-[package]
-name = "prism_dsp"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-realfft = "3.5"
