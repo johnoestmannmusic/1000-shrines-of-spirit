@@ -51,6 +51,12 @@ pub struct PrismPlugin {
     worker: Option<RenderWorker>,
     voices: VoiceManager,
     sample_rate: f32,
+    /// Raw MIDI pitch wheel position, normalized `[0, 1]` with `0.5` = no
+    /// bend (nih-plug's own convention for `NoteEvent::MidiPitchBend`, see
+    /// `process()`). Audio-thread-only - not a param, since the wheel's
+    /// live position isn't a settable value, only how far it's *allowed* to
+    /// bend is (`PrismPluginParams::pitch_bend_range_semitones`).
+    pitch_bend_normalized: f32,
     /// The params a render has already been requested for (or that were
     /// used for the initial synchronous render). Compared against the
     /// current param values each block to detect a change at all.
@@ -236,6 +242,17 @@ struct PrismPluginParams {
     #[persist = "sample-path"]
     sample_path: Mutex<Option<PathBuf>>,
 
+    /// Name of the last preset loaded or saved, if any - persisted the same
+    /// way as `sample_path` above, for the same reason: without this, a
+    /// saved host project restores every param correctly (`FloatParam`s
+    /// already persist on their own) but the editor's preset browser shows
+    /// "(no preset)" after reopening, even though the actual sound came
+    /// back fine. Purely a GUI display/navigation aid (drives the combo
+    /// box's selection and Prev/Next's starting point) - never read by the
+    /// DSP path.
+    #[persist = "selected-preset"]
+    selected_preset: Mutex<Option<String>>,
+
     #[id = "freeze_point"]
     pub freeze_point: FloatParam,
 
@@ -259,6 +276,19 @@ struct PrismPluginParams {
 
     #[id = "velocity_sensitivity"]
     pub velocity_sensitivity: FloatParam,
+
+    /// Maximum semitones the pitch wheel can bend by (at full deflection
+    /// either direction) - the wheel's own raw MIDI position isn't a param
+    /// at all (it's a continuous performance control, not a settable
+    /// value), only how far it's *allowed* to bend is.
+    #[id = "pitch_bend_range"]
+    pub pitch_bend_range_semitones: FloatParam,
+
+    #[id = "pan_center"]
+    pub pan_center_pct: FloatParam,
+
+    #[id = "pan_width"]
+    pub pan_width_pct: FloatParam,
 }
 
 fn silent_loop_buffer() -> LoopBufferData {
@@ -276,6 +306,7 @@ impl Default for PrismPlugin {
             worker: None,
             voices: VoiceManager::new(1.0, DEFAULT_ROOT_NOTE),
             sample_rate: 1.0,
+            pitch_bend_normalized: 0.5,
             last_requested: RenderRequest { freeze_point_pct: 50.0, formant_shift_semitones: 0.0, stereo_width_pct: 30.0 },
             pending_request: None,
             throttle_countdown: 0,
@@ -293,6 +324,7 @@ impl Default for PrismPluginParams {
                 (BASE_EDITOR_HEIGHT as f32 * DEFAULT_SCALE) as u32,
             ),
             sample_path: Mutex::new(None),
+            selected_preset: Mutex::new(None),
             freeze_point: FloatParam::new("Freeze Point", 50.0, FloatRange::Linear { min: 0.0, max: 100.0 })
                 .with_unit(" %"),
             formant_shift: FloatParam::new(
@@ -333,6 +365,16 @@ impl Default for PrismPluginParams {
                 FloatRange::Linear { min: 0.0, max: 100.0 },
             )
             .with_unit(" %"),
+            pitch_bend_range_semitones: FloatParam::new(
+                "Pitch Bend Range",
+                2.0, // the MIDI/GM standard default of +/-2 semitones
+                FloatRange::Linear { min: 0.0, max: 24.0 },
+            )
+            .with_unit(" st"),
+            pan_center_pct: FloatParam::new("Pan Center", 0.0, FloatRange::Linear { min: -100.0, max: 100.0 })
+                .with_unit(" %"),
+            pan_width_pct: FloatParam::new("Pan Width", 0.0, FloatRange::Linear { min: 0.0, max: 100.0 })
+                .with_unit(" %"),
         }
     }
 }
@@ -461,6 +503,17 @@ struct Preset {
     sustain_pct: f32,
     release_ms: f32,
     velocity_sensitivity_pct: f32,
+    /// `#[serde(default)]` on these three: presets saved before they
+    /// existed must still load rather than fail outright - they'll just
+    /// come back with pitch bend disabled (range 0) and no panning (center/
+    /// width 0), the same as a freshly-created instance would have before
+    /// anyone touched these controls.
+    #[serde(default)]
+    pitch_bend_range_semitones: f32,
+    #[serde(default)]
+    pan_center_pct: f32,
+    #[serde(default)]
+    pan_width_pct: f32,
     /// `None` if the preset was saved while still on the built-in
     /// placeholder tone - recalling it then leaves whatever sample is
     /// already loaded untouched rather than resetting to the placeholder.
@@ -478,6 +531,9 @@ impl Preset {
             sustain_pct: params.sustain.value(),
             release_ms: params.release.value(),
             velocity_sensitivity_pct: params.velocity_sensitivity.value(),
+            pitch_bend_range_semitones: params.pitch_bend_range_semitones.value(),
+            pan_center_pct: params.pan_center_pct.value(),
+            pan_width_pct: params.pan_width_pct.value(),
             sample_path: params.sample_path.lock().unwrap().clone(),
         }
     }
@@ -529,16 +585,14 @@ fn load_preset(dir: &Path, name: &str) -> Result<Preset, String> {
 /// GUI-thread-only state for the editor - not shared with the audio thread
 /// and not persisted. Which file is loaded lives on the plugin itself
 /// (`PrismPlugin::loaded_filename`) instead, so it survives the editor
-/// window being closed and reopened; only the load-error message and the
-/// preset-browser's own UI state (fine to forget when the editor is
-/// reopened - they're just a cursor position and a text field, not sound-
-/// affecting state) stay here.
+/// window being closed and reopened; the selected-preset name lives on
+/// `PrismPluginParams` for the same reason (and so it round-trips through a
+/// saved host project - see that field's doc comment). Only the load-error
+/// message and the preset-name text field (fine to forget when the editor
+/// is reopened - not sound-affecting state) stay here.
 #[derive(Default)]
 struct PrismEditorState {
     error: Option<String>,
-    /// Name of the preset last loaded/saved, if any - drives the combo
-    /// box's displayed selection and Prev/Next's starting point.
-    selected_preset: Option<String>,
     /// Text field buffer for naming a new preset to save.
     preset_name_input: String,
 }
@@ -807,7 +861,9 @@ impl Plugin for PrismPlugin {
         ..AudioIOLayout::const_default()
     }];
 
-    const MIDI_INPUT: MidiConfig = MidiConfig::Basic;
+    // MidiCCs (not just Basic) is required to actually receive
+    // NoteEvent::MidiPitchBend - Basic alone silently never delivers it.
+    const MIDI_INPUT: MidiConfig = MidiConfig::MidiCCs;
     const SAMPLE_ACCURATE_AUTOMATION: bool = true;
 
     type SysExMessage = ();
@@ -881,6 +937,9 @@ impl Plugin for PrismPlugin {
                     set(&params.sustain, preset.sustain_pct);
                     set(&params.release, preset.release_ms);
                     set(&params.velocity_sensitivity, preset.velocity_sensitivity_pct);
+                    set(&params.pitch_bend_range_semitones, preset.pitch_bend_range_semitones);
+                    set(&params.pan_center_pct, preset.pan_center_pct);
+                    set(&params.pan_width_pct, preset.pan_width_pct);
                     if let Some(path) = &preset.sample_path {
                         load_sample_from_path(path, &source, &loop_buffer, &trigger, &params, &loaded_filename, state);
                     }
@@ -895,15 +954,21 @@ impl Plugin for PrismPlugin {
 
                         let presets_dir = presets_dir();
                         let preset_names = presets_dir.as_deref().map(list_presets).unwrap_or_default();
+                        // Cloned out of the lock immediately - held only
+                        // long enough to read, not across the rest of the
+                        // frame (see `PrismPluginParams::selected_preset`'s
+                        // doc comment for why this lives there, not in
+                        // `PrismEditorState`).
+                        let selected_preset_name = params.selected_preset.lock().unwrap().clone();
                         let current_preset_idx =
-                            state.selected_preset.as_ref().and_then(|name| preset_names.iter().position(|n| n == name));
+                            selected_preset_name.as_ref().and_then(|name| preset_names.iter().position(|n| n == name));
 
                         let load_preset_at = |idx: usize, state: &mut PrismEditorState| {
                             let (Some(name), Some(dir)) = (preset_names.get(idx), &presets_dir) else { return };
                             match load_preset(dir, name) {
                                 Ok(preset) => {
                                     apply_preset(&preset, state);
-                                    state.selected_preset = Some(name.clone());
+                                    *params.selected_preset.lock().unwrap() = Some(name.clone());
                                     state.error = None;
                                 }
                                 Err(e) => state.error = Some(e),
@@ -915,7 +980,7 @@ impl Plugin for PrismPlugin {
                                 let idx = current_preset_idx.map(|i| i.saturating_sub(1)).unwrap_or(0);
                                 load_preset_at(idx, state);
                             }
-                            let combo_label = state.selected_preset.as_deref().unwrap_or("(no preset)");
+                            let combo_label = selected_preset_name.as_deref().unwrap_or("(no preset)");
                             egui::ComboBox::from_id_salt("spectral_prism_preset_combo").selected_text(combo_label).show_ui(
                                 ui,
                                 |ui| {
@@ -943,7 +1008,7 @@ impl Plugin for PrismPlugin {
                                 match &presets_dir {
                                     Some(dir) => match save_preset(dir, &name, &Preset::capture(&params)) {
                                         Ok(()) => {
-                                            state.selected_preset = Some(name);
+                                            *params.selected_preset.lock().unwrap() = Some(name);
                                             state.error = None;
                                         }
                                         Err(e) => state.error = Some(e),
@@ -994,6 +1059,16 @@ impl Plugin for PrismPlugin {
                             right.add_space(8.0);
                             right.label("Velocity Sensitivity");
                             right.add(widgets::ParamSlider::for_param(&params.velocity_sensitivity, setter));
+
+                            right.add_space(8.0);
+                            right.label("Pitch Bend Range");
+                            right.add(widgets::ParamSlider::for_param(&params.pitch_bend_range_semitones, setter));
+
+                            right.add_space(8.0);
+                            right.label("Pan Center");
+                            right.add(widgets::ParamSlider::for_param(&params.pan_center_pct, setter));
+                            right.label("Pan Width");
+                            right.add(widgets::ParamSlider::for_param(&params.pan_width_pct, setter));
                         });
 
                         ui.add_space(12.0);
@@ -1135,6 +1210,7 @@ impl Plugin for PrismPlugin {
             release_ms: self.params.release.value(),
         });
         self.voices.set_velocity_sensitivity(self.params.velocity_sensitivity.value() / 100.0);
+        self.voices.set_pan_settings(self.params.pan_center_pct.value() / 100.0, self.params.pan_width_pct.value() / 100.0);
 
         // Block-level MIDI handling: every event pending for this buffer is
         // applied before rendering, rather than split at the exact sample it
@@ -1153,9 +1229,20 @@ impl Plugin for PrismPlugin {
                 NoteEvent::Choke { .. } => {
                     self.voices.choke_all();
                 }
+                NoteEvent::MidiPitchBend { value, .. } => {
+                    // `value` is normalized [0, 1] with 0.5 = no bend (see
+                    // nih-plug's own doc comment on the variant) - stored
+                    // raw and converted to semitones below, after the loop,
+                    // so a same-block wheel movement still takes effect for
+                    // this block rather than being delayed to the next one.
+                    self.pitch_bend_normalized = value;
+                }
                 _ => (),
             }
         }
+        self.voices.set_pitch_bend_semitones(
+            (self.pitch_bend_normalized - 0.5) * 2.0 * self.params.pitch_bend_range_semitones.value(),
+        );
 
         let loop_buffer = self.loop_buffer.load();
         let channels = buffer.as_slice();
@@ -1224,6 +1311,9 @@ mod preset_tests {
             sustain_pct: 70.0,
             release_ms: 500.0,
             velocity_sensitivity_pct: 80.0,
+            pitch_bend_range_semitones: 4.0,
+            pan_center_pct: -10.0,
+            pan_width_pct: 35.0,
             sample_path,
         }
     }
@@ -1242,7 +1332,33 @@ mod preset_tests {
         assert_eq!(restored.sustain_pct, original.sustain_pct);
         assert_eq!(restored.release_ms, original.release_ms);
         assert_eq!(restored.velocity_sensitivity_pct, original.velocity_sensitivity_pct);
+        assert_eq!(restored.pitch_bend_range_semitones, original.pitch_bend_range_semitones);
+        assert_eq!(restored.pan_center_pct, original.pan_center_pct);
+        assert_eq!(restored.pan_width_pct, original.pan_width_pct);
         assert_eq!(restored.sample_path, original.sample_path);
+    }
+
+    #[test]
+    fn preset_without_pitch_bend_or_pan_fields_still_deserializes() {
+        // Regression test for backward compatibility: a preset saved before
+        // FREEZE-PLAN-018 added these fields must still load, defaulting to
+        // pitch bend disabled and no panning (see the `Preset` struct's doc
+        // comment on why 0.0 is an acceptable fallback for both).
+        let old_json = r#"{
+            "freeze_point_pct": 42.0,
+            "formant_shift_semitones": -3.5,
+            "stereo_width_pct": 60.0,
+            "attack_ms": 12.0,
+            "decay_ms": 250.0,
+            "sustain_pct": 70.0,
+            "release_ms": 500.0,
+            "velocity_sensitivity_pct": 80.0,
+            "sample_path": null
+        }"#;
+        let restored: Preset = serde_json::from_str(old_json).expect("old-format preset should still deserialize");
+        assert_eq!(restored.pitch_bend_range_semitones, 0.0);
+        assert_eq!(restored.pan_center_pct, 0.0);
+        assert_eq!(restored.pan_width_pct, 0.0);
     }
 
     #[test]

@@ -62,6 +62,37 @@ fn soft_limit(x: f32) -> f32 {
     x.signum() * compressed
 }
 
+/// Minimal xorshift32 PRNG, used only for the per-voice pan randomizer
+/// (`VoiceManager::pan_width`) - deliberately not a real `rand`-crate
+/// dependency, since nothing here needs cryptographic or even rigorous
+/// statistical quality, just a perceptually-varied spread across notes.
+/// Deterministic given the same call sequence, which keeps it testable
+/// (same note sequence always produces the same pan pattern).
+struct SimpleRng(u32);
+
+impl SimpleRng {
+    /// Must be non-zero - xorshift32 stays at zero forever if seeded there.
+    const SEED: u32 = 0x9E3779B9;
+
+    fn new() -> Self {
+        Self(Self::SEED)
+    }
+
+    fn next_u32(&mut self) -> u32 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.0 = x;
+        x
+    }
+
+    /// A value in `[-1.0, 1.0]`.
+    fn next_bipolar(&mut self) -> f32 {
+        (self.next_u32() as f32 / u32::MAX as f32) * 2.0 - 1.0
+    }
+}
+
 /// Attack/Decay/Sustain/Release timing applied to newly triggered voices
 /// (like most synths, changing these doesn't reshape a note already
 /// mid-envelope - only the *next* `note_on` picks up a change). Defaults to
@@ -91,6 +122,11 @@ pub struct Voice {
     pub reader: PlaybackReader,
     pub env: AdsrEnvelope,
     pub triggered_at: u64,
+    /// Fixed at `note_on` time (see `VoiceManager::pan_center`/`pan_width`) -
+    /// like gain and rate, panning doesn't change for a voice already
+    /// playing, only for the next one triggered. `-1.0` = full left, `0.0`
+    /// = center, `1.0` = full right.
+    pub pan: f32,
 }
 
 /// Fixed-size (no audio-thread allocation) polyphonic voice pool reading
@@ -139,6 +175,28 @@ pub struct VoiceManager {
     /// only affects voices triggered after it's set - not already-playing
     /// ones.
     velocity_sensitivity: f32,
+    /// Center point for the per-voice pan randomizer, in `[-1.0, 1.0]`
+    /// (`-1.0` = full left, `0.0` = center, `1.0` = full right). Like
+    /// `AdsrSettings`, only affects voices triggered after it's set.
+    pan_center: f32,
+    /// How far each newly triggered voice's pan can randomly land from
+    /// `pan_center`, in `[0.0, 1.0]` - `0.0` disables randomization
+    /// entirely (every voice pans to exactly `pan_center`), `1.0` allows
+    /// the full range on either side (clamped to stay within `[-1.0, 1.0]`
+    /// overall).
+    pan_width: f32,
+    /// Advanced once per `note_on` - see `SimpleRng`.
+    pan_rng: SimpleRng,
+    /// Current pitch bend amount in semitones (already `wheel_position *
+    /// range` - see `PrismPluginParams::pitch_bend_range_semitones` on the
+    /// plugin side; this struct doesn't need to know about raw MIDI
+    /// encoding or the range param, just the final musical value). Unlike
+    /// `AdsrSettings`/`velocity_sensitivity`/pan, this is a real-time
+    /// continuous control applied to *every* currently-active voice's
+    /// playback rate every block, not just newly triggered ones - that's
+    /// what real MIDI pitch bend does (it bends whatever is currently
+    /// sounding on the channel).
+    pitch_bend_semitones: f32,
 }
 
 impl VoiceManager {
@@ -155,6 +213,10 @@ impl VoiceManager {
             active_compensation: 1.0,
             smoothed_gain_compensation: 1.0,
             velocity_sensitivity: DEFAULT_VELOCITY_SENSITIVITY,
+            pan_center: 0.0,
+            pan_width: 0.0,
+            pan_rng: SimpleRng::new(),
+            pitch_bend_semitones: 0.0,
         }
     }
 
@@ -172,6 +234,18 @@ impl VoiceManager {
         self.velocity_sensitivity = sensitivity;
     }
 
+    /// Applied to voices triggered from now on - see `pan_center`/`pan_width`.
+    pub fn set_pan_settings(&mut self, center: f32, width: f32) {
+        self.pan_center = center.clamp(-1.0, 1.0);
+        self.pan_width = width.clamp(0.0, 1.0);
+    }
+
+    /// Applied to every currently-active voice on the next block - see
+    /// `pitch_bend_semitones`.
+    pub fn set_pitch_bend_semitones(&mut self, semitones: f32) {
+        self.pitch_bend_semitones = semitones;
+    }
+
     pub fn note_on(&mut self, note: u8, channel: u8, velocity: f32, id: i32) {
         let currently_active = self.active_voice_count();
         if currently_active == 0 {
@@ -186,7 +260,19 @@ impl VoiceManager {
         // one in place, so the total stays exactly what it already was
         // (which should already be `MAX_VOICES` whenever stealing happens).
         let new_total = if free_slot.is_some() { currently_active + 1 } else { currently_active.max(1) };
-        let required = 1.0 / new_total as f32;
+        // 1/sqrt(n), not strict 1/n: found by ear to be way too aggressive a
+        // step per added voice (each new note roughly halves every other
+        // held voice's volume under 1/n, a very audible ~6dB jump). 1/sqrt(n)
+        // assumes voices are uncorrelated for loudness-summing purposes -
+        // truer in practice here than it sounds, since different playback
+        // rates through the same frozen spectrum drift in and out of phase
+        // rather than staying perfectly aligned - and gives much gentler,
+        // more natural-feeling steps (2 voices: -3dB per voice; 3: -1.8dB
+        // more). `soft_limit` (see `process_block`) is the safety net for
+        // the rarer fully-correlated moments this doesn't cover as strictly
+        // as 1/n did - relying on it is exactly why 1/n was overly
+        // conservative on its own before that limiter existed.
+        let required = 1.0 / (new_total as f32).sqrt();
         if required < self.active_compensation {
             self.active_compensation = required;
         }
@@ -199,6 +285,10 @@ impl VoiceManager {
         // a controller/player where velocity scaling isn't wanted) and the
         // original gain-equals-velocity behavior (sensitivity 1.0).
         let gain = 1.0 - self.velocity_sensitivity * (1.0 - velocity);
+        // Randomized once per voice within [pan_center - pan_width,
+        // pan_center + pan_width], clamped to stay in range - width 0.0
+        // always lands exactly on pan_center (no randomization at all).
+        let pan = (self.pan_center + self.pan_width * self.pan_rng.next_bipolar()).clamp(-1.0, 1.0);
         let voice = Voice {
             id,
             note,
@@ -208,6 +298,7 @@ impl VoiceManager {
             reader: PlaybackReader::new(0.0),
             env,
             triggered_at: self.clock,
+            pan,
         };
 
         let slot = free_slot.unwrap_or_else(|| self.steal_slot());
@@ -306,32 +397,48 @@ impl VoiceManager {
         };
 
         // Voices are summed with no per-voice headroom, so a held chord
-        // clips without this. A single frozen note can already sit close to
-        // full scale, and frozen spectra from the same source can be highly
-        // correlated across notes (e.g. a small formant/pitch difference),
-        // so 1/sqrt(n) (tuned for uncorrelated signals) isn't conservative
-        // enough - it still let 4 voices clip in practice. 1/n guarantees
-        // the sum can never exceed a single voice's own peak even in the
-        // fully-correlated worst case, at the cost of chords getting quieter
-        // faster than perceived loudness would suggest.
-        //
-        // The actual `1/n` decision happens once, in `note_on`, as a
-        // ratchet (`active_compensation`) rather than being recomputed from
-        // the live count every block here - see that field's docs for why:
-        // recomputing it here from "1 / active_voice_count()" (the original
-        // design) meant a still-playing voice's effective share - and
-        // therefore its volume - grew the instant an unrelated sibling
-        // voice finished, which is audible and was never actually wanted.
-        // This is applied as a smoothed post-sum multiply, not per-voice
-        // inside the loop below: mathematically identical for a constant
-        // multiplier (gain * sum(x_i) == sum(gain * x_i)), but it's the only
-        // way to *smooth* the ratchet's occasional downward steps so a new
-        // chord note doesn't click every other already-sounding voice.
+        // clips without this. `note_on` decides the actual 1/sqrt(n)
+        // compensation once, as a ratchet (`active_compensation`) - see that
+        // field's docs for why it's a ratchet and not recomputed from the
+        // live count every block here (the original design let an already-
+        // playing voice's volume grow on its own when a sibling finished,
+        // which was audible and never wanted). 1/sqrt(n) alone doesn't
+        // algebraically guarantee the sum can never exceed a single voice's
+        // own peak in the fully-correlated worst case (unlike the stricter,
+        // but perceptually too-aggressive, 1/n this replaced) - `soft_limit`
+        // below is the safety net that catches the rare cases it doesn't
+        // cover, which is what makes relying on the gentler curve safe.
+        // Applied as a smoothed post-sum multiply, not per-voice inside the
+        // loop below: mathematically identical for a constant multiplier
+        // (gain * sum(x_i) == sum(gain * x_i)), but it's the only way to
+        // *smooth* the ratchet's occasional downward steps so a new chord
+        // note doesn't click every other already-sounding voice.
+        // Computed once per block, not per-sample: pitch bend is a MIDI
+        // wheel position, not audio-rate. Applied to *every* active voice's
+        // read rate (real MIDI pitch bend affects whatever's currently
+        // sounding on the channel, not just newly triggered notes - unlike
+        // gain/pan/ADSR, which are only decided once at `note_on`).
+        let bend_multiplier = 2.0_f64.powf(self.pitch_bend_semitones as f64 / 12.0);
+
         for slot in self.voices.iter_mut() {
             let Some(voice) = slot else { continue };
+            let bent_rate = voice.rate * bend_multiplier;
+            // Linear (not constant-power) pan: deliberately chosen so it's
+            // exact *identity* at the default `pan == 0.0` (left_gain ==
+            // right_gain == 1.0, i.e. the original unpanned behavior) rather
+            // than collapsing to mono at center the way a constant-power law
+            // would - important here because Stereo Width already bakes a
+            // real L/R difference into the source at render time, and this
+            // must not quietly undo that whenever the pan randomizer is left
+            // at its default (`pan_width == 0.0`, so every voice pans to
+            // exactly 0.0). Panning instead reduces the *opposite* channel's
+            // contribution as pan moves away from center.
+            let pan = voice.pan.clamp(-1.0, 1.0);
+            let left_gain = 1.0 - pan.max(0.0);
+            let right_gain = 1.0 + pan.min(0.0);
             for i in 0..out_left.len() {
                 let pos_before_advance = voice.reader.read_pos;
-                let (mut l, mut r) = voice.reader.read_stereo_and_advance(left_channel, right_channel, voice.rate);
+                let (mut l, mut r) = voice.reader.read_stereo_and_advance(left_channel, right_channel, bent_rate);
 
                 if let Some((outgoing_left, outgoing_right)) = crossfade {
                     let elapsed = self.crossfade_elapsed + i;
@@ -344,8 +451,8 @@ impl VoiceManager {
                 }
 
                 let level = voice.env.advance();
-                out_left[i] += l * level * voice.gain;
-                out_right[i] += r * level * voice.gain;
+                out_left[i] += l * left_gain * level * voice.gain;
+                out_right[i] += r * right_gain * level * voice.gain;
             }
             if voice.env.is_finished() {
                 *slot = None;
@@ -553,12 +660,22 @@ mod tests {
     }
 
     #[test]
-    fn gain_compensation_scales_down_with_more_active_voices() {
-        // A held chord must not clip even in the fully-correlated worst
-        // case: N simultaneous identical voices should sum to the same
-        // level as a single voice, not N times.
+    fn gain_compensation_uses_inverse_sqrt_of_voice_count() {
+        // Not strict 1/n (see note_on's docs for why that was replaced by
+        // ear - it made each added voice roughly halve every other held
+        // voice's volume, a very audible step). With 1/sqrt(n) compensation
+        // and N fully-correlated (identical buffer, same constant-value
+        // signal at every sample regardless of pitch) voices, the
+        // uncompensated sum is N times a single voice's own level, so after
+        // compensation the result is single_level * sqrt(n), not an
+        // unchanged single_level - this proves the actual curve in use.
+        // Buffer amplitude kept low enough that even 4 summed voices stay
+        // under `SOFT_LIMIT_THRESHOLD`, so the safety limiter doesn't
+        // confound this test's own concern (the compensation ratio, not
+        // peak safety - see `chord_attack_at_zero_velocity_sensitivity_never_exceeds_unity`
+        // for that).
         let buffer = Arc::new(LoopBufferData {
-            channels: vec![vec![1.0f32; 8192], vec![1.0f32; 8192]],
+            channels: vec![vec![0.3f32; 8192], vec![0.3f32; 8192]],
             sample_rate: 48000.0,
             root_note: DEFAULT_ROOT_NOTE,
         });
@@ -584,12 +701,14 @@ mod tests {
         let tail_start = single_out_l.len() - 100;
         let single_level: f32 = single_out_l[tail_start..].iter().sum::<f32>() / 100.0;
         let quad_level: f32 = quad_out_l[tail_start..].iter().sum::<f32>() / 100.0;
+        let expected_quad_level = single_level * 4.0_f32.sqrt();
 
         assert!(
-            (quad_level - single_level).abs() < 1e-2,
-            "expected 4 voices (1/4 compensation) to sum to the same level as a single voice: single={}, quad={}",
+            (quad_level - expected_quad_level).abs() < 1e-2,
+            "expected 4 fully-correlated voices (1/sqrt(4) compensation) to sum to sqrt(4)x a single voice: single={}, quad={}, expected_quad={}",
             single_level,
-            quad_level
+            quad_level,
+            expected_quad_level
         );
     }
 
@@ -679,21 +798,23 @@ mod tests {
 
         // The old design would have let this climb back to ~0.5 (full,
         // uncompensated level) over the ~150ms smoothing window. It must
-        // instead stay at the 2-voice-compensated level (0.5 buffer * 0.5
-        // compensation = 0.25) indefinitely, since only voice A finished -
-        // nothing new was triggered to justify a louder voice B.
+        // instead stay at the 2-voice-compensated level (0.5 buffer *
+        // 1/sqrt(2) compensation ~= 0.354) indefinitely, since only voice A
+        // finished - nothing new was triggered to justify a louder voice B.
+        let two_voice_level = 0.5 / 2.0_f32.sqrt();
         for _ in 0..(sample_rate as usize / 5) {
             vm.process_block(&buffer, &mut out_l, &mut out_r);
         }
         assert!(
-            (out_l[0] - 0.25).abs() < 1e-2,
-            "a lone surviving voice must not recover toward full level just because a sibling finished, got {}",
-            out_l[0]
+            (out_l[0] - two_voice_level).abs() < 1e-2,
+            "a lone surviving voice must not recover toward full level just because a sibling finished, got {} (expected {})",
+            out_l[0],
+            two_voice_level
         );
 
         // And the ratchet must still relax once *everything* has gone
         // quiet: choke the survivor, then confirm a brand new note starts
-        // fresh at full (uncompensated) level, not stuck at 0.25 forever.
+        // fresh at full (uncompensated) level, not stuck attenuated forever.
         vm.choke_all();
         assert_eq!(vm.active_voice_count(), 0);
         vm.note_on(60, 0, 1.0, 3);
@@ -789,5 +910,118 @@ mod tests {
         for i in tail_start..out_left.len() {
             assert!((out_left[i] - -0.5).abs() < 1e-3, "expected to have settled on buffer_b, got {}", out_left[i]);
         }
+    }
+
+    #[test]
+    fn pitch_bend_scales_playback_rate() {
+        let sample_rate = 48000.0;
+        let mut vm = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
+        vm.note_on(DEFAULT_ROOT_NOTE, 0, 1.0, 1);
+        let base_rate = vm.voices[0].as_ref().unwrap().rate;
+
+        vm.set_pitch_bend_semitones(12.0); // one octave up -> rate should double
+        let buffer = make_buffer();
+        let mut out_l = [0.0f32];
+        let mut out_r = [0.0f32];
+        vm.process_block(&buffer, &mut out_l, &mut out_r);
+
+        let advanced = vm.voices[0].as_ref().unwrap().reader.read_pos;
+        let expected = base_rate * 2.0;
+        assert!(
+            (advanced - expected).abs() < 1e-6,
+            "expected read position to advance by the pitch-bent rate ({expected}), got {advanced}"
+        );
+    }
+
+    #[test]
+    fn zero_pitch_bend_is_identity() {
+        let sample_rate = 48000.0;
+        let mut vm = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
+        vm.note_on(DEFAULT_ROOT_NOTE, 0, 1.0, 1);
+        let base_rate = vm.voices[0].as_ref().unwrap().rate;
+
+        vm.set_pitch_bend_semitones(0.0);
+        let buffer = make_buffer();
+        let mut out_l = [0.0f32];
+        let mut out_r = [0.0f32];
+        vm.process_block(&buffer, &mut out_l, &mut out_r);
+
+        let advanced = vm.voices[0].as_ref().unwrap().reader.read_pos;
+        assert!(
+            (advanced - base_rate).abs() < 1e-9,
+            "zero bend should leave the playback rate completely unchanged, expected {base_rate}, got {advanced}"
+        );
+    }
+
+    #[test]
+    fn default_pan_settings_preserve_existing_stereo_image() {
+        // pan_center=0.0, pan_width=0.0 (the defaults) must be a no-op -
+        // regression test for the risk that adding per-voice panning could
+        // quietly undo Stereo Width's already-baked L/R difference.
+        let mut vm = VoiceManager::new(48000.0, DEFAULT_ROOT_NOTE);
+        vm.note_on(60, 0, 1.0, 1);
+
+        let buffer = Arc::new(LoopBufferData {
+            channels: vec![vec![0.6f32; 4096], vec![0.3f32; 4096]],
+            sample_rate: 48000.0,
+            root_note: DEFAULT_ROOT_NOTE,
+        });
+        let mut out_left = vec![0.0f32; 4096];
+        let mut out_right = vec![0.0f32; 4096];
+        for _ in 0..5 {
+            vm.process_block(&buffer, &mut out_left, &mut out_right);
+        }
+
+        let tail_start = out_left.len() - 100;
+        for i in tail_start..out_left.len() {
+            assert!((out_left[i] - 0.6).abs() < 1e-3, "got {}", out_left[i]);
+            assert!((out_right[i] - 0.3).abs() < 1e-3, "got {}", out_right[i]);
+        }
+    }
+
+    #[test]
+    fn hard_pan_silences_the_opposite_channel() {
+        let mut vm = VoiceManager::new(48000.0, DEFAULT_ROOT_NOTE);
+        vm.set_pan_settings(1.0, 0.0); // hard right, no randomization
+        vm.note_on(60, 0, 1.0, 1);
+
+        let buffer = Arc::new(LoopBufferData {
+            channels: vec![vec![0.6f32; 4096], vec![0.3f32; 4096]],
+            sample_rate: 48000.0,
+            root_note: DEFAULT_ROOT_NOTE,
+        });
+        let mut out_left = vec![0.0f32; 4096];
+        let mut out_right = vec![0.0f32; 4096];
+        for _ in 0..5 {
+            vm.process_block(&buffer, &mut out_left, &mut out_right);
+        }
+
+        let tail_start = out_left.len() - 100;
+        for i in tail_start..out_left.len() {
+            assert!(out_left[i].abs() < 1e-4, "hard-right pan should silence the left channel entirely, got {}", out_left[i]);
+            assert!(
+                (out_right[i] - 0.3).abs() < 1e-3,
+                "hard-right pan should leave the right channel's own content unchanged, got {}",
+                out_right[i]
+            );
+        }
+    }
+
+    #[test]
+    fn pan_randomizer_stays_within_configured_width_and_varies() {
+        let mut vm = VoiceManager::new(48000.0, DEFAULT_ROOT_NOTE);
+        vm.set_pan_settings(0.0, 0.5);
+
+        let mut pans = Vec::new();
+        for i in 0..40 {
+            vm.note_on(60, 0, 1.0, i);
+            let pan = vm.voices.iter().find_map(|v| v.as_ref()).map(|v| v.pan).unwrap();
+            pans.push(pan);
+            vm.choke_all();
+        }
+
+        assert!(pans.iter().all(|&p| (-0.5..=0.5).contains(&p)), "all pans should stay within the configured width: {pans:?}");
+        let distinct = pans.windows(2).any(|w| (w[0] - w[1]).abs() > 1e-6);
+        assert!(distinct, "expected pan values to vary across notes, got all identical: {pans:?}");
     }
 }
