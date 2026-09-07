@@ -275,6 +275,14 @@ struct PrismPluginParams {
     #[id = "stereo_width"]
     pub stereo_width: FloatParam,
 
+    /// Length of the frozen loop buffer itself (not the FreezeFft/playback
+    /// duration) - shorter values reduce both the in-memory buffer size and
+    /// the exported WAV's file size. Purely a size/perceptual tradeoff, not
+    /// a technical one: any hop-aligned length loops with the same
+    /// continuity (see `render::render_frozen_loop`'s doc comment).
+    #[id = "loop_length"]
+    pub loop_length_seconds: FloatParam,
+
     #[id = "attack"]
     pub attack: FloatParam,
 
@@ -320,7 +328,12 @@ impl Default for PrismPlugin {
             voices: VoiceManager::new(1.0, DEFAULT_ROOT_NOTE),
             sample_rate: 1.0,
             pitch_bend_normalized: 0.5,
-            last_requested: RenderRequest { freeze_point_pct: 50.0, formant_shift_semitones: 0.0, stereo_width_pct: 30.0 },
+            last_requested: RenderRequest {
+                freeze_point_pct: 50.0,
+                formant_shift_semitones: 0.0,
+                stereo_width_pct: 30.0,
+                loop_length_seconds: prism_dsp::render::DEFAULT_LOOP_SECONDS,
+            },
             pending_request: None,
             throttle_countdown: 0,
             last_note: Arc::new(AtomicU8::new(NO_NOTE)),
@@ -348,6 +361,15 @@ impl Default for PrismPluginParams {
             .with_unit(" st"),
             stereo_width: FloatParam::new("Stereo Width", 30.0, FloatRange::Linear { min: 0.0, max: 100.0 })
                 .with_unit(" %"),
+            loop_length_seconds: FloatParam::new(
+                "Loop Length",
+                prism_dsp::render::DEFAULT_LOOP_SECONDS,
+                FloatRange::Linear {
+                    min: prism_dsp::render::MIN_LOOP_SECONDS,
+                    max: prism_dsp::render::MAX_LOOP_SECONDS,
+                },
+            )
+            .with_unit(" s"),
             attack: FloatParam::new(
                 "Attack",
                 prism_dsp::voice::ATTACK_MS,
@@ -493,6 +515,7 @@ fn load_sample_from_path(
                 freeze_point_pct: params.freeze_point.value(),
                 formant_shift_semitones: params.formant_shift.value(),
                 stereo_width_pct: params.stereo_width.value(),
+                loop_length_seconds: params.loop_length_seconds.value(),
             });
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
             loaded_filename.store(name.map(Arc::new));
@@ -542,6 +565,15 @@ struct Preset {
     freeze_point_pct: f32,
     formant_shift_semitones: f32,
     stereo_width_pct: f32,
+    /// `#[serde(default)]` with a custom default fn (not the bare
+    /// `0.0` a plain `#[serde(default)]` would give) - unlike
+    /// `pan_center_pct`/`pan_width_pct` where 0.0 is the semantically
+    /// correct "off" value, 0.0 seconds is a nonsensical loop length. A
+    /// preset saved before this param existed comes back at
+    /// `DEFAULT_LOOP_SECONDS` instead, matching what that preset's sound
+    /// actually used at the time.
+    #[serde(default = "default_loop_length_seconds")]
+    loop_length_seconds: f32,
     attack_ms: f32,
     decay_ms: f32,
     sustain_pct: f32,
@@ -572,12 +604,17 @@ struct Preset {
     build_number: String,
 }
 
+fn default_loop_length_seconds() -> f32 {
+    prism_dsp::render::DEFAULT_LOOP_SECONDS
+}
+
 impl Preset {
     fn capture(params: &PrismPluginParams) -> Self {
         Self {
             freeze_point_pct: params.freeze_point.value(),
             formant_shift_semitones: params.formant_shift.value(),
             stereo_width_pct: params.stereo_width.value(),
+            loop_length_seconds: params.loop_length_seconds.value(),
             attack_ms: params.attack.value(),
             decay_ms: params.decay.value(),
             sustain_pct: params.sustain.value(),
@@ -1011,6 +1048,7 @@ impl Plugin for PrismPlugin {
                     set(&params.freeze_point, preset.freeze_point_pct);
                     set(&params.formant_shift, preset.formant_shift_semitones);
                     set(&params.stereo_width, preset.stereo_width_pct);
+                    set(&params.loop_length_seconds, preset.loop_length_seconds);
                     set(&params.attack, preset.attack_ms);
                     set(&params.decay, preset.decay_ms);
                     set(&params.sustain, preset.sustain_pct);
@@ -1203,6 +1241,9 @@ impl Plugin for PrismPlugin {
                             left.label("Stereo Width");
                             left.add(widgets::ParamSlider::for_param(&params.stereo_width, setter));
 
+                            left.label("Loop Length");
+                            left.add(widgets::ParamSlider::for_param(&params.loop_length_seconds, setter));
+
                             let right = &mut columns[1];
                             right.label("Envelope (Attack / Decay / Sustain / Release)");
                             draw_adsr_graph(right, &params.attack, &params.decay, &params.sustain, &params.release, setter, scale);
@@ -1307,6 +1348,7 @@ impl Plugin for PrismPlugin {
             freeze_point_pct: self.params.freeze_point.value(),
             formant_shift_semitones: self.params.formant_shift.value(),
             stereo_width_pct: self.params.stereo_width.value(),
+            loop_length_seconds: self.params.loop_length_seconds.value(),
         };
         // First render happens synchronously here (initialize() runs before
         // playback starts, so blocking is fine) so process() never sees the
@@ -1317,6 +1359,7 @@ impl Plugin for PrismPlugin {
             request.freeze_point_pct,
             request.formant_shift_semitones,
             request.stereo_width_pct,
+            request.loop_length_seconds,
             DEFAULT_ROOT_NOTE,
         )));
         self.last_requested = request;
@@ -1357,6 +1400,7 @@ impl Plugin for PrismPlugin {
             freeze_point_pct: self.params.freeze_point.value(),
             formant_shift_semitones: self.params.formant_shift.value(),
             stereo_width_pct: self.params.stereo_width.value(),
+            loop_length_seconds: self.params.loop_length_seconds.value(),
         };
         if current_request != self.last_requested {
             self.pending_request = Some(current_request);
@@ -1479,6 +1523,7 @@ mod preset_tests {
             freeze_point_pct: 42.0,
             formant_shift_semitones: -3.5,
             stereo_width_pct: 60.0,
+            loop_length_seconds: 2.5,
             attack_ms: 12.0,
             decay_ms: 250.0,
             sustain_pct: 70.0,
@@ -1501,6 +1546,7 @@ mod preset_tests {
         assert_eq!(restored.freeze_point_pct, original.freeze_point_pct);
         assert_eq!(restored.formant_shift_semitones, original.formant_shift_semitones);
         assert_eq!(restored.stereo_width_pct, original.stereo_width_pct);
+        assert_eq!(restored.loop_length_seconds, original.loop_length_seconds);
         assert_eq!(restored.attack_ms, original.attack_ms);
         assert_eq!(restored.decay_ms, original.decay_ms);
         assert_eq!(restored.sustain_pct, original.sustain_pct);
@@ -1518,9 +1564,12 @@ mod preset_tests {
         // Regression test for backward compatibility: a preset saved before
         // FREEZE-PLAN-018 added these fields must still load, defaulting to
         // pitch bend disabled and no panning (see the `Preset` struct's doc
-        // comment on why 0.0 is an acceptable fallback for both), and
-        // before FREEZE-PLAN-023 added build_number, defaulting to an empty
-        // string (displayed as "unknown", never applied to anything).
+        // comment on why 0.0 is an acceptable fallback for both); before
+        // FREEZE-PLAN-023 added build_number, defaulting to an empty string
+        // (displayed as "unknown", never applied to anything); and before
+        // FREEZE-PLAN-024 added loop_length_seconds, defaulting to
+        // DEFAULT_LOOP_SECONDS rather than 0.0 (see that field's doc
+        // comment on why 0.0 would be nonsensical here).
         let old_json = r#"{
             "freeze_point_pct": 42.0,
             "formant_shift_semitones": -3.5,
@@ -1537,6 +1586,7 @@ mod preset_tests {
         assert_eq!(restored.pan_center_pct, 0.0);
         assert_eq!(restored.pan_width_pct, 0.0);
         assert_eq!(restored.build_number, "");
+        assert_eq!(restored.loop_length_seconds, prism_dsp::render::DEFAULT_LOOP_SECONDS);
     }
 
     #[test]

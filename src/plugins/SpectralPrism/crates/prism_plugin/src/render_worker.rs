@@ -15,6 +15,7 @@ pub struct RenderRequest {
     pub freeze_point_pct: f32,
     pub formant_shift_semitones: f32,
     pub stereo_width_pct: f32,
+    pub loop_length_seconds: f32,
 }
 
 /// A cheap-to-clone handle for asking the render worker to render again -
@@ -114,6 +115,7 @@ impl RenderWorker {
                     request.freeze_point_pct,
                     request.formant_shift_semitones,
                     request.stereo_width_pct,
+                    request.loop_length_seconds,
                     root_note,
                 );
                 output.store(Arc::new(rendered));
@@ -139,7 +141,7 @@ impl Drop for RenderWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use prism_dsp::render::DEFAULT_ROOT_NOTE;
+    use prism_dsp::render::{DEFAULT_LOOP_SECONDS, DEFAULT_ROOT_NOTE};
     use std::time::{Duration, Instant};
 
     fn make_source(sample_rate: f32, seconds: f32) -> Arc<ArcSwap<Vec<Vec<f32>>>> {
@@ -173,7 +175,12 @@ mod tests {
 
         let trigger = RenderTrigger::new();
         let _worker = RenderWorker::spawn(trigger.clone(), make_source(sample_rate, 1.0), sample_rate, DEFAULT_ROOT_NOTE, output.clone());
-        trigger.request_render(RenderRequest { freeze_point_pct: 50.0, formant_shift_semitones: 0.0, stereo_width_pct: 30.0 });
+        trigger.request_render(RenderRequest {
+            freeze_point_pct: 50.0,
+            formant_shift_semitones: 0.0,
+            stereo_width_pct: 30.0,
+            loop_length_seconds: DEFAULT_LOOP_SECONDS,
+        });
 
         assert!(wait_for_render(&output, Duration::from_secs(2)), "worker did not publish a render in time");
         assert_eq!(output.load().channels.len(), 2, "render_frozen_loop always outputs stereo");
@@ -192,7 +199,12 @@ mod tests {
         // `self.worker`, so a request made this early was simply lost.
         let sample_rate = 48000.0;
         let trigger = RenderTrigger::new();
-        trigger.request_render(RenderRequest { freeze_point_pct: 50.0, formant_shift_semitones: 0.0, stereo_width_pct: 30.0 });
+        trigger.request_render(RenderRequest {
+            freeze_point_pct: 50.0,
+            formant_shift_semitones: 0.0,
+            stereo_width_pct: 30.0,
+            loop_length_seconds: DEFAULT_LOOP_SECONDS,
+        });
 
         let output = Arc::new(ArcSwap::new(Arc::new(LoopBufferData {
             channels: Vec::new(),
@@ -219,7 +231,12 @@ mod tests {
         // Fire a burst of superseding requests - the mailbox should collapse
         // these down rather than queueing every one of them.
         for freeze_point_pct in [10.0, 20.0, 30.0, 40.0, 50.0] {
-            trigger.request_render(RenderRequest { freeze_point_pct, formant_shift_semitones: 0.0, stereo_width_pct: 0.0 });
+            trigger.request_render(RenderRequest {
+                freeze_point_pct,
+                formant_shift_semitones: 0.0,
+                stereo_width_pct: 0.0,
+                loop_length_seconds: DEFAULT_LOOP_SECONDS,
+            });
         }
 
         assert!(wait_for_render(&output, Duration::from_secs(2)), "worker did not publish a render in time");
@@ -245,18 +262,24 @@ mod tests {
 
         let trigger = RenderTrigger::new();
         let _worker = RenderWorker::spawn(trigger.clone(), source.clone(), sample_rate, DEFAULT_ROOT_NOTE, output.clone());
-        let request = RenderRequest { freeze_point_pct: 50.0, formant_shift_semitones: 0.0, stereo_width_pct: 0.0 };
+        let request = RenderRequest {
+            freeze_point_pct: 50.0,
+            formant_shift_semitones: 0.0,
+            stereo_width_pct: 0.0,
+            loop_length_seconds: DEFAULT_LOOP_SECONDS,
+        };
         trigger.request_render(request);
         assert!(wait_for_render(&output, Duration::from_secs(2)), "worker did not publish the first render in time");
-        let first_len = output.load().channels[0].len();
+        let first_render = output.load().channels[0].clone();
 
-        // Swap in a much longer source (loop length scales with source
-        // length up to the 8s cap) and request again via the same cloned
-        // trigger, mirroring how the GUI thread would use it.
-        let longer_len = (sample_rate * 6.0) as usize;
-        let longer_source: Vec<f32> =
-            (0..longer_len).map(|i| (i as f32 / sample_rate * 220.0 * std::f32::consts::TAU).sin()).collect();
-        source.store(Arc::new(vec![longer_source]));
+        // Swap in a source with a different frequency and request again via
+        // the same cloned trigger, mirroring how the GUI thread would use
+        // it - the resulting audio must differ, proving the *new* source
+        // was actually read rather than whatever was current at spawn time.
+        let swapped_len = (sample_rate * 1.0) as usize;
+        let swapped_source: Vec<f32> =
+            (0..swapped_len).map(|i| (i as f32 / sample_rate * 880.0 * std::f32::consts::TAU).sin()).collect();
+        source.store(Arc::new(vec![swapped_source]));
 
         // Force a fresh publish to detect: clear the output first so we can
         // tell a *new* render landed rather than reading the still-valid
@@ -265,7 +288,8 @@ mod tests {
         trigger.request_render(request);
         assert!(wait_for_render(&output, Duration::from_secs(2)), "worker did not publish the second render in time");
 
-        let second_len = output.load().channels[0].len();
-        assert!(second_len > first_len, "expected the longer swapped-in source to produce a longer loop: first={}, second={}", first_len, second_len);
+        let second_render = output.load().channels[0].clone();
+        assert_eq!(first_render.len(), second_render.len(), "loop_length_seconds is unchanged, so both renders should be the same length");
+        assert_ne!(first_render, second_render, "expected the swapped-in source to produce different audio");
     }
 }

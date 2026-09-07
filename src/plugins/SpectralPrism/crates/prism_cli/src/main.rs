@@ -5,7 +5,7 @@
 //! CLAP plugin format this project will also target later in prism_plugin.
 
 use clap::Parser;
-use prism_dsp::render::{render_frozen_loop, DEFAULT_ROOT_NOTE};
+use prism_dsp::render::{render_frozen_loop, DEFAULT_LOOP_SECONDS, DEFAULT_ROOT_NOTE};
 use prism_dsp::voice::VoiceManager;
 use std::path::PathBuf;
 
@@ -40,6 +40,11 @@ struct Args {
     /// frozen loop's full natural L/R difference).
     #[arg(long, default_value_t = 0.0)]
     stereo_width: f32,
+
+    /// Length in seconds of the frozen loop itself (before playback tiling
+    /// via --seconds), clamped to [MIN_LOOP_SECONDS, MAX_LOOP_SECONDS].
+    #[arg(long, default_value_t = DEFAULT_LOOP_SECONDS)]
+    loop_length: f32,
 }
 
 fn read_wav_channels(path: &PathBuf) -> (Vec<Vec<f32>>, f32) {
@@ -102,6 +107,7 @@ fn main() {
         args.freeze_point,
         args.formant_shift,
         args.stereo_width,
+        args.loop_length,
         DEFAULT_ROOT_NOTE,
     );
     println!(

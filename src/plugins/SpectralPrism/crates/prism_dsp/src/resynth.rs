@@ -65,6 +65,24 @@ pub fn ola_accumulate(accum: &mut [f32], pos: usize, frame: &[f32]) {
     }
 }
 
+/// Overlap-adds `frame` into `accum` starting at `pos`, wrapping any tail
+/// past the end of `accum` back around to its start instead of dropping it
+/// - the key primitive that makes a frozen loop click-free: rather than
+/// leaving the buffer's first `HOP_SIZE`-ish samples under-windowed (no
+/// "previous frame" exists at position 0 in a plain linear accumulation),
+/// the LAST frame's overlap naturally supplies that missing contribution,
+/// exactly as if the frame sequence carried on forever and simply wrapped
+/// back to frame 0. Combined with phase-locking the oscillator bank so the
+/// synthesized content is itself exactly periodic over `accum.len()`
+/// samples (see `render::quantize_advance_for_loop`), this makes the loop
+/// mathematically periodic rather than merely blended-to-look-continuous.
+pub fn ola_accumulate_circular(accum: &mut [f32], pos: usize, frame: &[f32]) {
+    let len = accum.len();
+    for (i, &s) in frame.iter().enumerate() {
+        accum[(pos + i) % len] += s;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,6 +116,29 @@ mod tests {
         let frame = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         ola_accumulate(&mut accum, 2, &frame);
         assert_eq!(accum, vec![0.0, 0.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn ola_accumulate_circular_wraps_tail_back_to_the_start() {
+        // Same frame/position as `ola_accumulate_drops_tail_past_buffer_end`
+        // above, but nothing is dropped here: `pos + i` for i=0..=5 lands
+        // at accum indices 2, 3, 0, 1, 2, 3 (mod 4) respectively, so index 2
+        // gets frame[0] + frame[4] = 1.0 + 5.0 = 6.0 and index 3 gets
+        // frame[1] + frame[5] = 2.0 + 6.0 = 8.0.
+        let mut accum = vec![0.0f32; 4];
+        let frame = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        ola_accumulate_circular(&mut accum, 2, &frame);
+        assert_eq!(accum, vec![3.0, 4.0, 6.0, 8.0]);
+    }
+
+    #[test]
+    fn ola_accumulate_circular_matches_linear_when_frame_fits_without_wrapping() {
+        let mut circular = vec![0.0f32; 8];
+        let mut linear = vec![0.0f32; 8];
+        let frame = vec![1.0, 2.0, 3.0];
+        ola_accumulate(&mut linear, 2, &frame);
+        ola_accumulate_circular(&mut circular, 2, &frame);
+        assert_eq!(circular, linear);
     }
 
     #[test]
