@@ -15,19 +15,6 @@ pub const RELEASE_MS: f32 = 150.0;
 /// discontinuity - audible as a click, and as stuttering when a host
 /// automates a param quickly enough to trigger several swaps in a row.
 pub const BUFFER_CROSSFADE_MS: f32 = 15.0;
-/// How quickly the polyphony gain compensation (see `process_block` and
-/// `VoiceManager::active_compensation`) chases its ratcheted-down target,
-/// instead of jumping to it instantly. Without this, a new chord note that
-/// forces the divisor lower causes an abrupt, audible volume dip on every
-/// other already-sounding voice at the exact instant it's triggered. The
-/// original (now-fixed) form of this same class of bug, before the ratchet
-/// redesign: recomputing the divisor fresh from the live voice count every
-/// block meant an already-sounding voice's volume could *increase* on its
-/// own, mid-note, the instant some unrelated sibling voice finished and
-/// freed its slot - confirmed by measurement: RMS held steady while 2 notes
-/// overlapped, then jumped ~1.6x the instant the first note's voice was
-/// freed.
-pub const GAIN_COMPENSATION_SMOOTHING_MS: f32 = 30.0;
 /// Default velocity sensitivity: 1.0 reproduces the plugin's original
 /// behavior (gain equals velocity exactly).
 pub const DEFAULT_VELOCITY_SENSITIVITY: f32 = 1.0;
@@ -41,17 +28,23 @@ pub const SOFT_LIMIT_THRESHOLD: f32 = 0.9;
 /// knee that's C1-continuous at the threshold (its derivative there is
 /// exactly 1, matching the identity region, so there's no audible kink).
 ///
-/// This exists because the polyphony gain-compensation *target* (see
-/// `GAIN_COMPENSATION_SMOOTHING_MS`) is deliberately smoothed rather than
-/// applied instantly - so several voices attacked together (a real chord)
-/// can genuinely sum well past unity for the first ~30-50ms while the
-/// compensation is still chasing its new, lower target down. Measured with
-/// 5 simultaneous full-gain voices on a realistic frozen-loop amplitude
-/// (~0.64 peak): the uncompensated attack transient reached roughly 2.5x
-/// full scale before this limiter existed. That was previously masked by
-/// real MIDI velocity naturally sitting below 1.0 most of the time - it
-/// became clearly audible once Velocity Sensitivity could force every voice
-/// to gain 1.0 regardless of how hard a key was struck.
+/// This is deliberately the *only* mechanism protecting against polyphony
+/// overload - there is no per-voice or per-block gain compensation based on
+/// how many voices are currently active (see `process_block`'s docs on why
+/// that was tried, three times, and removed: any gain change reacting to
+/// unrelated notes' lifecycle is audible as pumping/ducking no matter how
+/// it's tuned, which is not how real synths/instruments behave - playing
+/// more notes just makes more sound, the same way a piano or an analog
+/// synth does). Voices are simply summed at a fixed, uncompensated gain,
+/// and this limiter's smooth, bounded knee is what keeps that safe: it can
+/// never produce a hard clip regardless of how many voices stack, it only
+/// gets progressively denser/more saturated-sounding, which is a normal,
+/// expected texture for an unusually large chord rather than a bug to
+/// prevent. Measured with 5 simultaneous full-gain voices on a realistic
+/// frozen-loop amplitude (~0.64 peak): an uncompensated attack transient
+/// reached roughly 2.5x full scale - this limiter's job is to turn that
+/// into smooth saturation instead of harsh clipping, not to prevent the
+/// loudness increase from happening at all.
 fn soft_limit(x: f32) -> f32 {
     let magnitude = x.abs();
     if magnitude <= SOFT_LIMIT_THRESHOLD {
@@ -150,24 +143,6 @@ pub struct VoiceManager {
     outgoing_buffer: Option<Arc<LoopBufferData>>,
     crossfade_elapsed: usize,
     adsr: AdsrSettings,
-    /// The strictest (lowest) polyphony gain-compensation multiplier
-    /// currently in force. Ratchets *down* whenever a new voice starting
-    /// would otherwise let the mixed sum exceed a single voice's own peak,
-    /// but - unlike the old design - never ratchets back *up* just because
-    /// a voice finished. Found by ear: recomputing this fresh from
-    /// "1 / currently active count" every block (the original design) made
-    /// an already-sounding, held voice audibly swell in volume the moment
-    /// an unrelated sibling voice finished and freed its slot, since that
-    /// alone raised 1/active_count for everyone still playing. Only a
-    /// fresh phrase starting from complete silence resets this back to
-    /// 1.0 - see `note_on`.
-    active_compensation: f32,
-    /// The actually-applied, continuously-smoothed value used in the
-    /// per-sample multiply - chases `active_compensation` over
-    /// `GAIN_COMPENSATION_SMOOTHING_MS` rather than jumping to it
-    /// instantly, so a new chord note ratcheting the target down doesn't
-    /// click already-playing voices.
-    smoothed_gain_compensation: f32,
     /// How much MIDI velocity affects a newly triggered voice's gain, from
     /// 0.0 (every note plays at a fixed full gain, ignoring velocity - for
     /// players/controllers where velocity scaling isn't wanted) to 1.0 (gain
@@ -210,8 +185,6 @@ impl VoiceManager {
             outgoing_buffer: None,
             crossfade_elapsed: 0,
             adsr: AdsrSettings::default(),
-            active_compensation: 1.0,
-            smoothed_gain_compensation: 1.0,
             velocity_sensitivity: DEFAULT_VELOCITY_SENSITIVITY,
             pan_center: 0.0,
             pan_width: 0.0,
@@ -247,35 +220,7 @@ impl VoiceManager {
     }
 
     pub fn note_on(&mut self, note: u8, channel: u8, velocity: f32, id: i32) {
-        let currently_active = self.active_voice_count();
-        if currently_active == 0 {
-            // Nothing is sounding, so nothing can audibly jump - safe to
-            // hard-reset rather than ramp (see `active_compensation`'s docs).
-            self.active_compensation = 1.0;
-            self.smoothed_gain_compensation = 1.0;
-        }
-
         let free_slot = self.find_free_slot();
-        // A free slot genuinely adds a voice (count + 1); stealing replaces
-        // one in place, so the total stays exactly what it already was
-        // (which should already be `MAX_VOICES` whenever stealing happens).
-        let new_total = if free_slot.is_some() { currently_active + 1 } else { currently_active.max(1) };
-        // 1/sqrt(n), not strict 1/n: found by ear to be way too aggressive a
-        // step per added voice (each new note roughly halves every other
-        // held voice's volume under 1/n, a very audible ~6dB jump). 1/sqrt(n)
-        // assumes voices are uncorrelated for loudness-summing purposes -
-        // truer in practice here than it sounds, since different playback
-        // rates through the same frozen spectrum drift in and out of phase
-        // rather than staying perfectly aligned - and gives much gentler,
-        // more natural-feeling steps (2 voices: -3dB per voice; 3: -1.8dB
-        // more). `soft_limit` (see `process_block`) is the safety net for
-        // the rarer fully-correlated moments this doesn't cover as strictly
-        // as 1/n did - relying on it is exactly why 1/n was overly
-        // conservative on its own before that limiter existed.
-        let required = 1.0 / (new_total as f32).sqrt();
-        if required < self.active_compensation {
-            self.active_compensation = required;
-        }
 
         let rate = playback_rate(note, self.root_note);
         let mut env =
@@ -396,23 +341,16 @@ impl VoiceManager {
             None
         };
 
-        // Voices are summed with no per-voice headroom, so a held chord
-        // clips without this. `note_on` decides the actual 1/sqrt(n)
-        // compensation once, as a ratchet (`active_compensation`) - see that
-        // field's docs for why it's a ratchet and not recomputed from the
-        // live count every block here (the original design let an already-
-        // playing voice's volume grow on its own when a sibling finished,
-        // which was audible and never wanted). 1/sqrt(n) alone doesn't
-        // algebraically guarantee the sum can never exceed a single voice's
-        // own peak in the fully-correlated worst case (unlike the stricter,
-        // but perceptually too-aggressive, 1/n this replaced) - `soft_limit`
-        // below is the safety net that catches the rare cases it doesn't
-        // cover, which is what makes relying on the gentler curve safe.
-        // Applied as a smoothed post-sum multiply, not per-voice inside the
-        // loop below: mathematically identical for a constant multiplier
-        // (gain * sum(x_i) == sum(gain * x_i)), but it's the only way to
-        // *smooth* the ratchet's occasional downward steps so a new chord
-        // note doesn't click every other already-sounding voice.
+        // Voices are summed at a fixed, uncompensated gain - no attempt is
+        // made to keep the mixed level constant as the number of active
+        // voices changes (see `soft_limit`'s docs for why: three earlier
+        // attempts at reactive polyphony gain compensation each fixed one
+        // audible problem but introduced another, because any gain change
+        // that responds to unrelated notes' lifecycle is itself a form of
+        // pumping/ducking). More notes held just means more sound, the same
+        // way a real piano or analog synth behaves; `soft_limit` below is
+        // the sole, purely reactive-to-the-actual-signal safety net that
+        // keeps an unusually large chord from hard-clipping.
         // Computed once per block, not per-sample: pitch bend is a MIDI
         // wheel position, not audio-rate. Applied to *every* active voice's
         // read rate (real MIDI pitch bend affects whatever's currently
@@ -459,12 +397,9 @@ impl VoiceManager {
             }
         }
 
-        let smoothing_coeff = (-1.0 / ((GAIN_COMPENSATION_SMOOTHING_MS / 1000.0) * self.sample_rate)).exp();
         for i in 0..out_left.len() {
-            self.smoothed_gain_compensation =
-                self.active_compensation + (self.smoothed_gain_compensation - self.active_compensation) * smoothing_coeff;
-            out_left[i] = soft_limit(out_left[i] * self.smoothed_gain_compensation);
-            out_right[i] = soft_limit(out_right[i] * self.smoothed_gain_compensation);
+            out_left[i] = soft_limit(out_left[i]);
+            out_right[i] = soft_limit(out_right[i]);
         }
 
         if self.outgoing_buffer.is_some() {
@@ -621,13 +556,12 @@ mod tests {
         // Regression test for real distortion reported by ear: with Velocity
         // Sensitivity at 0% every voice plays at gain 1.0 regardless of how
         // hard a key is struck, removing the natural headroom real MIDI
-        // velocity (usually well below 1.0) used to provide "for free". A
-        // realistic 5-note chord hit together then genuinely sums well past
-        // unity for the first ~30-50ms while `GAIN_COMPENSATION_SMOOTHING_MS`
-        // is still chasing its new, lower target down (measured ~2.5x before
-        // `soft_limit` existed, using this same buffer amplitude and voice
-        // count). This proves the safety limiter actually catches it, one
-        // sample at a time so the exact peak during the attack is captured.
+        // velocity (usually well below 1.0) used to provide "for free". With
+        // no polyphony gain compensation at all (see `soft_limit`'s docs), a
+        // realistic 5-note chord hit together genuinely sums well past unity
+        // (measured ~2.5x, using this same buffer amplitude and voice count).
+        // This proves the safety limiter actually catches it, one sample at
+        // a time so the exact peak during the attack is captured.
         let sample_rate = 48000.0;
         let buffer = Arc::new(LoopBufferData {
             // Amplitude representative of a real frozen loop (measured
@@ -651,7 +585,7 @@ mod tests {
         let mut out_r = [0.0f32];
         let mut peak = 0.0f32;
         for _ in 0..(sample_rate as usize / 10) {
-            // 100ms, comfortably past the attack/compensation transient.
+            // 100ms, comfortably past the attack transient.
             vm.process_block(&buffer, &mut out_l, &mut out_r);
             peak = peak.max(out_l[0].abs()).max(out_r[0].abs());
         }
@@ -660,22 +594,26 @@ mod tests {
     }
 
     #[test]
-    fn gain_compensation_uses_inverse_sqrt_of_voice_count() {
-        // Not strict 1/n (see note_on's docs for why that was replaced by
-        // ear - it made each added voice roughly halve every other held
-        // voice's volume, a very audible step). With 1/sqrt(n) compensation
-        // and N fully-correlated (identical buffer, same constant-value
-        // signal at every sample regardless of pitch) voices, the
-        // uncompensated sum is N times a single voice's own level, so after
-        // compensation the result is single_level * sqrt(n), not an
-        // unchanged single_level - this proves the actual curve in use.
-        // Buffer amplitude kept low enough that even 4 summed voices stay
-        // under `SOFT_LIMIT_THRESHOLD`, so the safety limiter doesn't
-        // confound this test's own concern (the compensation ratio, not
-        // peak safety - see `chord_attack_at_zero_velocity_sensitivity_never_exceeds_unity`
+    fn voices_sum_linearly_with_no_polyphony_compensation() {
+        // `FREEZE-BUG-010`: three successive attempts at reactive polyphony
+        // gain compensation (1/n, then 1/sqrt(n) with a ratchet, then a
+        // ratchet plus a slow recovery) each fixed one audible problem but
+        // introduced another, because any gain that reacts to unrelated
+        // notes' lifecycle is itself audible as pumping/ducking. The fix was
+        // to remove compensation entirely: voices are summed at a fixed
+        // gain regardless of how many are active, the same way a real
+        // piano or analog synth behaves (more notes = more sound). With N
+        // fully-correlated (identical buffer, same constant-value signal at
+        // every sample regardless of pitch) voices, the sum must be exactly
+        // N times a single voice's own level - not sqrt(n), not 1/n,
+        // nothing in between. Buffer amplitude kept low enough that even 4
+        // summed voices stay under `SOFT_LIMIT_THRESHOLD`, so the safety
+        // limiter doesn't confound this test's own concern (linear
+        // summation, not peak safety - see
+        // `chord_attack_at_zero_velocity_sensitivity_never_exceeds_unity`
         // for that).
         let buffer = Arc::new(LoopBufferData {
-            channels: vec![vec![0.3f32; 8192], vec![0.3f32; 8192]],
+            channels: vec![vec![0.2f32; 8192], vec![0.2f32; 8192]],
             sample_rate: 48000.0,
             root_note: DEFAULT_ROOT_NOTE,
         });
@@ -701,11 +639,11 @@ mod tests {
         let tail_start = single_out_l.len() - 100;
         let single_level: f32 = single_out_l[tail_start..].iter().sum::<f32>() / 100.0;
         let quad_level: f32 = quad_out_l[tail_start..].iter().sum::<f32>() / 100.0;
-        let expected_quad_level = single_level * 4.0_f32.sqrt();
+        let expected_quad_level = single_level * 4.0;
 
         assert!(
             (quad_level - expected_quad_level).abs() < 1e-2,
-            "expected 4 fully-correlated voices (1/sqrt(4) compensation) to sum to sqrt(4)x a single voice: single={}, quad={}, expected_quad={}",
+            "expected 4 fully-correlated, uncompensated voices to sum to 4x a single voice: single={}, quad={}, expected_quad={}",
             single_level,
             quad_level,
             expected_quad_level
@@ -713,118 +651,65 @@ mod tests {
     }
 
     #[test]
-    fn gain_compensation_never_recovers_or_jumps_when_a_voice_finishes() {
-        // Regression test for two real bugs found by ear, both the same
-        // underlying design flaw at different points in its life:
-        //
-        // 1. (Originally fixed, still checked here) An unsmoothed instant
-        //    divisor change caused an abrupt jump right at the moment a
-        //    voice's slot freed. Measured live: RMS held steady while 2
-        //    notes overlapped, then jumped ~1.6x the instant the first
-        //    note's voice was freed.
-        // 2. (The actual remaining bug, found later by the user, fixed by
-        //    the `active_compensation` ratchet redesign) Even smoothed, the
-        //    original design recomputed its target from the *live* voice
-        //    count every block - meaning the still-sounding second voice's
-        //    target (and therefore its volume) would climb from 0.5 back up
-        //    to 1.0 over the following ~150ms once the first voice finished,
-        //    an unmistakable "getting louder while it's already playing"
-        //    swell with no new note to justify it. The ratchet design never
-        //    lets `active_compensation` increase while anything is still
-        //    sounding - a still-playing voice's volume can only ever dip
-        //    (smoothed) when a *new* voice joins, never climb on its own.
-        //
-        // Processes one sample per "block" specifically so the exact sample
-        // where `active_voice_count()` changes can be pinpointed. At that
-        // boundary sample, voice A's own envelope has *already* been forced
-        // to precisely 0.0 by `AdsrEnvelope::advance` (the same sample that
-        // flips it to `Stage::Idle`), so its contribution to the raw sum is
-        // identically 0. That isolates the comparison to *only* whatever the
-        // compensation multiplier does at this boundary, with no
-        // contamination from the envelope's own (legitimate, and otherwise
-        // easily confusable with this bug) ongoing decay.
+    fn surviving_voice_matches_its_solo_level_the_instant_a_sibling_finishes() {
+        // With gain compensation removed entirely (`FREEZE-BUG-010`), a
+        // surviving voice's level must match exactly what the same note
+        // would sound like played completely alone, the very instant a
+        // sibling voice finishes - no jump, no gradual "recovery" needed,
+        // because there was never any voice-count-dependent gain applied
+        // in the first place. This is the property all three earlier
+        // compensation designs were each trying (and each failing in a
+        // different way) to approximate reactively - removing the reactive
+        // part makes it exactly true instead of approximately true.
         // Buffer amplitude kept below `SOFT_LIMIT_THRESHOLD` (0.9) so the
-        // safety limiter added for `FREEZE-PLAN-007` doesn't confound this
-        // test's own concern (compensation-jump smoothness, not peak level).
+        // safety limiter doesn't confound this test's own concern.
         let sample_rate = 48000.0;
         let buffer = Arc::new(LoopBufferData {
             channels: vec![vec![0.5f32; 8192], vec![0.5f32; 8192]],
             sample_rate,
             root_note: DEFAULT_ROOT_NOTE,
         });
+        let adsr = AdsrSettings { attack_ms: 0.1, decay_ms: 0.1, sustain_level: 1.0, release_ms: 5.0 };
+
+        // Ground truth: what note B sounds like played completely alone.
+        let mut solo = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
+        solo.set_adsr(adsr);
+        solo.note_on(72, 0, 1.0, 2);
+        let mut solo_out_l = [0.0f32];
+        let mut solo_out_r = [0.0f32];
+        for _ in 0..100 {
+            solo.process_block(&buffer, &mut solo_out_l, &mut solo_out_r);
+        }
+        let solo_level = solo_out_l[0];
 
         let mut vm = VoiceManager::new(sample_rate, DEFAULT_ROOT_NOTE);
-        vm.set_adsr(AdsrSettings { attack_ms: 0.1, decay_ms: 0.1, sustain_level: 1.0, release_ms: 5.0 });
+        vm.set_adsr(adsr);
         vm.note_on(60, 0, 1.0, 1);
         vm.note_on(72, 0, 1.0, 2);
 
         let mut out_l = [0.0f32];
         let mut out_r = [0.0f32];
-
-        // Run past attack so both voices have settled at full level with
-        // compensation applied for 2 active voices.
         for _ in 0..100 {
             vm.process_block(&buffer, &mut out_l, &mut out_r);
         }
         assert_eq!(vm.active_voice_count(), 2);
 
         vm.note_off(60, 0);
-
-        let mut level_at_transition: Option<f32> = None;
-        let mut boundary_jump = None;
+        let mut reached_one = false;
         for _ in 0..(sample_rate as usize) {
-            let was_two = vm.active_voice_count() == 2;
             vm.process_block(&buffer, &mut out_l, &mut out_r);
-            let level = out_l[0];
-            if let Some(prev) = level_at_transition {
-                boundary_jump = Some((level - prev).abs());
+            if vm.active_voice_count() == 1 {
+                reached_one = true;
                 break;
             }
-            if was_two && vm.active_voice_count() == 1 {
-                level_at_transition = Some(level);
-            }
         }
+        assert!(reached_one, "voice A should have finished and freed its slot within the test window");
 
-        let boundary_jump = boundary_jump.expect("voice A should have finished and freed its slot within the test window");
-        // The old (unsmoothed) behavior stepped by close to the full
-        // (1.0 - 0.5) = 0.5 compensation change in this single sample. A
-        // smoothed transition should move only a tiny fraction of that in
-        // one sample, given a 30ms smoothing time constant.
         assert!(
-            boundary_jump < 0.01,
-            "expected a smooth transition right at the voice-freed boundary, not a jump: jump={}",
-            boundary_jump
-        );
-
-        // The old design would have let this climb back to ~0.5 (full,
-        // uncompensated level) over the ~150ms smoothing window. It must
-        // instead stay at the 2-voice-compensated level (0.5 buffer *
-        // 1/sqrt(2) compensation ~= 0.354) indefinitely, since only voice A
-        // finished - nothing new was triggered to justify a louder voice B.
-        let two_voice_level = 0.5 / 2.0_f32.sqrt();
-        for _ in 0..(sample_rate as usize / 5) {
-            vm.process_block(&buffer, &mut out_l, &mut out_r);
-        }
-        assert!(
-            (out_l[0] - two_voice_level).abs() < 1e-2,
-            "a lone surviving voice must not recover toward full level just because a sibling finished, got {} (expected {})",
+            (out_l[0] - solo_level).abs() < 1e-4,
+            "surviving voice should match its solo level immediately once its sibling finishes, got {} (expected {})",
             out_l[0],
-            two_voice_level
-        );
-
-        // And the ratchet must still relax once *everything* has gone
-        // quiet: choke the survivor, then confirm a brand new note starts
-        // fresh at full (uncompensated) level, not stuck attenuated forever.
-        vm.choke_all();
-        assert_eq!(vm.active_voice_count(), 0);
-        vm.note_on(60, 0, 1.0, 3);
-        for _ in 0..100 {
-            vm.process_block(&buffer, &mut out_l, &mut out_r);
-        }
-        assert!(
-            (out_l[0] - 0.5).abs() < 1e-2,
-            "a fresh note after complete silence should reset to full level, got {}",
-            out_l[0]
+            solo_level
         );
     }
 

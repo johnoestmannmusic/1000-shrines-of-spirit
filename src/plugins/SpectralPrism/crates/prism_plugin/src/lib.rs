@@ -408,7 +408,7 @@ impl Default for PrismPluginParams {
             .with_unit(" st"),
             pan_center_pct: FloatParam::new("Pan Center", 0.0, FloatRange::Linear { min: -100.0, max: 100.0 })
                 .with_unit(" %"),
-            pan_width_pct: FloatParam::new("Pan Width", 0.0, FloatRange::Linear { min: 0.0, max: 100.0 })
+            pan_width_pct: FloatParam::new("Random Pan Width", 0.0, FloatRange::Linear { min: 0.0, max: 100.0 })
                 .with_unit(" %"),
         }
     }
@@ -1128,6 +1128,11 @@ impl Plugin for PrismPlugin {
                                         let _ = save_preset(dir, name, &preset);
                                     }
                                     *params.selected_preset.lock().unwrap() = Some(name.clone());
+                                    // Prefills the Save field with the just-
+                                    // loaded preset's own name, so clicking
+                                    // Save immediately overwrites it instead
+                                    // of requiring the name to be retyped.
+                                    state.preset_name_input = name.clone();
                                 }
                                 Err(e) => state.error = Some(e),
                             }
@@ -1194,8 +1199,22 @@ impl Plugin for PrismPlugin {
                                                 preset.sample_path = Some(relocated);
                                                 let _ = write_preset_file(&path, &preset);
                                             }
-                                            *params.selected_preset.lock().unwrap() =
-                                                path.file_stem().map(|s| s.to_string_lossy().into_owned());
+                                            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+                                            // Prefills the Save field the same
+                                            // way `load_preset_at` does, so
+                                            // Save immediately overwrites a
+                                            // re-imported preset without
+                                            // retyping its name - only
+                                            // meaningful for a preset saved
+                                            // back into the named on-disk
+                                            // library, not this arbitrary file
+                                            // path, but that's exactly what
+                                            // typing a name into that field
+                                            // and clicking Save already does.
+                                            if let Some(stem) = &stem {
+                                                state.preset_name_input = stem.clone();
+                                            }
+                                            *params.selected_preset.lock().unwrap() = stem;
                                         }
                                         Err(e) => state.error = Some(e),
                                     }
@@ -1267,7 +1286,7 @@ impl Plugin for PrismPlugin {
                             right.add_space(8.0);
                             right.label("Pan Center");
                             right.add(widgets::ParamSlider::for_param(&params.pan_center_pct, setter));
-                            right.label("Pan Width");
+                            right.label("Random Pan Width");
                             right.add(widgets::ParamSlider::for_param(&params.pan_width_pct, setter));
                         });
 
