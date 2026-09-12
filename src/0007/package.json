@@ -1,0 +1,40 @@
+{
+  "name": "lantern-music-player-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript/Electron port of the Lantern Music Player (0006/0007).",
+  "license": "MIT",
+  "main": "dist/main/index.cjs",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "start": "electron .",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:all": "npm run typecheck && npm run test && npm run audit:deps && npm run build && npm run build:web && npm run test:web && npm run test:e2e",
+    "audit:deps": "node scripts/audit-dependencies.mjs",
+    "build:prism-wasm": "node scripts/build-prism-wasm.mjs",
+    "build:web": "node scripts/build-web.mjs",
+    "serve:web": "npx serve dist/web",
+    "test:web": "playwright test --config playwright.web.config.ts"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.3.0",
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.0.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0"
+  }
+}

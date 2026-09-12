@@ -1,0 +1,1139 @@
+/* Brand typeface. The bundled font file is Medodica Regular (the family name
+   the project's own assets use); exposed as "Medodica". */
+@font-face {
+  font-family: "Medodica";
+  src: url("./assets/MedodicaRegular.otf") format("opentype");
+}
+
+/* Light is the default brand theme: #6cd73c green on #ffffff white. */
+:root,
+:root[data-theme="light"] {
+  --bg: #f4f6f2;
+  --panel: #ffffff;
+  --edge: #dcdde0;
+  --text: #2e3440;
+  --secondary: #5e6470;
+  --deep: #eef0e9;
+  --accent: #6cd73c;
+  --amber: #6cd73c;
+  --chip: #2b8fd6;
+  --sampler: #3f9e0e;
+  --wave: #3f9e0e;
+  --tracker-alt: rgba(0, 0, 0, 0.03);
+  --tracker-header: #f2f4ef;
+  --playhead-bg: #d9f3c8;
+  --playhead-text: #1d3a10;
+  --input-bg: #ffffff;
+  --button-bg: #f2f4ef;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+:root[data-theme="dark"] {
+  --bg: #101012;
+  --panel: #17171a;
+  --edge: #2a2a2e;
+  --text: #e9e6db;
+  --secondary: #8a877c;
+  --deep: #0a0a0b;
+  --accent: #c9973a;
+  --amber: #c9973a;
+  --chip: #38bdf8;
+  --sampler: #6cd73c;
+  --wave: #8fd0a0;
+  --tracker-alt: rgba(255, 255, 255, 0.02);
+  --tracker-header: #1c1c20;
+  --playhead-bg: #4c4022;
+  --playhead-text: #fff6dd;
+  --input-bg: #202024;
+  --button-bg: #202024;
+  --shadow: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Medodica", system-ui, sans-serif;
+  font-size: 15px;
+}
+
+.app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  border-bottom: 2px solid var(--edge);
+  background: var(--deep);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.04em;
+}
+
+.subtitle {
+  margin: 2px 0 0;
+  color: var(--secondary);
+  font-size: 14px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.status {
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.error-banner {
+  background: #3a1717;
+  border-bottom: 2px solid #7a3030;
+  padding: 10px 20px;
+  color: #ffb4b4;
+}
+
+.layout {
+  flex: 1;
+  display: flex;
+  gap: 20px;
+  padding: 20px;
+  align-items: flex-start;
+  min-height: 0;
+}
+
+.main-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sidebar {
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  position: sticky;
+  top: 12px;
+  align-self: flex-start;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  padding-right: 10px;
+  font-size: 19px;
+}
+
+/* Right-hand panels read +4px larger than the main layout. */
+.sidebar .small {
+  font-size: 16.5px;
+}
+
+.sidebar .hint {
+  font-size: 17px;
+}
+
+.sidebar .explainer-body {
+  font-size: 17px;
+}
+
+.sidebar .timing-grid,
+.sidebar .timing-row,
+.sidebar .collapse-header {
+  font-size: 17px;
+}
+
+.sidebar .timing-row input {
+  font-size: 15px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 14px 16px;
+}
+
+.panel h2 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  letter-spacing: 0.14em;
+  color: var(--secondary);
+  text-transform: uppercase;
+}
+
+.hint {
+  margin: 0 0 10px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.row.wrap {
+  flex-wrap: wrap;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.mono {
+  font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+}
+
+.small {
+  font-size: 12.5px;
+}
+
+.muted {
+  color: var(--secondary);
+}
+
+button {
+  background: var(--button-bg);
+  color: var(--text);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--amber);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+input[type="range"] {
+  accent-color: var(--amber);
+}
+
+select {
+  background: var(--input-bg);
+  color: var(--text);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.mode-btn {
+  letter-spacing: 0.08em;
+  font-size: 13px;
+}
+
+.mode-btn.chip[data-active="true"] {
+  border-color: var(--chip);
+  color: var(--chip);
+}
+
+.mode-btn.sampler[data-active="true"] {
+  border-color: var(--sampler);
+  color: var(--sampler);
+}
+
+.transport-controls {
+  margin-top: 12px;
+}
+
+.play {
+  border-color: var(--sampler);
+  color: var(--sampler);
+  min-width: 104px;
+}
+
+.seek {
+  flex: 1;
+}
+
+.position {
+  color: var(--secondary);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* Mixer */
+.mixer-row {
+  margin-bottom: 8px;
+}
+
+.mixer-row input[type="range"] {
+  flex: 1;
+}
+
+.mute {
+  width: 64px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--secondary);
+}
+
+.db {
+  width: 66px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--secondary);
+}
+
+.meter {
+  width: 64px;
+  height: 12px;
+  background: var(--deep);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--wave);
+  transition: width 60ms linear;
+}
+
+.meter-fill.clip {
+  background: #e0533a;
+}
+
+.master-row .mute {
+  color: var(--amber);
+}
+
+/* Instruments */
+.instruments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-x: hidden;
+}
+
+.instrument-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  row-gap: 4px;
+  padding: 5px 6px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+
+.instrument-row:nth-child(odd) {
+  background: var(--tracker-alt);
+}
+
+.instrument-row button {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  border: 1px solid var(--edge);
+}
+
+.index {
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+.ins-name {
+  width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transpose,
+.volume {
+  font-size: 12px;
+  color: var(--secondary);
+  min-width: 48px;
+}
+
+/* Tracker */
+.tracker {
+  max-height: 480px;
+  overflow: auto;
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  background: var(--deep);
+}
+
+.tracker table {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+}
+
+.tracker th {
+  position: sticky;
+  top: 0;
+  background: var(--tracker-header);
+  color: var(--secondary);
+  font-weight: normal;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 4px 8px;
+  border-bottom: 2px solid var(--edge);
+  z-index: 2;
+}
+
+.tracker .sub-head th {
+  top: 26px;
+  font-size: 10px;
+}
+
+.tracker td {
+  padding: 1px 8px;
+  color: var(--text);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.tracker .row-col {
+  color: var(--secondary);
+  background: var(--deep);
+}
+
+.tracker tr.beat td {
+  background: var(--tracker-alt);
+}
+
+.tracker tr.playhead td {
+  background: var(--playhead-bg);
+  color: var(--playhead-text);
+}
+
+.tracker td.note.on {
+  text-decoration: underline;
+}
+
+.tracker td.fx {
+  color: #b9a06a;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100%;
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+/* ---- Toolbar / header extras ---- */
+.theme-toggle {
+  font-size: 13px;
+}
+
+.ref-toggle {
+  font-size: 13px;
+  color: var(--secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---- Source samples ---- */
+.sample-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sample-slot {
+  border: 1px solid var(--edge);
+  border-radius: 3px;
+  padding: 6px 8px;
+  background: var(--panel);
+}
+
+.waveform {
+  width: 100%;
+  margin-top: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  touch-action: none;
+}
+
+/* ---- Instrument pill switch ---- */
+.pill-switch {
+  display: inline-flex;
+  gap: 0;
+}
+
+.pill-switch button {
+  border-radius: 0;
+}
+
+.pill-switch button:first-child {
+  border-top-left-radius: 3px;
+  border-bottom-left-radius: 3px;
+}
+
+.pill-switch button:last-child {
+  border-top-right-radius: 3px;
+  border-bottom-right-radius: 3px;
+}
+
+.pill-switch button.active,
+.tabs button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tabs {
+  margin: 8px 0;
+  gap: 0;
+}
+
+/* ---- Floating editor window ---- */
+.floating-window {
+  position: fixed;
+  width: min(680px, 92vw);
+  max-height: 84vh;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+}
+
+.floating-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--deep);
+  border-bottom: 2px solid var(--edge);
+  cursor: move;
+  font-size: 13px;
+}
+
+.floating-body {
+  padding: 12px;
+  overflow: auto;
+}
+
+.editor-tab h3 {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: var(--secondary);
+  text-transform: uppercase;
+}
+
+.slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--secondary);
+}
+
+.slider input[type="range"] {
+  width: 130px;
+}
+
+.slider .mono {
+  min-width: 46px;
+  color: var(--text);
+}
+
+.floating-body input[type="number"] {
+  width: 72px;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-family: inherit;
+}
+
+/* ---- Modals ---- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  width: min(720px, 92vw);
+  max-height: 86vh;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 15px;
+  color: var(--accent);
+}
+
+.project-json {
+  width: 100%;
+  height: 320px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: var(--deep);
+  color: var(--text);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 8px;
+  resize: vertical;
+}
+
+.modal textarea,
+.modal input {
+  background: var(--input-bg);
+  color: var(--text);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 6px;
+  font-family: inherit;
+}
+
+/* ---- Piano ---- */
+.piano-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.piano-scroll {
+  overflow-x: auto;
+  max-width: calc(100% - 128px);
+}
+
+.noise-box {
+  width: 110px;
+  min-height: 58px;
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 6px 8px;
+  background: var(--deep);
+}
+
+.noise-note {
+  font-size: 21px;
+}
+
+/* ---- Cover art ---- */
+.cover-canvas {
+  width: 240px;
+  height: 240px;
+  image-rendering: pixelated;
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  cursor: pointer;
+  background: var(--deep);
+}
+
+/* ---- Tracker edit mode ---- */
+.mode-btn.edit[data-active="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.channel-head {
+  cursor: pointer;
+}
+
+.muted-col {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.tracker td {
+  cursor: default;
+}
+
+.tracker-cell.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.tracker-cell.in-range {
+  box-shadow: inset 0 0 0 1px rgba(108, 215, 60, 0.4);
+}
+
+.muted-cell {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 60;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 4px;
+  min-width: 190px;
+  max-height: 360px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow);
+}
+
+.menu-item {
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.menu-item:hover {
+  background: var(--deep);
+  border: none;
+}
+
+.menu-label {
+  color: var(--secondary);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 6px 8px 2px;
+}
+
+.manager-list {
+  max-height: 380px;
+  overflow: auto;
+}
+
+.manager-row {
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.manager-row button {
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.help-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 18px;
+}
+
+/* ---- Explainer / sidebar cards ---- */
+.explainer {
+  display: flex;
+  flex-direction: column;
+  height: 282px;
+}
+
+.explainer-title {
+  color: var(--accent);
+  letter-spacing: 0.08em;
+}
+
+.explainer-body {
+  margin-top: 6px;
+  height: 232px;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.explainer-body p {
+  margin: 0 0 6px;
+}
+
+.tk-num { color: var(--accent); }
+.tk-var { color: #7fb2d6; }
+.tk-kw { color: #c98fe0; font-weight: 600; }
+.tk-live { color: #e0a33a; font-weight: 600; }
+
+.tk-block {
+  margin: 0 0 6px;
+  padding: 4px 6px;
+  background: var(--deep);
+  border-left: 2px solid var(--accent);
+  border-radius: 2px;
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.collapse-header {
+  background: transparent;
+  border: none;
+  color: var(--secondary);
+  text-align: left;
+  padding: 0;
+  letter-spacing: 0.12em;
+  font-size: 13px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.collapse-header:hover {
+  border: none;
+  color: var(--text);
+}
+
+.timing-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.timing-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.timing-row input,
+.modal input,
+.floating-body input[type="number"],
+.instrument-row input[type="number"] {
+  width: 72px;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+/* ---- Instrument quick edits ---- */
+.color-swatch {
+  width: 26px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ins-name-input {
+  width: 104px;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font-family: inherit;
+}
+
+.db-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--secondary);
+}
+
+.db-input {
+  width: 58px;
+  text-align: right;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+
+.floating-title .close-btn {
+  padding: 2px 8px;
+}
+
+.tracker tr.bar td {
+  background: var(--tracker-alt);
+}
+
+.pattern-swatch {
+  width: 14px;
+  height: 14px;
+  display: inline-block;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+}
+
+.tracker-cell.flash {
+  box-shadow: inset 0 0 0 2px var(--accent), 0 0 6px var(--accent);
+}
+
+/* Frozen two-row tracker header: explicit, non-overlapping sticky offsets. */
+.tracker thead tr:first-child th {
+  top: 0;
+  height: 28px;
+  z-index: 4;
+}
+
+.tracker .sub-head th {
+  top: 28px;
+  height: 22px;
+  z-index: 4;
+}
+
+/* ---- ADSR graph ---- */
+.adsr-wrap {
+  width: 100%;
+  height: 110px;
+  margin: 6px 0;
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  touch-action: none;
+}
+
+.adsr-canvas {
+  display: block;
+  width: 100%;
+  height: 110px;
+  cursor: crosshair;
+}
+
+.audio-error {
+  color: #e0533a;
+  font-size: 13px;
+  padding: 4px 2px 0;
+}
+
+.add-instrument {
+  margin-top: 8px;
+  width: 100%;
+}
+
+.delete-instrument {
+  padding: 3px 8px;
+  font-size: 12px;
+  border-color: #a06060;
+  color: #c07070;
+}
+
+.delete-instrument:hover:not(:disabled) {
+  border-color: #d08080;
+}
+
+/* Instrument hamburger menu */
+.instrument-menu-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.hamburger {
+  padding: 3px 8px;
+  font-size: 13px;
+}
+
+.instrument-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  padding: 3px;
+  background: var(--panel);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+}
+
+.comments-edit {
+  width: 100%;
+  min-height: 84px;
+  margin-top: 6px;
+  padding: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+
+.audio-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.audio-error-dismiss {
+  padding: 1px 7px;
+  font-size: 12px;
+  color: #e0533a;
+  border-color: #a06060;
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.error-dismiss {
+  padding: 1px 8px;
+  font-size: 12px;
+  color: #ffb4b4;
+  border-color: #7a3030;
+}
+
+/* Smooth Light <-> Dark transition */
+body,
+.app-header,
+.panel,
+.toolbar,
+.sidebar,
+.tracker,
+.tracker th,
+.tracker td,
+.floating-window,
+.modal,
+.cover-canvas,
+.adsr-wrap,
+button,
+input,
+select {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+/* EDIT MODE uses the blue accent; CHIP/SAMPLER return to green. */
+.app[data-mode="edit"] {
+  --accent: #3ea3e3;
+  --amber: #3ea3e3;
+  --sampler: #3ea3e3;
+}
+
+.pat-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  color: var(--accent);
+  font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.pat-edit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--secondary);
+}
+
+.pat-edit input {
+  width: 56px;
+}
+
+.radio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+}
+
+.draggable-title {
+  cursor: move;
+}
+
+.mode-tip {
+  display: inline-block;
+}
+
+.instrument-row.instrument-muted {
+  opacity: 0.5;
+}
+
+.instrument-row.flash {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.mute-btn {
+  min-width: 46px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-color: var(--edge);
+}
+
+.mute-btn.muted {
+  border-color: var(--accent);
+  color: var(--accent);
+  opacity: 0.65;
+}
+
+.pan-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--secondary);
+}
+
+.pan-field input[type="range"] {
+  width: 70px;
+}
+
+.pan-field .mono {
+  width: 32px;
+  text-align: right;
+}
+
+.pan-field input[type="number"] {
+  width: 48px;
+}

@@ -1,0 +1,19 @@
+[package]
+name = "prism-wasm"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "WASM binding for the prism_dsp Spectral engine used by the Lantern Music Player Electron port."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Sibling SpectralPrism checkout. Adjust if the directory layout differs.
+prism_dsp = { path = "../../../../SpectralPrism/crates/prism_dsp" }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = true

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+native/prism-wasm/target/
+native/prism-wasm/pkg/
+*.log
+.DS_Store
