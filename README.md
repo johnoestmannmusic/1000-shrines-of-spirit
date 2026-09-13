@@ -4,4 +4,6 @@ This repository contains the source code for the programming side of various tra
 
 _Please note that while the compositions are done "by hand" by myself, I have used AI to assist with the programming of these softwares. To learn more about my current thoughts around this, please read this post: https://johnoestmannmusic.com/ai-building-exoskeletons_
 
+_Please note that while Claude inserted itself as a Contributor, I have also used DeepSeek in this repo (and currently am using that as my main GenAI)._
+
 For everything else, visit https://johnoestmannmusic.com
