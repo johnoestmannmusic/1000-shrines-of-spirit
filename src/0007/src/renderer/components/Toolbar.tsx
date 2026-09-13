@@ -8,6 +8,7 @@ interface ToolbarProps {
   onOpenProjectJson: () => void;
   onSaveWav: () => void;
   wavReady: boolean;
+  furReady: boolean;
   status: string;
 }
 
@@ -16,7 +17,13 @@ export function Toolbar(props: ToolbarProps) {
   return (
     <section className="panel toolbar">
       <div className="row wrap">
-        <button onClick={props.onSaveFur}>Save .FUR</button>
+        <button
+          onClick={props.onSaveFur}
+          disabled={!props.furReady}
+          title={props.furReady ? "Save the loaded Furnace module" : "No .fur is loaded — this is a project-only song"}
+        >
+          Save .FUR
+        </button>
         <button onClick={props.onSaveMidi}>Save .MIDI</button>
         <button
           onClick={props.onSaveWav}

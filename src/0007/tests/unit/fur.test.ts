@@ -4,7 +4,7 @@ import { fixtureBytes } from "./fixtures";
 
 describe("Furnace .fur parser", () => {
   it("parses the bundled Game Boy fixture", () => {
-    const module = parseFurFile(fixtureBytes("assets/flight_school_night_shift.fur"));
+    const module = parseFurFile(fixtureBytes("tests/fixtures/flight_school_night_shift.fur"));
 
     expect(module.formatVersion).toBe(251);
     expect(module.info.name).toBe("flight_school_night_shift");
@@ -61,7 +61,7 @@ describe("Furnace .fur parser", () => {
   });
 
   it("accepts an already-unwrapped buffer and rejects garbage", () => {
-    const raw = fixtureBytes("assets/flight_school_night_shift.fur");
+    const raw = fixtureBytes("tests/fixtures/flight_school_night_shift.fur");
     const module = parseFurFile(raw);
     expect(module.info.name).toBe("flight_school_night_shift");
 

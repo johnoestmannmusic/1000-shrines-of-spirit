@@ -1,4 +1,5 @@
 import type { AudioClip } from "@/core/dsp";
+import type { MasterFxSettings } from "@/core/masterFx";
 import type { SamplerSettings, Sequence } from "@/core/sampler";
 
 export type PlaybackMode = "chip" | "sampler";
@@ -70,6 +71,7 @@ export interface AudioBackend {
   setChannelVolume(channel: number, volume: number): void;
   setChannelMute(channel: number, muted: boolean): void;
   setMasterVolume(volume: number): void;
+  setMasterFx(settings: MasterFxSettings): void;
   meterLevels(): number[];
   dispose(): void;
 }

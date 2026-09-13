@@ -13,6 +13,7 @@ import { rowDurationSec, songPositionAt, rowTime } from "@/core/timing";
 import { DEFAULT_ENTRY_NOTE } from "@/core/pitch";
 import {
   LOOKAHEAD_SEC,
+  setSpectralEnabled,
   Scheduler,
   defaultSamplerSettings,
   envelopeAt,
@@ -31,7 +32,7 @@ import {
 } from "@/core/project";
 
 function fixture(): SongModel {
-  return buildSongModel(parseFurFile(fixtureBytes("assets/flight_school_night_shift.fur")));
+  return buildSongModel(parseFurFile(fixtureBytes("tests/fixtures/flight_school_night_shift.fur")));
 }
 
 describe("song model", () => {
@@ -57,6 +58,38 @@ describe("song model", () => {
     const pos2 = songPositionAt(song, rowDur * song.meta.patternLength);
     expect(pos2.orderPos).toBe(1);
     expect(pos2.row).toBe(0);
+  });
+
+  it("keeps the channel instrument across a note-off", () => {
+    const song = fixture();
+    const empty = () => ({
+      note: null,
+      instrument: null,
+      volume: null,
+      effects: Array.from({ length: 8 }, () => ({ effect: null, value: null })),
+    });
+    applyEdit(song, {
+      channel: 0,
+      order: 0,
+      row: 0,
+      cell: { ...empty(), note: { kind: "note", note: 129 }, instrument: 0 },
+    });
+    applyEdit(song, {
+      channel: 0,
+      order: 0,
+      row: 1,
+      cell: { ...empty(), note: { kind: "off" } },
+    });
+    applyEdit(song, {
+      channel: 0,
+      order: 0,
+      row: 2,
+      cell: { ...empty(), note: { kind: "note", note: 127 } },
+    });
+    // A note after a note-off must still resolve to the held instrument.
+    expect(song.channels[0]!.insTimeline[0]![2]).toBe(0);
+    // The held note is still cleared by the OFF.
+    expect(song.channels[0]!.noteTimeline[0]![1]).toBeNull();
   });
 
   it("applyEdit mutates the cell and regenerates timelines", () => {
@@ -212,7 +245,7 @@ describe("sampler", () => {
 
 describe("project json", () => {
   it("original project round-trips without losing its schema", () => {
-    const project = projectFromJson(fixtureText("assets/lmp-default-proj.json"));
+    const project = projectFromJson(fixtureText("tests/fixtures/lmp-default-proj.legacy.lampjson"));
     validateProject(project, 10);
     expect(project.sourceSamples).toHaveLength(6);
     expect(project.instruments).toHaveLength(10);
@@ -228,7 +261,7 @@ describe("project json", () => {
   });
 
   it("legacy rootNote converts to transpose", () => {
-    const value = JSON.parse(fixtureText("assets/lmp-default-proj.json")) as {
+    const value = JSON.parse(fixtureText("tests/fixtures/lmp-default-proj.legacy.lampjson")) as {
       instruments: Array<Record<string, unknown>>;
     };
     const first = value.instruments[0]!;
@@ -238,8 +271,46 @@ describe("project json", () => {
     expect(project.instruments[0]!.transpose).toBe(12);
   });
 
+  it("switching Spectral on loops by default and restores the sampler loop on exit", () => {
+    const settings = defaultSamplerSettings();
+    settings.looping = false;
+    setSpectralEnabled(settings, true);
+    expect(settings.spectral.enabled).toBe(true);
+    expect(settings.looping).toBe(true);
+    setSpectralEnabled(settings, false);
+    expect(settings.spectral.enabled).toBe(false);
+    expect(settings.looping).toBe(false);
+  });
+
+  it("round-trips master FX settings", () => {
+    const project = projectFromJson(fixtureText("tests/fixtures/lmp-default-proj.legacy.lampjson"));
+    project.masterFx.delay.enabled = true;
+    project.masterFx.delay.timeSec = 0.19;
+    project.masterFx.delay.feedback = 0.5;
+    project.masterFx.reverb.enabled = true;
+    project.masterFx.reverb.decaySec = 3.5;
+    const reread = projectFromJson(projectToJson(project));
+    expect(reread.masterFx).toEqual(project.masterFx);
+  });
+
+  it("round-trips vibrato settings", () => {
+    const project = projectFromJson(fixtureText("tests/fixtures/lmp-default-proj.legacy.lampjson"));
+    project.instruments[0]!.vibratoSpeed = 7.5;
+    project.instruments[0]!.vibratoDepth = 0.4;
+    const reread = projectFromJson(projectToJson(project));
+    expect(reread.instruments[0]!.vibratoSpeed).toBe(7.5);
+    expect(reread.instruments[0]!.vibratoDepth).toBe(0.4);
+  });
+
+  it("round-trips instrument display names", () => {
+    const project = projectFromJson(fixtureText("tests/fixtures/lmp-default-proj.legacy.lampjson"));
+    project.instrumentNames = ["Bass 1", "Lead", "Perc"];
+    const reread = projectFromJson(projectToJson(project));
+    expect(reread.instrumentNames).toEqual(["Bass 1", "Lead", "Perc"]);
+  });
+
   it("round-trips the instrument pan centre and random width", () => {
-    const project = projectFromJson(fixtureText("assets/lmp-default-proj.json"));
+    const project = projectFromJson(fixtureText("tests/fixtures/lmp-default-proj.legacy.lampjson"));
     project.instruments[0]!.pan = -0.5;
     project.instruments[0]!.panRandomRange = 0.25;
     const reread = projectFromJson(projectToJson(project));
@@ -248,7 +319,7 @@ describe("project json", () => {
   });
 
   it("gracefully imports the legacy Fusion schema and unknown modes", () => {
-    const value = JSON.parse(fixtureText("assets/lmp-default-proj.json")) as {
+    const value = JSON.parse(fixtureText("tests/fixtures/lmp-default-proj.legacy.lampjson")) as {
       instruments: Array<Record<string, unknown>>;
     };
     const first = value.instruments[0]!;
@@ -275,10 +346,10 @@ describe("project json", () => {
     const originalSecondRow = song.rowTimes[1]!;
     const originalTickRate = song.meta.tickRate;
 
-    applyTimingOverrides(projectFromJson(fixtureText("assets/lmp-default-proj.json")), song);
+    applyTimingOverrides(projectFromJson(fixtureText("tests/fixtures/lmp-default-proj.legacy.lampjson")), song);
     expect(song.meta.tickRate).toBe(originalTickRate);
 
-    const project = projectFromJson(fixtureText("assets/lmp-default-proj.json"));
+    const project = projectFromJson(fixtureText("tests/fixtures/lmp-default-proj.legacy.lampjson"));
     project.tickRateOverride = originalTickRate * 2;
     project.speedOverride = 3;
     project.highlightAOverride = 8;

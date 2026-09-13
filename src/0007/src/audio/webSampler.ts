@@ -29,6 +29,8 @@ export class Voice {
     public start: number,
     public end: number,
     public rate: number,
+    public lfo: OscillatorNode | null = null,
+    public lfoGain: GainNode | null = null,
   ) {}
 
   levelAt(when: number): number {
@@ -54,6 +56,13 @@ export class Voice {
       this.source.stop(when + fade + 0.02);
     } catch {
       /* already stopped */
+    }
+    if (this.lfo) {
+      try {
+        this.lfo.stop(when + fade + 0.05);
+      } catch {
+        /* already stopped */
+      }
     }
     this.released = { start: when, level, duration: fade };
     this.end = Math.min(this.end, when + fade + 0.02);
@@ -93,9 +102,16 @@ export class Voice {
       /* already stopped */
     }
     try {
+      this.lfo?.stop();
+    } catch {
+      /* already stopped */
+    }
+    try {
       this.source.disconnect();
       this.gain.disconnect();
       this.pan.disconnect();
+      this.lfo?.disconnect();
+      this.lfoGain?.disconnect();
     } catch {
       /* already disconnected */
     }
@@ -124,6 +140,21 @@ export function buildVoice(
 
   source.buffer = buffer;
   source.playbackRate.value = rate;
+
+  // Vibrato: a sine LFO offsetting playbackRate via `detune` (cents), so it
+  // layers on top of any pitch ramp rather than replacing it.
+  let lfo: OscillatorNode | null = null;
+  let lfoGain: GainNode | null = null;
+  if (settings.vibratoDepth > 0 && settings.vibratoSpeed > 0) {
+    lfo = ctx.createOscillator();
+    lfo.type = "sine";
+    lfo.frequency.value = settings.vibratoSpeed;
+    lfoGain = ctx.createGain();
+    lfoGain.gain.value = settings.vibratoDepth * 100;
+    lfo.connect(lfoGain);
+    lfoGain.connect(source.detune);
+    lfo.start(when);
+  }
 
   gain.gain.setValueAtTime(0, when);
   gain.gain.linearRampToValueAtTime(level, when + attack);
@@ -154,6 +185,13 @@ export function buildVoice(
     source.start(when, offset, length);
     const playDuration = length / rate;
     end = when + playDuration;
+    if (lfo) {
+      try {
+        lfo.stop(end + 0.05);
+      } catch {
+        /* already stopped */
+      }
+    }
     // Short fade at the end so a one-shot that ends on a non-zero sample
     // doesn't click/pop.
     const fade = Math.min(0.005, playDuration / 2);
@@ -164,7 +202,7 @@ export function buildVoice(
     }
   }
 
-  return new Voice(source, gain, pan, channel, instrument, settings, level, when, end, rate);
+  return new Voice(source, gain, pan, channel, instrument, settings, level, when, end, rate, lfo, lfoGain);
 }
 
 export interface LoopCache {
@@ -317,6 +355,12 @@ export class SamplerEngine {
       this.fused[instrument] = buffer;
       this.fusedClips[instrument] = clip;
       this.fusedWaveforms[instrument] = waveform(clip.channels[0]!, 600);
+      // The fused loop is this instrument's effective source, so play its full
+      // length. Without this the old sampler trim (e.g. a 0.44s slice of sample
+      // A) would cut the rendered 4s loop off early.
+      s.startSec = 0;
+      s.endSec = buffer.duration;
+      s.looping = true;
       this.fusionJustCompleted[instrument] = true;
     } catch (e) {
       if (this.renderGeneration[instrument] !== generation) return; // superseded, ignore its error too

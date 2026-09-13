@@ -23,3 +23,13 @@ export function clipIsEmpty(clip: AudioClip): boolean {
 export function clipDuration(clip: AudioClip): number {
   return clipLen(clip) / Math.max(clip.sampleRate, 1);
 }
+
+/** Returns a copy of `clip` shortened to `frames` per channel (or the clip itself). */
+export function clipSlice(clip: AudioClip, frames: number): AudioClip {
+  const length = Math.min(Math.max(frames, 0), clipLen(clip));
+  if (length === clipLen(clip)) return clip;
+  return audioClip(
+    clip.channels.map((channel) => channel.subarray(0, length)),
+    clip.sampleRate,
+  );
+}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { SongModel } from "@/core/songModel";
 import type { ProjectFile } from "@/core/project";
 import type { AudioBackend, SamplePlayhead } from "@/audio/backend";
@@ -27,7 +27,7 @@ interface SourceSamplesProps {
   onPackage: () => void;
 }
 
-export function SourceSamples(props: SourceSamplesProps) {
+function SourceSamplesImpl(props: SourceSamplesProps) {
   const explain = useExplainer();
   const [durations, setDurations] = useState<number[]>([]);
   const [playheads, setPlayheads] = useState<SamplePlayhead[]>([]);
@@ -106,3 +106,5 @@ export function SourceSamples(props: SourceSamplesProps) {
     </section>
   );
 }
+
+export const SourceSamples = memo(SourceSamplesImpl);

@@ -58,14 +58,6 @@ export function timingExplain(song: SongModel): ExplainerText {
   };
 }
 
-export function chipsExplain(song: SongModel): ExplainerText {
-  const names = song.chips.map((c) => (c.chipId === 4 ? "Game Boy" : `Chip ${c.chipId}`));
-  return {
-    title: "Chips — the sound hardware being emulated",
-    body: `${names.join(", ")} with ${song.channels.length} channels. Volume/panning are master-bus trims, separate from per-instrument and per-row volume.`,
-  };
-}
-
 export function instrumentsExplain(song: SongModel): ExplainerText {
   return {
     title: "Instruments — Game Boy channel presets",
@@ -187,7 +179,7 @@ export function spectralFusionExplain(): ExplainerText {
 export function projectJsonExplain(): ExplainerText {
   return {
     title: "Project JSON — save and restore the whole setup",
-    body: "A JSON dump of the whole setup: sampler configs, mixer levels/mutes, sample comments, page metadata and theme.\n\nCopy to save; Load or paste + Apply to restore. Samples are referenced by path, never embedded — files must exist under ASSETS/SourceSamples/.",
+    body: "A JSON dump of the whole setup: sampler configs, mixer levels/mutes, sample comments, page metadata and theme.\n\nCopy to save; Load a `.lampjson` file or paste + Apply to restore. Saving uses the `.lampjson` extension so it is easy to filter. Samples are referenced by path, never embedded — files must exist under ASSETS/SourceSamples/.",
   };
 }
 
@@ -208,7 +200,7 @@ export function pianoRollExplain(): ExplainerText {
 export function coverArtExplain(): ExplainerText {
   return {
     title: "Cover Art — animated, driven by the same triggers as everything else",
-    body: "A 240×240 canvas, dithered from a 32×32 buffer with a 4×4 Bayer matrix. A CD spins over flashing Matrix-style code.\n\nEvery note trigger fires a scan-flash around the disc's rim, coloured and sized by its instrument and volume — all four channels, including Noise. Click to save a crisp 1600×1600 PNG.",
+    body: "A 240×240 canvas, dithered from a 32×32 buffer with a 4×4 Bayer matrix. A glass laboratory vat holds a green plant stem that grows in and sways, surrounded by a wall of dull-blue monitoring screens that hum and scroll.\n\nEvery note trigger makes the stem jiggle and flashes an instrument-coloured aura around the vat — all four channels, including Noise. Click to save a crisp 1600×1600 PNG.",
   };
 }
 

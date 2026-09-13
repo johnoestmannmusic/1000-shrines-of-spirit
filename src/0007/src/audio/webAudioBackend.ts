@@ -1,4 +1,5 @@
 import type { AudioClip } from "@/core/dsp";
+import { defaultMasterFx, type MasterFxSettings } from "@/core/masterFx";
 import { clipDuration } from "@/core/dsp";
 import { Scheduler, waveform, type SamplerSettings, type Sequence } from "@/core/sampler";
 import {
@@ -9,6 +10,7 @@ import {
   type SamplePlayhead,
 } from "./backend";
 import { SamplerEngine, Voice, buildVoice } from "./webSampler";
+import { createMasterFxGraph, type MasterFxGraph } from "./masterFxGraph";
 
 async function decodeBytes(ctx: AudioContext, bytes: Uint8Array): Promise<AudioBuffer> {
   const arrayBuffer = bytes.buffer.slice(
@@ -30,6 +32,8 @@ interface InstrumentPreview {
 
 export class WebAudioBackend implements AudioBackend {
   private ctx: AudioContext | null = null;
+  private masterFx: MasterFxSettings = defaultMasterFx();
+  private masterFxGraph: MasterFxGraph | null = null;
   private masterGain: GainNode | null = null;
   private masterAnalyser: AnalyserNode | null = null;
   private channelGain: Array<GainNode | null> = [null, null, null, null];
@@ -76,8 +80,13 @@ export class WebAudioBackend implements AudioBackend {
     const masterAnalyser = ctx.createAnalyser();
     masterAnalyser.fftSize = 512;
     master.gain.value = this.masterVolume;
-    master.connect(masterAnalyser);
+    // Master FX bus: dry + delay + reverb sum into the analyser/destination.
+    // Shares the exact graph used for offline WAV export.
+    const fx = createMasterFxGraph(ctx, this.masterFx);
+    master.connect(fx.input);
+    fx.output.connect(masterAnalyser);
     masterAnalyser.connect(ctx.destination);
+    this.masterFxGraph = fx;
     for (let c = 0; c < NUM_CHANNELS; c++) {
       const gain = ctx.createGain();
       const analyser = ctx.createAnalyser();
@@ -599,6 +608,11 @@ export class WebAudioBackend implements AudioBackend {
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setValueAtTime(volume, this.ctx.currentTime);
     }
+  }
+
+  setMasterFx(settings: MasterFxSettings): void {
+    this.masterFx = settings;
+    this.masterFxGraph?.update(settings);
   }
 
   meterLevels(): number[] {

@@ -1,9 +1,8 @@
 import { app, dialog } from "electron";
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseFurFile } from "../core/fur/node";
-import { assembleSongFolder } from "./folder";
-import type { LoadedSong, SongFolderFile } from "../shared/types";
+import type { LoadedSong } from "../shared/types";
 
 function assetsDir(): string {
   return app.isPackaged
@@ -23,47 +22,27 @@ function readTextIfPresent(filePath: string): string | null {
 
 export function loadDefaultSong(): LoadedSong | { error: string } {
   const dir = assetsDir();
-  const furBytes = readIfPresent(path.join(dir, "flight_school_night_shift.fur"));
-  if (!furBytes) {
-    return { error: `Cannot find bundled song assets in ${dir}` };
+  const project = readTextIfPresent(path.join(dir, "lmp-default-proj.lampjson"));
+  if (!project) {
+    return { error: `Cannot find the bundled project assets in ${dir}` };
   }
-  const project = readTextIfPresent(path.join(dir, "lmp-default-proj.json")) ?? "";
   const stems = [0, 1, 2, 3].map((i) => readIfPresent(path.join(dir, `${i}.ogg`)));
-  const samples = [0, 1, 2].map((i) =>
+  const samples = [0, 1, 2, 3, 4, 5].map((i) =>
     readIfPresent(path.join(dir, "SourceSamples", `${i}.ogg`)),
   );
   const chipMix = readIfPresent(path.join(dir, "flight_school_night_shift.wav"));
-  try {
-    const raw = parseFurFile(furBytes);
-    return { raw, furBytes, project, stems, samples, chipMix };
-  } catch (e) {
-    return { error: `Cannot parse bundled .fur: ${String(e)}` };
-  }
-}
-
-function collectFiles(root: string, current: string, out: SongFolderFile[]): void {
-  for (const entry of readdirSync(current)) {
-    const full = path.join(current, entry);
-    const stats = statSync(full);
-    if (stats.isDirectory()) {
-      collectFiles(root, full, out);
-    } else {
-      const rel = path.relative(root, full).split(path.sep).join("/");
-      out.push({ name: rel, bytes: new Uint8Array(readFileSync(full)) });
+  // The .fur (and its stems) are optional: a project-only song loads without
+  // CHIP MODE, reconstructing its model from the project's pattern snapshot.
+  const furBytes = readIfPresent(path.join(dir, "flight_school_night_shift.fur"));
+  let raw;
+  if (furBytes) {
+    try {
+      raw = parseFurFile(furBytes);
+    } catch (e) {
+      return { error: `Cannot parse bundled .fur: ${String(e)}` };
     }
   }
-}
-
-export async function loadSongFolder(): Promise<LoadedSong | { error: string }> {
-  const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
-  if (result.canceled || result.filePaths.length === 0) return { error: "cancelled" };
-  try {
-    const out: SongFolderFile[] = [];
-    collectFiles(result.filePaths[0]!, result.filePaths[0]!, out);
-    return assembleSongFolder(out);
-  } catch (e) {
-    return { error: `Cannot read folder: ${String(e)}` };
-  }
+  return { raw, furBytes: furBytes ?? undefined, project, stems, samples, chipMix };
 }
 
 export async function chooseAudioFile(): Promise<
@@ -84,8 +63,22 @@ export async function chooseAudioFile(): Promise<
   }
 }
 
+const SAVE_FILTERS: Record<string, { name: string; extensions: string[] }> = {
+  lampjson: { name: "Lantern Project", extensions: ["lampjson"] },
+  wav: { name: "WAV audio", extensions: ["wav"] },
+  mid: { name: "MIDI", extensions: ["mid"] },
+  zip: { name: "ZIP archive", extensions: ["zip"] },
+  png: { name: "PNG image", extensions: ["png"] },
+  fur: { name: "Furnace module", extensions: ["fur"] },
+};
+
 export async function saveFile(suggestedName: string, bytes: Uint8Array): Promise<boolean> {
-  const result = await dialog.showSaveDialog({ defaultPath: suggestedName });
+  const extension = path.extname(suggestedName).replace(".", "").toLowerCase();
+  const filter = SAVE_FILTERS[extension];
+  const result = await dialog.showSaveDialog({
+    defaultPath: suggestedName,
+    filters: filter ? [filter] : undefined,
+  });
   if (result.canceled || !result.filePath) return false;
   writeFileSync(result.filePath, bytes);
   return true;

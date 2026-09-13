@@ -114,9 +114,11 @@ function buildInstrumentTimeline(ch: Channel, patternLength: number): (number | 
     const row: (number | null)[] = [];
     for (let r = 0; r < patternLength; r++) {
       const cell = pat?.rows[r];
-      if (cell) {
-        if (cell.instrument !== null) current = cell.instrument;
-        if (cell.note && cell.note.kind === "off") current = null;
+      if (cell && cell.instrument !== null) {
+        // Furnace keeps the channel's instrument across note-offs; only a new
+        // instrument value changes it. (Clearing it on OFF made notes after an
+        // OFF play with no instrument, i.e. silently.)
+        current = cell.instrument;
       }
       row.push(current);
     }
@@ -197,6 +199,103 @@ export function buildSongModel(raw: RawFurModule): SongModel {
     rowTicks: [],
   };
 
+  const timing = buildRowTiming(song);
+  song.rowTimes = timing.starts;
+  song.rowTicks = timing.ticks;
+  return song;
+}
+
+/** Minimal project shape needed to reconstruct a song without a `.fur`. */
+export interface ProjectSongSource {
+  songTitle?: string;
+  artist?: string;
+  comments?: string;
+  tickRateOverride?: number | null;
+  speedOverride?: number | null;
+  highlightAOverride?: number | null;
+  highlightBOverride?: number | null;
+  virtualTempoOverride?: [number, number] | null;
+  instruments: unknown[];
+  patternSnapshot?: PatternSnapshot | null;
+}
+
+/**
+ * Builds a playable `SongModel` purely from a Project file — used for songs
+ * that ship as a project + Source Samples with no Furnace `.fur` (and so no
+ * CHIP MODE). Pattern length defaults to 64 rows.
+ */
+export function buildSongModelFromProject(project: ProjectSongSource): SongModel {
+  const snapshot = project.patternSnapshot ?? null;
+  const patternLength = 64;
+  const orderLength = snapshot?.orderLength ?? 1;
+  const channelCount = Math.max(snapshot?.channels.length ?? 4, 1);
+
+  const channels: Channel[] = [];
+  for (let ch = 0; ch < channelCount; ch++) {
+    const snap = snapshot?.channels[ch];
+    const patterns = new Map<number, Pattern>();
+    let effectColumns = 1;
+    if (snap) {
+      for (const [index, rows] of snap.patterns) {
+        patterns.set(index, {
+          subsong: 0,
+          channel: ch,
+          index,
+          name: "",
+          rows: rows.map(cloneCell),
+        });
+        for (const cell of rows) {
+          for (let e = 0; e < cell.effects.length; e++) {
+            const slot = cell.effects[e]!;
+            if (slot.effect !== null || slot.value !== null) effectColumns = Math.max(effectColumns, e + 1);
+          }
+        }
+      }
+    }
+    const channel: Channel = {
+      index: ch,
+      effectColumns,
+      orderList: (snap?.orderList ?? [0]).slice(),
+      patterns,
+      insTimeline: [],
+      noteTimeline: [],
+    };
+    channel.insTimeline = buildInstrumentTimeline(channel, patternLength);
+    channel.noteTimeline = buildNoteTimeline(channel, patternLength);
+    channels.push(channel);
+  }
+
+  const instrumentCount = Math.max(project.instruments.length, 1);
+  const instruments: InstrumentInfo[] = Array.from({ length: instrumentCount }, (_, i) => ({
+    name: `Instrument ${(i + 1).toString().padStart(2, "0")}`,
+    insType: 2,
+    gameBoy: null,
+    colorRgb: instrumentColor(i),
+  }));
+
+  const song: SongModel = {
+    meta: {
+      name: project.songTitle || "Untitled",
+      author: project.artist || "",
+      system: "Game Boy",
+      tuningA4: 440,
+      formatVersion: 0,
+      tickRate: project.tickRateOverride ?? 60,
+      speedPattern: [project.speedOverride ?? 6],
+      patternLength,
+      orderLength,
+      highlightA: project.highlightAOverride ?? 4,
+      highlightB: project.highlightBOverride ?? 16,
+      comment: project.comments || "",
+      virtualTempo: project.virtualTempoOverride ?? [1, 1],
+    },
+    channels,
+    instruments,
+    wavetables: [],
+    chips: [{ chipId: 4, channelCount: 4, volume: 1, panning: 0, frontRear: 0 }],
+    rowTimes: [],
+    rowTicks: [],
+  };
   const timing = buildRowTiming(song);
   song.rowTimes = timing.starts;
   song.rowTicks = timing.ticks;

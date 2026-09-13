@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { PatternCell } from "@/core/fur/types";
 import {
   applyEdit,
@@ -51,6 +51,8 @@ interface PatternGridProps {
   editMode: boolean;
   channelMuted: boolean[];
   instrumentMuted: boolean[];
+  /** Show the Game Boy channel roles (Pulse/Wave/Noise) — CHIP MODE only. */
+  showChannelTypes: boolean;
   onChanged: () => void;
   onSeek: (time: number) => void;
   onToggleChannel: (channel: number) => void;
@@ -74,7 +76,7 @@ function effectText(effect: { effect: number | null; value: number | null }): st
   return `${hex(effect.effect)}${hex(effect.value)}`;
 }
 
-export function PatternGrid(props: PatternGridProps) {
+function PatternGridImpl(props: PatternGridProps) {
   const { song, backend, editMode } = props;
   const explain = useExplainer();
   const [order, setOrder] = useState(0);
@@ -378,7 +380,12 @@ export function PatternGrid(props: PatternGridProps) {
         event.preventDefault();
         const rect = selectionRect(model, current, stateRef.current.anchor);
         const flat = flatColumns(model);
+        const singleColumn = !!rect && rect.colLo === rect.colHi;
         const adjust = (cell: PatternCell, column: EditColumn): PatternCell => {
+          // When the selection spans multiple columns (e.g. "select all
+          // columns"), semitone/octave changes only retune notes; a single
+          // selected column adjusts that column's own value.
+          if (!singleColumn && column.kind !== "note") return cell;
           if (key === "q") return adjustCell(cell, column, 1, model.instruments.length);
           if (key === "a") return adjustCell(cell, column, -1, model.instruments.length);
           if (key === "w") return adjustNote(cell, 12);
@@ -399,6 +406,35 @@ export function PatternGrid(props: PatternGridProps) {
               }
             }
           });
+          // Remember the focus cell's new value so Z can repeat it. The cell is
+          // already adjusted by `mutate`, so record it as-is (adjusting again
+          // would store a value one step off).
+          recordLastValue(
+            lastValues.current,
+            current.column,
+            cellAt(model, current.channel, current.order, current.row),
+          );
+          // In an all-columns selection the focus may not be a note column, so
+          // also remember the adjusted note on the focus row.
+          if (!singleColumn) {
+            const noteColumn = flat
+              .slice(rect.colLo, rect.colHi + 1)
+              .find((fc) => fc.column.kind === "note");
+            if (noteColumn) {
+              recordLastValue(
+                lastValues.current,
+                noteColumn.column,
+                cellAt(model, noteColumn.channel, rect.order, current.row),
+              );
+            }
+          }
+          // Preview the changed cell (note pitch or volume), same as clicking it.
+          if (
+            !propsRef.current.channelMuted[current.channel] &&
+            (current.column.kind === "note" || current.column.kind === "vol")
+          ) {
+            propsRef.current.onAudition([current.channel], current.order, current.row);
+          }
         }
         return;
       }
@@ -527,13 +563,27 @@ export function PatternGrid(props: PatternGridProps) {
 
   const draggingRef = useRef(false);
   const didDragRef = useRef(false);
+  const dragTimerRef = useRef<number | null>(null);
+  const clearDragTimer = useCallback(() => {
+    if (dragTimerRef.current !== null) {
+      window.clearTimeout(dragTimerRef.current);
+      dragTimerRef.current = null;
+    }
+  }, []);
   const beginDrag = (channel: number, r: number, column: EditColumn) => {
     if (!editMode) return;
-    draggingRef.current = true;
+    clearDragTimer();
+    draggingRef.current = false;
     didDragRef.current = false;
     const pos: CellPos = { channel, order, row: r, column };
-    setAnchor(pos);
-    setSelected(pos);
+    // Range selection only starts once the pointer has been held briefly, so a
+    // quick click (which may drift a pixel or two) stays a single-cell select.
+    dragTimerRef.current = window.setTimeout(() => {
+      dragTimerRef.current = null;
+      draggingRef.current = true;
+      setAnchor(pos);
+      setSelected(pos);
+    }, 250);
   };
   const extendDrag = (channel: number, r: number, column: EditColumn) => {
     if (!draggingRef.current) return;
@@ -542,11 +592,15 @@ export function PatternGrid(props: PatternGridProps) {
   };
   useEffect(() => {
     const up = () => {
+      clearDragTimer();
       draggingRef.current = false;
     };
     window.addEventListener("mouseup", up);
-    return () => window.removeEventListener("mouseup", up);
-  }, []);
+    return () => {
+      window.removeEventListener("mouseup", up);
+      clearDragTimer();
+    };
+  }, [clearDragTimer]);
 
   const selectCell = (channel: number, r: number, column: EditColumn, shift: boolean) => {
     if (!editMode) return;
@@ -649,7 +703,7 @@ export function PatternGrid(props: PatternGridProps) {
                     onMouseEnter={() => explain(channelExplain(song, c, !!props.channelMuted[c]))}
                     title="Mute or unmute this channel"
                   >
-                    CH{c} · {CHANNEL_NAMES[c]}
+                    {props.showChannelTypes ? `CH${c} · ${CHANNEL_NAMES[c]}` : `CH${c}`}
                   </span>
                 </th>
               ))}
@@ -698,7 +752,11 @@ export function PatternGrid(props: PatternGridProps) {
                     const pattern =
                       patternIndex === undefined ? undefined : channel.patterns.get(patternIndex);
                     const cell = pattern?.rows[r];
-                    const instrument = channel.insTimeline[order]?.[r] ?? null;
+                    // Colour by the instrument only while a note is held; a
+                    // note-off clears the colour even though the channel keeps
+                    // its instrument for later notes.
+                    const heldNote = channel.noteTimeline[order]?.[r] ?? null;
+                    const instrument = heldNote ? channel.insTimeline[order]?.[r] ?? null : null;
                     const muted =
                       props.channelMuted[c] ||
                       (instrument !== null && (props.instrumentMuted[instrument] ?? false));
@@ -932,6 +990,8 @@ export function PatternGrid(props: PatternGridProps) {
     </section>
   );
 }
+
+export const PatternGrid = memo(PatternGridImpl);
 
 function SubHeaders({ song, channel }: { song: SongModel; channel: number }) {
   const effectColumns = Math.max(song.channels[channel]?.effectColumns ?? 1, 1);

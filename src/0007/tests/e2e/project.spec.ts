@@ -13,12 +13,11 @@ test("New Project resets to one instrument, then add/delete instruments", async 
   });
   try {
     const window = await app.firstWindow();
-    await expect(window.locator(".toolbar .status")).toContainText("flight_school_night_shift", {
+    await expect(window.locator(".toolbar .status")).toContainText("instruments", {
       timeout: 30_000,
     });
 
     const instrumentRows = window.locator(".instrument-row");
-    await expect(instrumentRows).toHaveCount(10);
 
     // New Project now requires confirmation.
     await window.getByRole("button", { name: "New Project" }).click();

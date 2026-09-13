@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   applySnapshot,
   buildSongModel,
+  buildSongModelFromProject,
   cellAt,
   instrumentColor,
   patternSnapshot,
@@ -10,6 +11,7 @@ import {
   type SongModel,
 } from "@/core/songModel";
 import { clearPatternsSnapshot, reassignInstrument, remapInstrumentsAfterDelete } from "@/core/tracker";
+import { defaultMasterFx, type MasterFxSettings } from "@/core/masterFx";
 import {
   applyTimingOverrides,
   defaultProject,
@@ -25,11 +27,20 @@ import {
   setSpectralEnabled,
   type SamplerSettings,
 } from "@/core/sampler";
-import { renderSamplerMix, wavPcm16, zipStore } from "@/core/export";
+import {
+  applyExportEnvelope,
+  arrangeExport,
+  renderSamplerMix,
+  wavPcm16,
+  zipStore,
+  type ExportParams,
+} from "@/core/export";
+import { clipLen, clipSlice, type AudioClip } from "@/core/dsp";
 import { writeMidi } from "@/core/midi";
 import { samplerPlaybackRate } from "@/core/pitch";
 import { rowDuration, rowTime } from "@/core/timing";
 import { WebAudioBackend } from "@/audio/webAudioBackend";
+import { applyMasterFxOffline, decodeAudioBytes } from "@/audio/offline";
 import type { PlaybackMode } from "@/audio/backend";
 import { applyTheme, loadTheme, type ThemeName } from "./theme";
 import { safeFilename } from "./util";
@@ -40,12 +51,13 @@ import { InstrumentList } from "./components/InstrumentList";
 import { PatternGrid } from "./components/PatternGrid";
 import { SourceSamples } from "./components/SourceSamples";
 import { Piano } from "./components/Piano";
-import { CoverArt } from "./components/CoverArt";
+import { CoverArt, type CoverArtHandle } from "./components/CoverArt";
 import { SamplerEditor } from "./components/SamplerEditor";
 import { DraggableModal } from "./components/DraggableModal";
+import { MasterFxModal } from "./components/MasterFxModal";
+import { WavExportModal } from "./components/WavExportModal";
 import { AudioError } from "./components/AudioError";
 import {
-  ChipsCard,
   ExplainerCard,
   LicensesCard,
   SongComments,
@@ -60,7 +72,7 @@ import {
 } from "./explainer";
 import { loadLocalState, saveLocalState } from "./localState";
 import { initPrismWasm } from "./vendor/prism/loader";
-import { chooseAudioFile, loadDefaultSong, loadSongFolder, saveFile } from "./platform";
+import { chooseAudioFile, loadDefaultSong, saveFile } from "./platform";
 
 interface EditorState {
   index: number;
@@ -87,7 +99,12 @@ function findInstrumentSpot(
   return null;
 }
 
-const BUILD_NUMBER = `v${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
+declare const __BUILD_DATE__: string | undefined;
+const BUILD_NUMBER = `v${
+  typeof __BUILD_DATE__ === "string"
+    ? __BUILD_DATE__
+    : new Date().toISOString().slice(0, 10).replace(/-/g, "")
+}`;
 
 const NEW_PROJECT_TITLE = "New Song";
 const NEW_PROJECT_ARTIST = "Unknown Artist";
@@ -95,6 +112,7 @@ const NEW_PROJECT_ALBUM = "New Album";
 
 export function App() {
   const backendRef = useRef<WebAudioBackend | null>(null);
+  const coverRef = useRef<CoverArtHandle | null>(null);
   const songRef = useRef<SongModel | null>(null);
   const settingsRef = useRef<SamplerSettings[]>([]);
   const viewOrderRef = useRef(0);
@@ -134,6 +152,11 @@ export function App() {
     target: number;
   } | null>(null);
   const [wasmReady, setWasmReady] = useState(false);
+  const [masterFx, setMasterFx] = useState<MasterFxSettings>(defaultMasterFx());
+  const [masterFxOpen, setMasterFxOpen] = useState(false);
+  const [wavExportOpen, setWavExportOpen] = useState(false);
+  const [wavExportBusy, setWavExportBusy] = useState(false);
+  const [wavExportProgress, setWavExportProgress] = useState(0);
   const [explainer, setExplainer] = useState<ExplainerContent>(DEFAULT_EXPLAINER);
 
   songRef.current = song;
@@ -212,13 +235,22 @@ export function App() {
       setStatus("");
       return;
     }
-    if (!("raw" in result)) return;
-
-    const model = buildSongModel(result.raw);
+    if (!("project" in result)) return;
     const loadedProject = projectFromJson(result.project);
+    let model: SongModel;
+    if (result.raw) {
+      model = buildSongModel(result.raw);
+      if (loadedProject.patternSnapshot) applySnapshot(model, loadedProject.patternSnapshot);
+      applyTimingOverrides(loadedProject, model);
+    } else {
+      // Project-only song (no Furnace .fur / CHIP MODE): rebuild the model
+      // from the project's pattern snapshot and timing overrides.
+      model = buildSongModelFromProject(loadedProject);
+    }
     validateProject(loadedProject, model.instruments.length);
-    if (loadedProject.patternSnapshot) applySnapshot(model, loadedProject.patternSnapshot);
-    applyTimingOverrides(loadedProject, model);
+    loadedProject.instrumentNames.forEach((name, i) => {
+      if (model.instruments[i]) model.instruments[i]!.name = name;
+    });
 
     const loadedSettings = model.instruments.map(
       (_, i) => loadedProject.instruments[i] ?? defaultSamplerSettings(),
@@ -248,6 +280,7 @@ export function App() {
       engine.setChannelMute(c, loadedProject.mutedChannels[c] ?? false);
     }
     engine.setMasterVolume(loadedProject.masterVolume);
+    engine.setMasterFx(loadedProject.masterFx);
     const sampleBytes: Array<Uint8Array | null> = Array.from(
       { length: 6 },
       (_, i) => result.samples[i] ?? null,
@@ -269,10 +302,11 @@ export function App() {
     setChannelVolume(loadedProject.channelVolume.slice(0, 4));
     setChannelMuted(loadedProject.mutedChannels.slice(0, 4));
     setMasterVolume(loadedProject.masterVolume);
+    setMasterFx(loadedProject.masterFx);
     setReference(saved ? saved.reference : loadedProject.refPitchEnabled);
     setMode(initialMode);
     setStemsAvailable(haveStems);
-    setCurrentFur(result.furBytes);
+    setCurrentFur(result.furBytes ?? null);
     setChipMix(result.chipMix ?? null);
     setEditor(null);
     setStatus(`${model.meta.name} — ${model.instruments.length} instruments`);
@@ -502,6 +536,8 @@ export function App() {
     setMasterVolume(1);
     setEditor(null);
     setStemsAvailable(false);
+    engine.setMasterFx(defaultMasterFx());
+    setMasterFx(defaultMasterFx());
     setProject((prev) => {
       const base = prev ?? defaultProject();
       return {
@@ -516,6 +552,7 @@ export function App() {
         mutedChannels: [false, false, false, false],
         mutedInstruments: [false],
         instruments: nextSettings.map((setting) => ({ ...setting, muted: false })),
+        masterFx: defaultMasterFx(),
         patternSnapshot: patternSnapshot(model),
         tickRateOverride: model.meta.tickRate,
         speedOverride: model.meta.speedPattern[0] ?? null,
@@ -590,6 +627,30 @@ export function App() {
     [],
   );
 
+  const instrumentMuted = useMemo(
+    () => settings.map((s) => s.muted),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [settings.map((s) => s.muted).join(",")],
+  );
+
+  const onMasterFxChange = useCallback((settings: MasterFxSettings) => {
+    setMasterFx(settings);
+    backendRef.current?.setMasterFx(settings);
+  }, []);
+
+  const onOpenMasterFx = useCallback(() => setMasterFxOpen(true), []);
+
+  const onViewOrderChange = useCallback((order: number) => {
+    viewOrderRef.current = order;
+  }, []);
+
+  const onSelectionChange = useCallback(
+    (selection: { order: number; row: number } | null) => {
+      selectionRef.current = selection;
+    },
+    [],
+  );
+
   const onPreview = useCallback(
     (index: number) => {
       const engine = backendRef.current;
@@ -639,6 +700,19 @@ export function App() {
     [],
   );
 
+  const onSampleLoad = useCallback((slot: number) => void loadSample(slot), [loadSample]);
+  const onSamplePlay = useCallback((slot: number) => backendRef.current?.previewSample(slot), []);
+  const onSampleStop = useCallback(() => backendRef.current?.stopSamplePreview(), []);
+  const onSampleInfo = useCallback(
+    (slot: number) => {
+      setSampleInfo(slot);
+      setSampleInfoName(sampleNames[slot] ?? "");
+      setSampleInfoComments(project?.sourceSamples[slot]?.comments ?? "");
+    },
+    [sampleNames, project],
+  );
+  const onSampleClear = useCallback(() => setClearConfirm(true), []);
+
   const clearSamples = useCallback(() => {
     const engine = backendRef.current;
     if (!engine) return;
@@ -684,6 +758,8 @@ export function App() {
         refPitchEnabled: reference,
         theme,
         instruments: settings.map((s) => ({ ...s, muted: false })),
+        instrumentNames: model.instruments.map((i) => i.name),
+        masterFx,
         patternSnapshot: patternSnapshot(model),
         tickRateOverride: model.meta.tickRate,
         speedOverride: model.meta.speedPattern[0] ?? null,
@@ -693,7 +769,7 @@ export function App() {
       };
       setProjectIoText(projectToJson(live, true));
     }, 0);
-  }, [song, project, mode, channelVolume, masterVolume, channelMuted, settings, reference, theme]);
+  }, [song, project, mode, channelVolume, masterVolume, channelMuted, settings, reference, theme, masterFx]);
 
   const applyProjectText = useCallback(
     (text: string) => {
@@ -729,6 +805,9 @@ export function App() {
         }
       }
       validateProject(parsed, song.instruments.length);
+      parsed.instrumentNames.forEach((name, i) => {
+        if (song.instruments[i]) song.instruments[i]!.name = name;
+      });
       if (parsed.patternSnapshot) applySnapshot(song, parsed.patternSnapshot);
       applyTimingOverrides(parsed, song);
       const engine = backendRef.current;
@@ -737,6 +816,7 @@ export function App() {
         engine?.setChannelMute(c, parsed.mutedChannels[c] ?? false);
       }
       engine?.setMasterVolume(parsed.masterVolume);
+      engine?.setMasterFx(parsed.masterFx);
       const nextSettings = song.instruments.map(
         (_, i) => parsed.instruments[i] ?? defaultSamplerSettings(),
       );
@@ -755,6 +835,7 @@ export function App() {
       setChannelVolume(parsed.channelVolume.slice(0, 4));
       setChannelMuted(parsed.mutedChannels.slice(0, 4));
       setMasterVolume(parsed.masterVolume);
+      setMasterFx(parsed.masterFx);
       setReference(parsed.refPitchEnabled);
       setProjectIoOpen(false);
       setStatus("Applied Project JSON");
@@ -770,6 +851,10 @@ export function App() {
       const file = event.target.files?.[0];
       event.target.value = "";
       if (!file) return;
+      if (!file.name.toLowerCase().endsWith(".lampjson")) {
+        setError(`Unsupported project file "${file.name}" — expected a .lampjson file.`);
+        return;
+      }
       void file.text().then((text) => {
         setProjectIoText(text);
         applyProjectText(text);
@@ -794,24 +879,88 @@ export function App() {
 
   const saveWav = useCallback(() => {
     if (!song) return;
-    if (mode === "chip" && chipMix) {
-      void saveBytes(`${safeFilename(song.meta.name)}.wav`, chipMix);
-      return;
-    }
-    const engine = backendRef.current;
-    if (!engine) return;
-    const clips = settings.map((_, i) => engine.effectiveClip(i));
-    const mix = renderSamplerMix(
-      sequenceFromSong(song),
+    setWavExportOpen(true);
+  }, [song]);
+
+  const runWavExport = useCallback(
+    async (params: ExportParams) => {
+      if (!song) return;
+      setWavExportBusy(true);
+      setWavExportProgress(0);
+      try {
+        // Yield so the progress modal can paint before the synchronous mixdown.
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        const title = project?.songTitle || song.meta.name;
+        const isChip = mode === "chip" && chipMix !== null;
+        setWavExportProgress(0.08);
+        let base: AudioClip;
+        if (isChip && chipMix) {
+          base = await decodeAudioBytes(chipMix);
+        } else {
+          const engine = backendRef.current;
+          if (!engine) return;
+          const clips = settings.map((_, i) => engine.effectiveClip(i));
+          base = renderSamplerMix(
+            sequenceFromSong(song),
+            settings,
+            clips,
+            channelVolume,
+            channelMuted,
+            masterVolume,
+          );
+        }
+        setWavExportProgress(0.2);
+
+        // Arrange all loops + fade tail first, then run the Master FX chain once
+        // over the continuous signal so reverb/delay tails overlap the next loop
+        // instead of leaving a gap between them. With a fade we trim back to the
+        // arrangement so the file ends exactly at the fade; without one we let
+        // the final tail ring out.
+        const arranged = arrangeExport(base, params.loops, params.fadeOutMs);
+        const wet = await applyMasterFxOffline(arranged, masterFx, (fraction) =>
+          setWavExportProgress(0.2 + fraction * 0.7),
+        );
+        const trimmed = params.fadeOutMs > 0 ? clipSlice(wet, clipLen(arranged)) : wet;
+        const final = applyExportEnvelope(trimmed, params);
+        setWavExportProgress(0.93);
+
+        const artwork = (await coverRef.current?.renderPngBytes()) ?? undefined;
+        const bytes = wavPcm16(final, {
+          title,
+          artist: project?.artist || undefined,
+          album: project?.album || undefined,
+          artwork,
+        });
+        setWavExportProgress(0.97);
+
+        const now = new Date();
+        const stamp = `${String(now.getFullYear() % 100).padStart(2, "0")}${String(
+          now.getMonth() + 1,
+        ).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+        const name = `${stamp}- ${safeFilename(title)}.wav`;
+        await saveBytes(name, bytes);
+        setWavExportProgress(1);
+        setWavExportOpen(false);
+      } catch (e) {
+        setError(`WAV export failed: ${String(e)}`);
+        setWavExportOpen(false);
+      } finally {
+        setWavExportBusy(false);
+      }
+    },
+    [
+      song,
+      mode,
+      chipMix,
       settings,
-      clips,
       channelVolume,
       channelMuted,
       masterVolume,
-    );
-    const title = project ? project.songTitle : song.meta.name;
-    void saveBytes(`${safeFilename(title)}-sampler-mix.wav`, wavPcm16(mix));
-  }, [song, mode, chipMix, settings, channelVolume, channelMuted, masterVolume, project, saveBytes]);
+      project,
+      masterFx,
+      saveBytes,
+    ],
+  );
 
   const packageSamples = useCallback(() => {
     const engine = backendRef.current;
@@ -829,18 +978,6 @@ export function App() {
     const title = project ? project.songTitle : "source-samples";
     void saveBytes(`${safeFilename(title)}-source-samples.zip`, zipStore(entries));
   }, [project, song, saveBytes]);
-
-  const loadFolder = useCallback(async () => {
-    const result = await loadSongFolder();
-    if ("error" in result) {
-      if (result.error !== "cancelled") setError(result.error || "Failed to load folder");
-      return;
-    }
-    backendRef.current?.dispose();
-    setStatus("Loading selected song folder…");
-    setError(null);
-    applyLoaded(result);
-  }, [applyLoaded]);
 
   const openEditor = useCallback(
     (index: number, spectral: boolean) => {
@@ -894,6 +1031,7 @@ export function App() {
               onOpenProjectJson={openProjectJson}
               onSaveWav={saveWav}
               wavReady={mode === "sampler" || chipMix !== null}
+              furReady={currentFur !== null}
               status={status}
             />
             <SongMetaCard
@@ -919,17 +1057,14 @@ export function App() {
               backend={backend}
               editMode={editMode}
               channelMuted={channelMuted}
-              instrumentMuted={settings.map((s) => s.muted)}
+              instrumentMuted={instrumentMuted}
+              showChannelTypes={mode === "chip" && !editMode}
               onChanged={onPatternChanged}
               onSeek={onSeek}
               onToggleChannel={onToggleChannel}
               onAudition={onAudition}
-              onViewOrderChange={(order) => {
-                viewOrderRef.current = order;
-              }}
-              onSelectionChange={(selection) => {
-                selectionRef.current = selection;
-              }}
+              onViewOrderChange={onViewOrderChange}
+              onSelectionChange={onSelectionChange}
             />
             <InstrumentList
               backend={backend}
@@ -952,20 +1087,16 @@ export function App() {
               song={song}
               project={project}
               sampleNames={sampleNames}
-              onLoad={(slot) => void loadSample(slot)}
-              onPlay={(slot) => backend.previewSample(slot)}
-              onStop={() => backend.stopSamplePreview()}
-              onInfo={(slot) => {
-                setSampleInfo(slot);
-                setSampleInfoName(sampleNames[slot] ?? "");
-                setSampleInfoComments(infoProject?.sourceSamples[slot]?.comments ?? "");
-              }}
-              onClear={() => setClearConfirm(true)}
+              onLoad={onSampleLoad}
+              onPlay={onSamplePlay}
+              onStop={onSampleStop}
+              onInfo={onSampleInfo}
+              onClear={onSampleClear}
               onPackage={packageSamples}
             />
           </div>
           <aside className="sidebar">
-            <CoverArt song={song} backend={backend} title={project?.songTitle || song.meta.name} />
+            <CoverArt ref={coverRef} song={song} backend={backend} title={project?.songTitle || song.meta.name} />
             <ExplainerCard content={explainer} />
             <SongComments
               comments={project?.comments ?? ""}
@@ -976,7 +1107,6 @@ export function App() {
               }
             />
             <TimingCard song={song} editMode={editMode} onEdit={onTimingEdit} />
-            <ChipsCard song={song} />
             <Mixer
               backend={backend}
               channelVolume={channelVolume}
@@ -985,6 +1115,7 @@ export function App() {
               onChannelVolume={onChannelVolume}
               onChannelMute={onChannelMute}
               onMasterVolume={onMasterVolume}
+              onOpenMasterFx={onOpenMasterFx}
             />
             <LicensesCard project={project} />
           </aside>
@@ -1027,7 +1158,7 @@ export function App() {
               title={
                 typeof File === "undefined"
                   ? "File loading is not supported in this browser"
-                  : "Load a Project JSON file from disk"
+                  : "Load a Lantern Project file (.lampjson) from disk"
               }
             >
               Load…
@@ -1035,7 +1166,7 @@ export function App() {
             <input
               ref={jsonFileInputRef}
               type="file"
-              accept=".json,application/json"
+              accept=".lampjson"
               style={{ display: "none" }}
               onChange={loadProjectFile}
             />
@@ -1044,7 +1175,7 @@ export function App() {
             <button
               onClick={() =>
                 void saveBytes(
-                  `${safeFilename(project ? project.songTitle : "project")}.json`,
+                  `${safeFilename(project ? project.songTitle : "project")}.lampjson`,
                   new TextEncoder().encode(projectIoText),
                 )
               }
@@ -1151,6 +1282,23 @@ export function App() {
             <button onClick={() => setDeletePrompt(null)}>Cancel</button>
           </div>
         </DraggableModal>
+      )}
+
+      {masterFxOpen && (
+        <MasterFxModal
+          settings={masterFx}
+          onChange={onMasterFxChange}
+          onClose={() => setMasterFxOpen(false)}
+        />
+      )}
+
+      {wavExportOpen && (
+        <WavExportModal
+          busy={wavExportBusy}
+          progress={wavExportProgress}
+          onExport={runWavExport}
+          onClose={() => setWavExportOpen(false)}
+        />
       )}
 
       {newProjectConfirm && (

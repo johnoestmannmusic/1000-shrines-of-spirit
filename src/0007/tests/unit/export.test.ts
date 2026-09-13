@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { crc32, wavPcm16, zipStore } from "@/core/export";
+import { applyExportEnvelope, arrangeExport, crc32, finalizeExport, wavPcm16, zipStore } from "@/core/export";
 import { makeClip } from "@/core/spectral";
-import { clipDuration } from "@/core/dsp";
+import { clipDuration, clipLen } from "@/core/dsp";
 import { buildSongModel } from "@/core/songModel";
 import { parseFurFile } from "@/core/fur/node";
 import { writeMidi } from "@/core/midi";
@@ -74,7 +74,7 @@ describe("ZIP export", () => {
 
 describe("MIDI export", () => {
   it("writes a format-1 SMF with one tempo track and one track per channel", () => {
-    const song = buildSongModel(parseFurFile(fixtureBytes("assets/flight_school_night_shift.fur")));
+    const song = buildSongModel(parseFurFile(fixtureBytes("tests/fixtures/flight_school_night_shift.fur")));
     const bytes = writeMidi(song);
     const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
@@ -86,6 +86,107 @@ describe("MIDI export", () => {
     expect(ascii(bytes, 14, 4)).toBe("MTrk");
     // Each track ends with an End of Track meta event.
     expect(ascii(bytes, bytes.length - 3, 3)).toBe("\u00ff\u002f\u0000");
+  });
+});
+
+describe("export finalisation", () => {
+  it("repeats the mix loops + 1 times with no gaps when there is no fade", () => {
+    const clip = makeClip([[0.5, 0.25, 0.125]], 1000);
+    const out = finalizeExport(clip, { loops: 2, fadeInMs: 0, fadeOutMs: 0, normalize: false });
+    expect(clipLen(out)).toBe(9);
+    expect(Array.from(out.channels[0]!)).toEqual([
+      0.5, 0.25, 0.125, 0.5, 0.25, 0.125, 0.5, 0.25, 0.125,
+    ]);
+  });
+
+  it("plays full loops untouched, then appends the fade as an extra pass", () => {
+    // Loop of 4 frames at 1 kHz; Loops=1 means two full passes, then the fade.
+    const clip = makeClip([[1, 1, 1, 1]], 1000);
+    const out = finalizeExport(clip, { loops: 1, fadeInMs: 0, fadeOutMs: 2, normalize: false });
+    expect(clipLen(out)).toBe(10);
+    // Two full loops with no gap, then a 2-frame fade tail that hits silence.
+    expect(Array.from(out.channels[0]!)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 0]);
+  });
+
+  it("continues looping the source while a long fade-out ramps to zero", () => {
+    const clip = makeClip([[0.5, 0.25]], 1000);
+    const out = finalizeExport(clip, { loops: 0, fadeInMs: 0, fadeOutMs: 6, normalize: false });
+    expect(clipLen(out)).toBe(8);
+    const data = Array.from(out.channels[0]!);
+    expect(data.slice(0, 2)).toEqual([0.5, 0.25]);
+    expect(data[2]).toBeCloseTo(0.5);
+    expect(data[3]).toBeCloseTo(0.2);
+    expect(data[4]).toBeCloseTo(0.3);
+    expect(data[7]).toBe(0);
+  });
+
+  it("applies fade-in at the very start of the file", () => {
+    const clip = makeClip([[1, 1, 1, 1]], 1000);
+    const out = finalizeExport(clip, { loops: 0, fadeInMs: 2, fadeOutMs: 0, normalize: false });
+    expect(Array.from(out.channels[0]!)).toEqual([0, 0.5, 1, 1]);
+  });
+
+  it("splits arrangement (loop join + tail) from the post-FX envelope", () => {
+    const clip = makeClip([[1, 1, 1, 1]], 1000);
+    // Arrange: two full loops plus a raw 2-frame tail, no gain applied yet.
+    const arranged = arrangeExport(clip, 1, 2);
+    expect(Array.from(arranged.channels[0]!)).toEqual([
+      1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    ]);
+    // Envelope: fade the final 2 frames to silence (applied after Master FX).
+    const out = applyExportEnvelope(arranged, {
+      loops: 1,
+      fadeInMs: 0,
+      fadeOutMs: 2,
+      normalize: false,
+    });
+    expect(Array.from(out.channels[0]!)).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 0]);
+  });
+
+  it("embeds LIST/INFO and ID3 tags with cover art, keeping the RIFF size correct", () => {
+    const clip = makeClip([[0, 0.5]], 8000);
+    const artwork = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9, 9]);
+    const bytes = wavPcm16(clip, { title: "Title", artist: "Artist", album: "Album", artwork });
+    const data = view(bytes);
+    expect(data.getUint32(4, true)).toBe(bytes.length - 8);
+
+    const text = new TextDecoder("latin1").decode(bytes);
+    for (const token of [
+      "LIST",
+      "INFO",
+      "INAM",
+      "IART",
+      "IPRD",
+      "id3 ",
+      "ID3",
+      "TIT2",
+      "TPE1",
+      "TALB",
+      "APIC",
+      "image/png",
+      "Title",
+      "Artist",
+      "Album",
+    ]) {
+      expect(text).toContain(token);
+    }
+
+    let foundArtwork = false;
+    for (let i = 0; i <= bytes.length - artwork.length; i++) {
+      if (artwork.every((b, j) => bytes[i + j] === b)) {
+        foundArtwork = true;
+        break;
+      }
+    }
+    expect(foundArtwork).toBe(true);
+  });
+
+  it("peak-normalises to full scale when enabled", () => {
+    const clip = makeClip([[0.25, -0.5, 0.1]], 1000);
+    const out = finalizeExport(clip, { loops: 0, fadeInMs: 0, fadeOutMs: 0, normalize: true });
+    const peak = Math.max(...Array.from(out.channels[0]!, (v) => Math.abs(v)));
+    expect(Math.abs(peak - 1)).toBeLessThan(1e-9);
+    expect(out.channels[0]![0]).toBeCloseTo(0.5);
   });
 });
 

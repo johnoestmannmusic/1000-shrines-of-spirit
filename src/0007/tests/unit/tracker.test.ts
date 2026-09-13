@@ -24,7 +24,7 @@ import { patternSnapshot } from "@/core/songModel";
 import { fixtureBytes } from "./fixtures";
 
 function fixture(): SongModel {
-  return buildSongModel(parseFurFile(fixtureBytes("assets/flight_school_night_shift.fur")));
+  return buildSongModel(parseFurFile(fixtureBytes("tests/fixtures/flight_school_night_shift.fur")));
 }
 
 function emptyCell() {

@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, memo } from "react";
 import type { AudioBackend } from "@/audio/backend";
 import { useAnimationFrame } from "../hooks";
 import { useExplainer } from "../explainer";
@@ -15,6 +15,7 @@ interface MixerProps {
   onChannelVolume: (channel: number, volume: number) => void;
   onChannelMute: (channel: number, muted: boolean) => void;
   onMasterVolume: (volume: number) => void;
+  onOpenMasterFx: () => void;
 }
 
 function linearToDb(value: number): number {
@@ -81,7 +82,7 @@ function Meter({ level, master = false }: { level: number; master?: boolean }) {
   );
 }
 
-export function Mixer(props: MixerProps) {
+function MixerImpl(props: MixerProps) {
   const [meters, setMeters] = useState([0, 0, 0, 0, 0]);
   const hold = useRef([0, 0, 0, 0, 0]);
   const explain = useExplainer();
@@ -97,7 +98,13 @@ export function Mixer(props: MixerProps) {
 
   return (
     <section className="panel">
-      <h2 style={{ cursor: "help" }} onMouseEnter={() => explain(mixerExplain())}>MIXER</h2>
+      <div className="row">
+        <h2 style={{ cursor: "help", margin: 0 }} onMouseEnter={() => explain(mixerExplain())}>
+          MIXER
+        </h2>
+        <span className="spacer" />
+        <button onClick={props.onOpenMasterFx}>Master FX</button>
+      </div>
       {[0, 1, 2, 3].map((c) => (
         <div
           className="row mixer-row"
@@ -147,3 +154,5 @@ export function Mixer(props: MixerProps) {
     </section>
   );
 }
+
+export const Mixer = memo(MixerImpl);

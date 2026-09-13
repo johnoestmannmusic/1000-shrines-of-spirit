@@ -24,6 +24,10 @@ export interface SamplerSettings {
   pan: number;
   /** Random pan width around the centre, 0..1. */
   panRandomRange: number;
+  /** Vibrato LFO speed in Hz. */
+  vibratoSpeed: number;
+  /** Vibrato depth in semitones (0 = off). */
+  vibratoDepth: number;
   polyphonic: boolean;
   voiceCap: number;
   spectral: SpectralSettings;
@@ -46,6 +50,8 @@ export function defaultSamplerSettings(): SamplerSettings {
     release: 0.15,
     pan: 0,
     panRandomRange: 0,
+    vibratoSpeed: 6,
+    vibratoDepth: 0,
     polyphonic: false,
     voiceCap: 8,
     spectral: defaultSpectralSettings(),
@@ -58,9 +64,13 @@ export function setSpectralEnabled(settings: SamplerSettings, enabled: boolean):
   if (enabled) {
     settings.spectral.savedStartSec = settings.startSec;
     settings.spectral.savedEndSec = settings.endSec;
+    settings.spectral.savedLooping = settings.looping;
+    // Spectral renders are sustained loops by default.
+    settings.looping = true;
   } else {
     settings.startSec = settings.spectral.savedStartSec;
     settings.endSec = settings.spectral.savedEndSec;
+    settings.looping = settings.spectral.savedLooping;
   }
   settings.spectral.enabled = enabled;
 }

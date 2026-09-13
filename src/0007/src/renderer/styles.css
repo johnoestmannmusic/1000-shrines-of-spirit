@@ -20,6 +20,8 @@
   --sampler: #3f9e0e;
   --wave: #3f9e0e;
   --tracker-alt: rgba(0, 0, 0, 0.03);
+  --beat-bg: #e9f1e2;
+  --bar-bg: #d3e7c6;
   --tracker-header: #f2f4ef;
   --playhead-bg: #d9f3c8;
   --playhead-text: #1d3a10;
@@ -41,6 +43,8 @@
   --sampler: #6cd73c;
   --wave: #8fd0a0;
   --tracker-alt: rgba(255, 255, 255, 0.02);
+  --beat-bg: rgba(255, 255, 255, 0.05);
+  --bar-bg: rgba(255, 255, 255, 0.1);
   --tracker-header: #1c1c20;
   --playhead-bg: #4c4022;
   --playhead-text: #fff6dd;
@@ -213,6 +217,35 @@ body {
   color: var(--secondary);
 }
 
+/* Long unbroken words (URLs) wrap instead of overflowing the panel. */
+.linkified {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.linkified a {
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---- Progress bar ---- */
+.progress {
+  width: 100%;
+  height: 14px;
+  background: var(--deep);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+
 button {
   background: var(--button-bg);
   color: var(--text);
@@ -285,14 +318,18 @@ select {
 /* Mixer */
 .mixer-row {
   margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+  row-gap: 4px;
 }
 
 .mixer-row input[type="range"] {
-  flex: 1;
+  flex: 1 1 90px;
+  min-width: 50px;
 }
 
 .mute {
-  width: 64px;
+  width: 58px;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -301,14 +338,16 @@ select {
 }
 
 .db {
-  width: 66px;
-  text-align: right;
+  width: auto;
+  min-width: 16px;
+  text-align: left;
   font-size: 12px;
   color: var(--secondary);
 }
 
 .meter {
-  width: 64px;
+  width: 48px;
+  flex: 0 0 48px;
   height: 12px;
   background: var(--deep);
   border: 1px solid var(--edge);
@@ -427,12 +466,15 @@ select {
   background: var(--deep);
 }
 
-.tracker tr.beat td {
-  background: var(--tracker-alt);
+.tracker tr.beat {
+  background: var(--beat-bg);
+}
+
+.tracker tr.playhead {
+  background: var(--playhead-bg);
 }
 
 .tracker tr.playhead td {
-  background: var(--playhead-bg);
   color: var(--playhead-text);
 }
 
@@ -883,7 +925,7 @@ select {
 }
 
 .db-input {
-  width: 58px;
+  width: 52px;
   text-align: right;
   background: var(--input-bg);
   color: var(--text);
@@ -897,8 +939,8 @@ select {
   padding: 2px 8px;
 }
 
-.tracker tr.bar td {
-  background: var(--tracker-alt);
+.tracker tr.bar {
+  background: var(--bar-bg);
 }
 
 .pattern-swatch {
@@ -1136,4 +1178,24 @@ select {
 
 .pan-field input[type="number"] {
   width: 48px;
+}
+
+/* Buffered numeric inputs keep the compact size of the old number fields. */
+.number-input {
+  width: 72px;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.pan-field .number-input {
+  width: 48px;
+}
+
+.slider .number-input {
+  width: 56px;
 }

@@ -6,6 +6,7 @@ import {
 import type { NoteValue, PatternCell } from "./fur/types";
 import { SPECTRAL_FUSION_MODES, defaultSpectralSettings, type SpectralSettings } from "./spectral";
 import { retime, type PatternSnapshot, type SongModel } from "./songModel";
+import { defaultMasterFx, masterFxFromJson, type MasterFxSettings } from "./masterFx";
 
 export interface SourceSampleRef {
   name: string;
@@ -24,6 +25,8 @@ export interface ProjectFile {
   refPitchEnabled: boolean;
   sourceSamples: Array<SourceSampleRef | null>;
   instruments: SamplerSettings[];
+  /** Display names for the instruments (not part of the .fur). */
+  instrumentNames: string[];
   songTitle: string;
   artist: string;
   album: string;
@@ -33,6 +36,8 @@ export interface ProjectFile {
   viewSourceLink: string;
   websiteLink: string;
   theme: string;
+  /** Master output effects (delay + reverb). */
+  masterFx: MasterFxSettings;
   patternSnapshot?: PatternSnapshot | null;
   tickRateOverride?: number | null;
   speedOverride?: number | null;
@@ -52,6 +57,7 @@ export function defaultProject(): ProjectFile {
     refPitchEnabled: false,
     sourceSamples: Array.from({ length: 6 }, () => null),
     instruments: [],
+    instrumentNames: [],
     songTitle: "",
     artist: "",
     album: "",
@@ -61,6 +67,7 @@ export function defaultProject(): ProjectFile {
     viewSourceLink: "",
     websiteLink: "",
     theme: "system",
+    masterFx: defaultMasterFx(),
     patternSnapshot: null,
     tickRateOverride: null,
     speedOverride: null,
@@ -231,6 +238,7 @@ function spectralFromJson(value: unknown): SpectralSettings {
     loopLengthSeconds: num("loopLengthSeconds", d.loopLengthSeconds),
     savedStartSec: num("savedStartSec", d.savedStartSec),
     savedEndSec: num("savedEndSec", d.savedEndSec),
+    savedLooping: typeof obj.savedLooping === "boolean" ? obj.savedLooping : d.savedLooping,
   };
 }
 
@@ -256,6 +264,8 @@ export function samplerFromJson(value: unknown): SamplerSettings {
     release: num("release", d.release),
     pan: num("pan", d.pan),
     panRandomRange: num("panRandomRange", d.panRandomRange),
+    vibratoSpeed: num("vibratoSpeed", d.vibratoSpeed),
+    vibratoDepth: num("vibratoDepth", d.vibratoDepth),
     polyphonic: bool("polyphonic", d.polyphonic),
     voiceCap: num("voiceCap", d.voiceCap),
     spectral: spectralFromJson(obj.spectral ?? obj.spectralFusion),
@@ -278,6 +288,8 @@ export function samplerToJson(settings: SamplerSettings, includeMuted = false): 
     release: settings.release,
     pan: settings.pan,
     panRandomRange: settings.panRandomRange,
+    vibratoSpeed: settings.vibratoSpeed,
+    vibratoDepth: settings.vibratoDepth,
     polyphonic: settings.polyphonic,
     voiceCap: settings.voiceCap,
     spectral: settings.spectral,
@@ -352,6 +364,7 @@ export function projectFromValue(value: Record<string, unknown>): ProjectFile {
     refPitchEnabled: typeof value.refPitchEnabled === "boolean" ? value.refPitchEnabled : false,
     sourceSamples,
     instruments,
+    instrumentNames: arr<unknown>(value.instrumentNames, []).map((n) => String(n)),
     songTitle: str("songTitle", ""),
     artist: str("artist", ""),
     album: str("album", ""),
@@ -361,6 +374,7 @@ export function projectFromValue(value: Record<string, unknown>): ProjectFile {
     viewSourceLink: str("viewSourceLink", ""),
     websiteLink: str("websiteLink", ""),
     theme: str("theme", "system"),
+    masterFx: masterFxFromJson(value.masterFx),
     patternSnapshot: snapshotFromSerde(value.patternSnapshot),
     tickRateOverride: typeof value.tickRateOverride === "number" ? value.tickRateOverride : null,
     speedOverride: typeof value.speedOverride === "number" ? value.speedOverride : null,
@@ -386,7 +400,9 @@ export function projectToValue(project: ProjectFile): Record<string, unknown> {
     refPitchEnabled: project.refPitchEnabled,
     instruments: project.instruments.map((s) => samplerToJson(s, false)),
     theme: project.theme,
+    masterFx: project.masterFx,
   };
+  if (project.instrumentNames.some((n) => n)) value.instrumentNames = project.instrumentNames;
   if (project.mutedChannels.some(Boolean)) value.mutedChannels = project.mutedChannels;
   if (project.mutedInstruments.some(Boolean)) value.mutedInstruments = project.mutedInstruments;
   if (project.sourceSamples.some((s) => s !== null)) value.sourceSamples = project.sourceSamples;

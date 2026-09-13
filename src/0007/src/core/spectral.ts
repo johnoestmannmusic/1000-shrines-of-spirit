@@ -75,6 +75,8 @@ export interface SpectralSettings {
   loopLengthSeconds: number;
   savedStartSec: number;
   savedEndSec: number;
+  /** Sampler's loop flag, restored when Spectral is switched off. */
+  savedLooping: boolean;
 }
 
 export function defaultSpectralSettings(): SpectralSettings {
@@ -98,6 +100,7 @@ export function defaultSpectralSettings(): SpectralSettings {
     loopLengthSeconds: DEFAULT_LOOP_SECONDS,
     savedStartSec: 0,
     savedEndSec: 0,
+    savedLooping: false,
   };
 }
 

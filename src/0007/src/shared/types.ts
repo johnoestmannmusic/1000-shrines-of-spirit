@@ -1,10 +1,11 @@
 import type { RawFurModule } from "@/core/fur/types";
 
 export interface LoadedSong {
-  raw: RawFurModule;
-  /** Original `.fur` bytes, retained for "Save .FUR". */
-  furBytes: Uint8Array;
-  /** `lmp-default-proj.json` contents as text. */
+  /** Parsed `.fur`, when the song ships/uses one (absent for project-only songs). */
+  raw?: RawFurModule;
+  /** Original `.fur` bytes, retained for "Save .FUR" (absent for project-only songs). */
+  furBytes?: Uint8Array;
+  /** `lmp-default-proj.lampjson` contents as text. */
   project: string;
   stems: Array<Uint8Array | null>;
   samples: Array<Uint8Array | null>;
@@ -12,16 +13,11 @@ export interface LoadedSong {
   error?: string;
 }
 
-export interface SongFolderFile {
-  name: string;
-  bytes: Uint8Array;
-}
-
 export const IPC = {
   loadDefaultSong: "assets:load-default-song",
-  loadSongFolder: "assets:load-song-folder",
   chooseAudioFile: "assets:choose-audio-file",
   saveFile: "file:save",
+  openExternal: "shell:open-external",
 } as const;
 
 export interface AudioFileChoice {
@@ -36,7 +32,7 @@ export interface SaveFileRequest {
 
 export interface LanternApi {
   loadDefaultSong(): Promise<LoadedSong | { error: string }>;
-  loadSongFolder(): Promise<LoadedSong | { error: string }>;
   chooseAudioFile(): Promise<AudioFileChoice | { error: string }>;
   saveFile(suggestedName: string, bytes: Uint8Array): Promise<boolean>;
+  openExternal(url: string): Promise<void>;
 }

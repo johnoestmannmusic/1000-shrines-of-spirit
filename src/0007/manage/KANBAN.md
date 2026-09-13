@@ -26,7 +26,7 @@ commit `5948fdc` ("Handover").
 **Rust Kanban:** `../SourceRepo/1000-shrines-of-spirit/src/0007/manage/KANBAN.md`
 **Parity Checklist:** `../SourceRepo/1000-shrines-of-spirit/src/0007/PARITY.md`
 **Original HTML:** `../SourceRepo/1000-shrines-of-spirit/src/0006/index.html`
-**Board Last Updated:** 2026-09-12 23:05 by opencode
+**Board Last Updated:** 2026-09-13 10:00 by opencode
 
 ### Branding (user-confirmed)
 
@@ -63,7 +63,7 @@ is captured as an optional card, not a parity gap.
   | `lantern-audio` (web) | `src/audio/{backend,webSampler,webAudioBackend}.ts` |
   | `lantern-app` | `src/renderer/` (React) |
   | `prism_dsp` | `native/prism-wasm/` -> `src/renderer/vendor/prism/` + `src/wasm/{prism,prism.worker,prismWorkerClient,prismWorkerProtocol}.ts` |
-  | folder/file I/O | `src/main/` + `src/preload/` |
+  | bundled-asset I/O | `src/main/` + `src/preload/` (folder hot-loading removed; see `0007E-PLAN-111`) |
 - **Dropped by design:** native `rodio` backend, `eframe` storage, `trunk`
   packaging, `System` theme.
 - **Byte-format contracts:** WAV PCM16 (LE asymmetric scaling), ZIP STORE
@@ -119,7 +119,7 @@ npm run test:all         # typecheck + unit + audit + build + web + e2e
 
 ## Bugs
 
-_(none open — see 0007E-BUG-001…008 in Completed)_
+_(none open — see 0007E-BUG-001…017 in Completed)_
 
 ## Planned Features — Remaining Rust parity backlog
 
@@ -464,6 +464,237 @@ _(none currently)_
   "follow stays on while editing" change. Removed it, so Follow Playhead is now
   only ever toggled by its checkbox. Regression assertion added to
   `tests/e2e/edit.spec.ts` (click a cell, then expect the checkbox checked).
+
+- **0007E-PLAN-106 — Project files use the `.lampjson` extension.**
+  *(2026-09-12 23:20)* Downloaded project files are now `*.lampjson`; the
+  Project JSON **Load** picker accepts `.lampjson` (plus legacy `.json` for
+  backward compatibility), and the Electron save dialog filters by the
+  suggested extension (a "Lantern Project" filter for `.lampjson`). Folder
+  assembly accepts `lmp-default-proj.lampjson` or `.json`. The bundled default
+  asset keeps its `.json` name since it is an internal asset / folder
+  convention, not a user-saved project.
+
+- **0007E-PLAN-107 — Strict `.lampjson` only.** *(2026-09-12 23:35)* The Load
+  picker now accepts only `.lampjson` and rejects anything else with an inline
+  error (even if the OS picker allows "all files"); the `.json` save filter was
+  dropped; folder assembly requires `lmp-default-proj.lampjson`; and the bundled
+  default asset was renamed to `lmp-default-proj.lampjson`. Regression test:
+  loading a `.json` file shows ".lampjson" in the error banner and keeps the
+  modal open.
+
+- **0007E-PLAN-108 — New cover art: laboratory plant vat.** *(2026-09-12 23:55)*
+  Same 240×240 / 32×32 / 4×4 Bayer pipeline, new scene: a glass vat with a
+  translucent green nutrient liquid and a vibrant green stem that grows in and
+  sways, jiggling on note triggers, with instrument-coloured auras and rim
+  flashes, set against dull-blue humming monitor screens. Export PNG unchanged.
+
+- **0007E-PLAN-109 — Build number stamped at build time.** *(2026-09-13 00:10)*
+  The title's `vYYYYMMDD` is now injected by Vite (`__BUILD_DATE__`, local
+  date) at build time rather than computed when the app runs, so each build
+  regenerates it. Applies to both the Electron and web builds; the smoke test
+  asserts the `v\d{8}` format.
+
+- **0007E-PLAN-110 — Project-only songs (no `.fur` / CHIP MODE).**
+  *(2026-09-13 00:35)* The bundled song now ships as just
+  `lmp-default-proj.lampjson` + `SourceSamples/`. The loader no longer requires
+  a `.fur`: when absent, `buildSongModelFromProject` rebuilds the `SongModel`
+  from the project's pattern snapshot (channels/orders/rows), timing overrides,
+  and instrument count, so the app loads and plays in SAMPLER mode with CHIP
+  MODE disabled. `LoadedSong.raw`/`furBytes` are now optional and "Save .FUR"
+  is disabled for project-only songs. Both Electron and web loaders updated;
+  E2E fixtures switched from the old 10-instrument song to "Aquavats" (1
+  instrument).
+
+- **0007E-PLAN-111 — Folder hot-loading removed.** *(2026-09-13 07:45)*
+  Deleted `src/main/folder.ts` and all `loadSongFolder`/`assembleSongFolder`/
+  `SongFolderFile` plumbing across main, preload, shared IPC types, the
+  renderer platform layer and App. A Furnace `.fur` + matching files are now
+  bundled with the program rather than chosen at runtime. Supersedes the
+  folder-assembly parts of `0007E-PLAN-015`/`0007E-PLAN-107`; the removed
+  "Load Song Folder" button is gone for good.
+- **0007E-PLAN-112 — 3D vat in the cover art.** *(2026-09-13 07:45)* The glass
+  tube now reads as a cylinder: rounded top/bottom caps (row insets), a
+  left-of-centre specular band with darkened rim edges, depth-shaded liquid
+  with a lit meniscus, a front-glass highlight and right-edge sheen, a back rim
+  seen through the liquid, and a base plate. Same 32×32/Bayer pipeline.
+
+- **0007E-BUG-010 — Q/A/W/S retuned non-note columns in an all-columns
+  selection.** *(2026-09-13 08:20)* When a selection spans multiple columns
+  (e.g. Ctrl+A "all columns"), semitone/octave keys now only adjust note
+  columns; a single selected column still adjusts its own value (INS index,
+  VOL, FX value).
+- **0007E-BUG-011 — Beat/bar row markers invisible.** *(2026-09-13 08:20)* The
+  markers were cell backgrounds (hidden by instrument tint) and used a
+  dark-only colour. Now theme-aware `--beat-bg`/`--bar-bg` applied to the row
+  so the translucent instrument tint composites over them.
+- **0007E-BUG-012 — Only 3 of 6 Source Samples loaded.** *(2026-09-13 08:20)*
+  Both loaders hardcoded slots 0–2; now read all six
+  (`SourceSamples/0..5.ogg`), matching the new bundled folder.
+- **0007E-BUG-013 — Z always inserted C4.** *(2026-09-13 08:20)* The Q/A/W/S
+  selection refactor bypassed `recordLastValue`, so the "last entered value"
+  never updated. Those edits now record the focus value (and the adjusted note
+  on an all-columns selection), so Z repeats the last note/value as designed.
+  New E2E assertions: Z-repeat and a `6 / 6` Source Samples count.
+  *Follow-up (2026-09-13):* the Q/A/W/S branch recorded the last value by
+  re-applying the adjustment after `mutate` had already applied it, storing a
+  value one step off (Z then inserted one note above/below). It now records the
+  resulting cell directly; the Z E2E asserts D-4 then Q -> Z yields D#4, not
+  E-4.
+
+- **0007E-PLAN-113 — Preview when editing a cell's note or volume.**
+  *(2026-09-13 08:30)* Changing a cell with Q/A/W/S now auditions it the same
+  way clicking the cell does — fired for note (semitone/octave) and volume
+  columns, on the focused channel/row, after the edit is applied.
+
+- **0007E-BUG-014 — Notes after a note-off played silently.** *(2026-09-13 08:40)*
+  `buildInstrumentTimeline` cleared the channel's held instrument on a Note Off
+  (copied from the original JS/Rust), so any note after an OFF with a blank
+  instrument column (e.g. the staccato runs in Aquavats) resolved to no
+  instrument and never sounded. Furnace keeps the instrument across note-offs,
+  so the clearing was removed; only a new instrument value changes it. A note
+  after an OFF now plays with the held instrument, while the held *note*
+  timeline is still cleared by the OFF. Unit-tested; deliberate divergence from
+  the reference implementation, justified by real Furnace semantics and the
+  composer's song.
+  *Follow-up (2026-09-13):* the tracker's instrument colour-coding now keys off
+  a **held note** (`noteTimeline`) rather than the persistent instrument, so a
+  note-off clears the row tint (and mute dimming) as it should, while playback
+  still resolves the held instrument for later notes.
+
+- **0007E-PLAN-114 — Instrument names persist in the project JSON.**
+  *(2026-09-13 09:00)* Added `instrumentNames` to the Project schema; export
+  writes the current names and load (bundled or via Load) applies them, so
+  edited instrument names round-trip. Unit-tested.
+- **0007E-PLAN-115 — Hold-to-drag cell selection (250 ms).** *(2026-09-13 09:00)*
+  Range selection now only begins after the pointer has been held on a cell for
+  250 ms; a quick click (which may drift across a cell or two) stays a
+  single-cell selection. E2E covers both the quick-click and hold-drag cases.
+
+- **0007E-PLAN-116 — Numbered channel headings outside CHIP MODE.**
+  *(2026-09-13 09:10)* The tracker channel headers show just `CH0…CH3` in
+  SAMPLER/EDIT mode; the Game Boy roles (`PULSE 1`, `PULSE 2`, `WAVE`, `NOISE`)
+  only appear in CHIP MODE. `/tmp` smoke E2E asserts this.
+
+- **0007E-BUG-015 — Spectral instruments ended early (e.g. Aquavats Instrument 7).**
+  *(2026-09-13 09:15)* A Spectral instrument's saved trim (a ~0.44 s slice
+  of Sample A) was left in place after the fused loop rendered, so it cut the
+  rendered multi-second loop off early. `SamplerEngine.renderSpectral` now
+  resets `startSec`/`endSec` to the full fused result and sets `looping = true`
+  on completion (Spectral instruments loop by default). `setSpectralEnabled`
+  saves/restores the sampler's loop flag so turning Spectral off restores it.
+  Unit-tested.
+- **0007E-PLAN-117 — Per-instrument Vibrato.** *(2026-09-13 09:15)* Added
+  `vibratoSpeed` (Hz) and `vibratoDepth` (semitones, default 0) to
+  `SamplerSettings`. Live voices run a sine LFO into `AudioBufferSourceNode.detune`
+  (layering on pitch ramps); the offline mixdown applies the same modulation;
+  controls appear in the Sampler editor and compactly in the instrument rows;
+  Project JSON round-trips both fields.
+  *Follow-up (2026-09-13):* the instrument-row numeric fields (and the Timing
+  card values / voice cap) now use a buffered `NumberInput` that commits on
+  Enter/blur, so values can be backspaced and retyped (a small E2E clears and
+  retypes the Depth field).
+
+- **0007E-BUG-016 — Instrument names weren't exported/applied in Project JSON.**
+  *(2026-09-13 09:35)* The `live` export object omitted `instrumentNames` and
+  `applyProjectText` never applied them, so names never round-tripped. Both
+  paths added; E2E covers save and load.
+- **0007E-PLAN-118 — Numeric-input sizing, editable ADSR, centred editor.**
+  *(2026-09-13 09:35)* Buffered `NumberInput`s now carry a compact
+  `.number-input` style (they had reverted to default size when switched from
+  `type="number"`); the Sampler/Spectral envelope values are editable directly
+  (each slider now shows a `NumberInput`); and the editor window opens high and
+  horizontally centred.
+- **0007E-PLAN-119 — Master FX (Delay + Reverb).** *(2026-09-13 09:35)* New
+  master-output effect chain in `WebAudioBackend` (sum bus feeding delay with
+  feedback + low-pass tone, and a convolution reverb from a generated
+  noise-decay impulse). A **Master FX** button in the Mixer opens a draggable
+  modal with per-effect enable toggles (off by default), Delay
+  time/feedback/tone/mix, Reverb decay/mix, and a **PS1 Echo** preset. Settings
+  persist in Project JSON (`masterFx`). Unit + E2E tested.
+  *Follow-up (2026-09-13):* the export `live` object (and its callback deps)
+  omitted `masterFx`, so toggles never saved; fixed, and New Project now resets
+  Master FX to defaults. E2E verifies both save and load.
+
+- **0007E-BUG-017 — Dragging pan during playback hung the UI.** *(2026-09-13 10:00)*
+  Continuous control drags (pan/volume/vibrato) update app state on every
+  pointer tick, which re-rendered the whole tree — the tracker rebuilds
+  thousands of per-cell handlers each pass, so a drag became a re-render storm.
+  Memoized the heavy panels (`PatternGrid`, `Piano`, `CoverArt`, `Mixer`,
+  `SourceSamples`) and stabilized their props (stable muted-flags list, stable
+  callbacks) so a pan drag only re-renders the instrument row. E2E stresses 60
+  pan steps during playback and asserts the UI still responds.
+
+- **0007E-BUG-018 — WAV export ignored Master FX.** *(2026-09-13 10:20)* `saveWav`
+  rendered the sampler mix and encoded it straight to WAV, bypassing the delay
+  and reverb entirely. Extracted the live chain into a shared
+  `createMasterFxGraph` (`src/audio/masterFxGraph.ts`) used by both playback and
+  a new offline renderer (`src/audio/offline.ts`), so exports now sound like the
+  transport. Unit + E2E tested.
+- **0007E-PLAN-120 — WAV export options modal.** *(2026-09-13 10:20, revised 12:10)*
+  **Save .WAV** now opens a draggable modal (`WavExportModal`) with Number of
+  Loops (default 0 = single pass), Fade In ms, Fade Out ms (both default 0) and
+  Peak Normalize (default on). `finalizeExport` joins `loops + 1` full passes
+  with no gap, then appends the fade-out as an EXTRA tail that keeps looping the
+  source while ramping to zero over the fade time; the file ends exactly when it
+  reaches silence (e.g. Loops=1 + 8000ms = two full passes + an 8s fading 3rd
+  loop). The arranged signal is run through the offline Master FX and the
+  fade/normalise envelope is applied after it (see 0007E-BUG-019). Unit tests
+  cover the loop joins, the appended fade tail, long-fade wrapping, fade-in and
+  normalisation.
+
+- **0007E-BUG-019 — Silence between exported loops (per-loop Master FX tail).**
+  *(2026-09-13 12:25)* `runWavExport` applied the offline Master FX to a single
+  pass and then looped the result, so every repeat carried its own reverb/delay
+  decay tail — audible as a multi-second "gap" before the next loop (confirmed
+  in a real export: silent regions at 42.4–44.9s and 87.3–89.8s). Export now
+  arranges `loops + 1` passes + fade tail first (`arrangeExport`), runs the FX
+  chain once over that continuous signal, trims back to the arrangement length,
+  then applies the fade/normalise envelope (`applyExportEnvelope`). Re-exporting
+  the same project produced no silent regions and the expected length
+  (2×40.678s + 8.000s). Unit tests cover the arrange/envelope split.
+
+- **0007E-PLAN-121 — Linkified, wrapping Comments/Licenses text.** *(2026-09-13 12:40)*
+  Song Comments and the Licenses card now render through `LinkifiedText`:
+  `https://` words become anchors that open in the system browser (desktop,
+  via a new `shell:open-external` IPC + preload method and `setWindowOpenHandler`)
+  or a new tab (web), and a `.linkified` style (`overflow-wrap: anywhere`) wraps
+  long unbroken words/URLs instead of overflowing the panel. E2E checks a
+  Licenses link and the wrapping rule.
+- **0007E-PLAN-122 — WAV metadata tags, cover art, dated filename.** *(2026-09-13 12:40)*
+  `wavPcm16` accepts `WavTags` and appends a `LIST`/`INFO` block (INAM/IART/IPRD)
+  and an `id3 ` chunk with an ID3v2.3 tag (TIT2/TPE1/TALB + `APIC` front cover).
+  Exports embed the animated cover rendered at 1600×1600 at export time (via a
+  `CoverArtHandle` ref) and are named `YYMMDD- Title.wav`. Verified on a real
+  export: 1600×1600 PNG APIC and correct tags. Unit test covers the chunks.
+- **0007E-PLAN-123 — "Exporting WAV…" progress bar.** *(2026-09-13 12:40)*
+  The export modal swaps to a percentage progress bar while rendering;
+  `applyMasterFxOffline` reports progress using `OfflineAudioContext.suspend`
+  checkpoints, and the flow yields once so the bar paints before the synchronous
+  sampler mixdown.
+
+- **0007E-PLAN-124 — Remove the CHIPS panel.** *(2026-09-13 12:50)* The unused
+  right-hand Chips panel was removed (`ChipsCard` + its hover explainer and the
+  now-dead `chipsExplain` helper); the sidebar now runs Cover Art → Explainer →
+  Comments → Timing → Mixer → Licenses.
+
+- **0007E-BUG-020 — Web WAV export crashed without `OfflineAudioContext.suspend`.**
+  *(2026-09-13 13:40)* On browsers whose `OfflineAudioContext` lacks `suspend`/
+  `resume` (Safari/older Firefox), the progress checkpoints threw
+  `TypeError: s.suspend is not a function`. Now feature-detected; when missing,
+  progress falls back to a timed ramp and the render proceeds. Web regression
+  test removes `suspend` and asserts a successful export.
+- **0007E-BUG-021 — Mixer sliders/volumes overflowed the sidebar panel.**
+  *(2026-09-13 13:40)* The row's fixed widths (66px "dB" label + 64px meter +
+  58px input + button + 10px gaps) exceeded the 300px sidebar content width, so
+  the range and meter spilled off the right edge. The `dB` label is now auto
+  width, the meter is 48px, and `.mixer-row` wraps with tighter gaps. E2E
+  measures every row's children against its right edge.
+- **0007E-BUG-022 — E2E expected the old bundled song title.**
+  *(2026-09-13 13:40)* The bundled default project became the finished track
+  ("Completed first track in this"), so hardcoded "Aquavats" waits and the
+  Master-FX-disabled / single-instrument assumptions failed. Waits now check for
+  the generic "instruments" status, and the Master FX/New Project tests assert
+  the modal and the post-reset count instead.
 
 ---
 

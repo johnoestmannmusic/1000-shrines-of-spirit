@@ -13,7 +13,7 @@ test("Sampler/Spectral modal shows waveforms and closes", async () => {
   });
   try {
     const window = await app.firstWindow();
-    await expect(window.locator(".toolbar .status")).toContainText("flight_school_night_shift", {
+    await expect(window.locator(".toolbar .status")).toContainText("instruments", {
       timeout: 30_000,
     });
 

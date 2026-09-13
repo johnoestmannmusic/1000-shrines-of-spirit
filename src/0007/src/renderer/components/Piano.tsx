@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, memo } from "react";
 import type { SongModel } from "@/core/songModel";
 import { noteToName, A_REF_NOTE } from "@/core/pitch";
 import { songPositionAt } from "@/core/timing";
@@ -18,7 +18,7 @@ interface PianoProps {
   backend: AudioBackend;
 }
 
-export function Piano({ song, backend }: PianoProps) {
+function PianoImpl({ song, backend }: PianoProps) {
   const explain = useExplainer();
   const [, force] = useState(0);
   const lastPosition = useRef<string | null>(null);
@@ -196,3 +196,5 @@ function heldNoise(
     color: info ? `rgb(${info.colorRgb.join(",")})` : "#c9973a",
   };
 }
+
+export const Piano = memo(PianoImpl);

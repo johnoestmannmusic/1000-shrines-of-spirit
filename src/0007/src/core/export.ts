@@ -6,6 +6,7 @@ import {
   type SamplerSettings,
   type Sequence,
 } from "./sampler";
+import { buildWavMetadataChunks, type WavTags } from "./wavTags";
 
 function pushU16(out: number[], value: number): void {
   out.push(value & 0xff, (value >>> 8) & 0xff);
@@ -16,7 +17,7 @@ function pushU32(out: number[], value: number): void {
 }
 
 /** Encodes an AudioClip as a canonical 16-bit PCM WAV file. */
-export function wavPcm16(clip: AudioClip): Uint8Array {
+export function wavPcm16(clip: AudioClip, tags?: WavTags): Uint8Array {
   const channels = clip.channels.length;
   if (clipIsEmpty(clip)) throw new Error("Audio clip is empty");
   if (channels > 65535) throw new Error("Too many channels for a WAV file");
@@ -25,13 +26,15 @@ export function wavPcm16(clip: AudioClip): Uint8Array {
   const dataSize = frames * blockAlign;
   if (dataSize > 0xffffffff - 36) throw new Error("Audio is too large for a PCM WAV file");
 
+  const metadata = tags ? buildWavMetadataChunks(tags) : new Uint8Array(0);
+
   const out: number[] = [];
   const writeAscii = (s: string) => {
     for (const ch of s) out.push(ch.charCodeAt(0));
   };
 
   writeAscii("RIFF");
-  pushU32(out, 36 + dataSize);
+  pushU32(out, 36 + dataSize + metadata.length);
   writeAscii("WAVEfmt ");
   pushU32(out, 16);
   pushU16(out, 1);
@@ -51,6 +54,8 @@ export function wavPcm16(clip: AudioClip): Uint8Array {
       pushU16(out, value & 0xffff);
     }
   }
+
+  for (const byte of metadata) out.push(byte);
 
   return Uint8Array.from(out);
 }
@@ -146,6 +151,93 @@ export function zipStore(entries: ZipEntry[]): Uint8Array {
   return Uint8Array.from(all);
 }
 
+// ---- Export finalisation (looping, fades, peak normalise) ----
+
+export interface ExportParams {
+  /** Extra repeats after the first pass (0 = play the song once). */
+  loops: number;
+  fadeInMs: number;
+  fadeOutMs: number;
+  normalize: boolean;
+}
+
+/**
+ * Arranges `loops + 1` full passes of the song joined with no gap, followed by
+ * a `fadeOutMs` tail that keeps looping the source. No fades or gain changes are
+ * applied here, so the result can be handed to the Master FX chain as one
+ * continuous signal (effects must not be baked in per loop, or each repeat would
+ * carry its own decaying tail and leave a gap before the next).
+ */
+export function arrangeExport(clip: AudioClip, loops: number, fadeOutMs: number): AudioClip {
+  const srcLen = clipLen(clip);
+  if (srcLen === 0 || clip.channels.length === 0) return clip;
+
+  const rate = clip.sampleRate;
+  const passes = Math.max(0, Math.floor(loops)) + 1;
+  const fadeOutFrames = Math.max(0, Math.round((fadeOutMs / 1000) * rate));
+  const fullFrames = srcLen * passes;
+  const total = fullFrames + fadeOutFrames;
+
+  const out: Float32Array[] = [];
+  for (const channel of clip.channels) {
+    const dst = new Float32Array(total);
+    for (let r = 0; r < passes; r++) dst.set(channel.subarray(0, srcLen), r * srcLen);
+    for (let j = 0; j < fadeOutFrames; j++) dst[fullFrames + j] = channel[j % srcLen]!;
+    out.push(dst);
+  }
+  return audioClip(out, rate);
+}
+
+/**
+ * Applies the export envelope to an already-arranged clip: a fade-in over the
+ * first `fadeInMs`, a fade-out over the final `fadeOutMs`, and peak
+ * normalisation. The fade-out must be applied here (after Master FX) so the
+ * reverb/delay tail cannot ring past the intended end.
+ */
+export function applyExportEnvelope(clip: AudioClip, params: ExportParams): AudioClip {
+  const total = clipLen(clip);
+  if (total === 0 || clip.channels.length === 0) return clip;
+
+  const rate = clip.sampleRate;
+  const fadeInFrames = Math.max(0, Math.round((params.fadeInMs / 1000) * rate));
+  const fadeOutFrames = Math.max(0, Math.round((params.fadeOutMs / 1000) * rate));
+  const fadeIn = Math.min(fadeInFrames, total);
+  const fadeOut = Math.min(fadeOutFrames, total);
+  const fadeOutStart = total - fadeOut;
+  const fadeOutDenom = Math.max(fadeOut - 1, 1);
+
+  const out: Float32Array[] = [];
+  for (const channel of clip.channels) {
+    const data = new Float32Array(channel);
+    for (let i = 0; i < fadeIn; i++) data[i] = data[i]! * (i / fadeIn);
+    for (let i = 0; i < fadeOut; i++) {
+      const index = fadeOutStart + i;
+      data[index] = data[index]! * ((fadeOut - 1 - i) / fadeOutDenom);
+    }
+    out.push(data);
+  }
+
+  if (params.normalize) {
+    let peak = 0;
+    for (const data of out) {
+      for (let i = 0; i < total; i++) {
+        const value = Math.abs(data[i]!);
+        if (value > peak) peak = value;
+      }
+    }
+    if (peak > 0) {
+      const gain = 1 / peak;
+      for (const data of out) for (let i = 0; i < total; i++) data[i] = data[i]! * gain;
+    }
+  }
+
+  return audioClip(out, rate);
+}
+
+export function finalizeExport(clip: AudioClip, params: ExportParams): AudioClip {
+  return applyExportEnvelope(arrangeExport(clip, params.loops, params.fadeOutMs), params);
+}
+
 // ---- Offline sampler mixdown (ports lantern-core::export::render_sampler_mix) ----
 
 const OUTPUT_RATE = 44_100;
@@ -192,6 +284,17 @@ function rateAt(voice: RenderVoice, time: number): number {
     current = ramp.to;
   }
   return current;
+}
+
+/** Base playback rate plus this voice's optional vibrato modulation. */
+function modulatedRate(voice: RenderVoice, time: number, base: number): number {
+  const depth = voice.settings.vibratoDepth;
+  const speed = voice.settings.vibratoSpeed;
+  if (depth > 0 && speed > 0) {
+    const phase = 2 * Math.PI * speed * (time - voice.start);
+    return base * Math.pow(2, (depth * Math.sin(phase)) / 12);
+  }
+  return base;
 }
 
 function voiceEnvelope(voice: RenderVoice, time: number): number {
@@ -323,11 +426,11 @@ export function renderSamplerMix(
 
     let traveled = 0;
     let previousTime = voice.start;
-    let previousRate = rateAt(voice, voice.start);
+    let previousRate = modulatedRate(voice, voice.start, rateAt(voice, voice.start));
 
     for (let frame = startFrame; frame < endFrame; frame++) {
       const t = frame / OUTPUT_RATE;
-      const rate = rateAt(voice, t);
+      const rate = modulatedRate(voice, t, rateAt(voice, t));
       traveled += (t - previousTime) * ((rate + previousRate) / 2);
       previousTime = t;
       previousRate = rate;

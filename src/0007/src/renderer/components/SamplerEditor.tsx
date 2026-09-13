@@ -12,6 +12,7 @@ import type { AudioBackend } from "@/audio/backend";
 import { useAnimationFrame } from "../hooks";
 import { Waveform, type WaveformMarker } from "./Waveform";
 import { AdsrGraph } from "./AdsrGraph";
+import { NumberInput } from "./NumberInput";
 import { useExplainer } from "../explainer";
 import { spectralFusionExplain } from "../explainerContent";
 import { formatDb } from "../util";
@@ -35,7 +36,11 @@ interface SamplerEditorProps {
 export function SamplerEditor(props: SamplerEditorProps) {
   const { backend, settings } = props;
   const explain = useExplainer();
-  const [position, setPosition] = useState({ x: 360, y: 90 });
+  const [position, setPosition] = useState(() => ({
+    // Open high and roughly centred so it rarely needs dragging up.
+    x: Math.max(16, (window.innerWidth - 680) / 2),
+    y: 24,
+  }));
   const drag = useRef<{ dx: number; dy: number } | null>(null);
   const [duration, setDuration] = useState(0);
   const [peaks, setPeaks] = useState<Array<[number, number]>>([]);
@@ -190,19 +195,21 @@ export function SamplerEditor(props: SamplerEditorProps) {
             <div className="row wrap">
               <Slider label="Pan" value={settings.pan * 100} min={-100} max={100} step={1} onChange={(v) => props.onUpdate({ pan: v / 100 })} />
               <Slider label="Random Pan (%)" value={settings.panRandomRange * 100} min={0} max={100} step={1} onChange={(v) => props.onUpdate({ panRandomRange: v / 100 })} />
+              <Slider label="Vibrato Speed (Hz)" value={settings.vibratoSpeed} min={0} max={20} step={0.1} onChange={(v) => props.onUpdate({ vibratoSpeed: v })} />
+              <Slider label="Vibrato Depth (st)" value={settings.vibratoDepth} min={0} max={2} step={0.01} onChange={(v) => props.onUpdate({ vibratoDepth: v })} />
               <label>
                 <input type="checkbox" checked={settings.polyphonic} onChange={(e) => props.onUpdate({ polyphonic: e.target.checked })} />
                 Polyphonic
               </label>
               <label>
                 Voice cap
-                <input
-                  type="number"
+                <NumberInput
+                  value={settings.voiceCap}
                   min={1}
                   max={32}
-                  value={settings.voiceCap}
+                  step={1}
                   disabled={!settings.polyphonic}
-                  onChange={(e) => props.onUpdate({ voiceCap: Number(e.target.value) })}
+                  onChange={(v) => props.onUpdate({ voiceCap: Math.round(v) })}
                 />
               </label>
             </div>
@@ -407,7 +414,13 @@ function Slider(props: {
         value={props.value}
         onChange={(e) => props.onChange(Number(e.target.value))}
       />
-      <span className="mono">{props.value.toFixed(3)}</span>
+      <NumberInput
+        value={props.value}
+        min={props.min}
+        max={props.max}
+        step={props.step}
+        onChange={props.onChange}
+      />
     </label>
   );
 }

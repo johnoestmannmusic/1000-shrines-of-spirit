@@ -4,6 +4,7 @@ import type { SamplerSettings } from "@/core/sampler";
 import { useExplainer } from "../explainer";
 import { hexToRgb, rgbToHex } from "../util";
 import { DbInput } from "./DbInput";
+import { NumberInput } from "./NumberInput";
 import { useAnimationFrame } from "../hooks";
 import { songPositionAt } from "@/core/timing";
 import type { AudioBackend } from "@/audio/backend";
@@ -145,19 +146,36 @@ export function InstrumentList(props: InstrumentListProps) {
 
               <label className="pan-field" title="Random pan width around the centre point">
                 Rnd Pan
-                <input
-                  type="number"
+                <NumberInput
+                  value={Math.round(setting.panRandomRange * 100)}
                   min={0}
                   max={100}
                   step={1}
-                  value={Math.round(setting.panRandomRange * 100)}
-                  onChange={(e) =>
-                    props.onUpdate(i, {
-                      panRandomRange: Math.min(Math.max(Number(e.target.value), 0), 100) / 100,
-                    })
-                  }
+                  onChange={(v) => props.onUpdate(i, { panRandomRange: v / 100 })}
                 />
                 %
+              </label>
+
+              <label className="pan-field" title="Vibrato speed (Hz)">
+                Vib
+                <NumberInput
+                  value={setting.vibratoSpeed}
+                  min={0}
+                  max={20}
+                  step={0.1}
+                  onChange={(v) => props.onUpdate(i, { vibratoSpeed: v })}
+                />
+              </label>
+
+              <label className="pan-field" title="Vibrato depth (semitones, 0 = off)">
+                Depth
+                <NumberInput
+                  value={setting.vibratoDepth}
+                  min={0}
+                  max={2}
+                  step={0.01}
+                  onChange={(v) => props.onUpdate(i, { vibratoDepth: v })}
+                />
               </label>
 
               <select
