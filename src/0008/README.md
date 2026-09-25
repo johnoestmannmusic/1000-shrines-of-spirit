@@ -1,7 +1,7 @@
 # 0008 - HYPERMART02
 25 SEP 26
 
-This is the web build of SpectralPrism Tracker, including the HYPERMART02 `.crtproj` and asset files.
+This is the web build of SpectralPrism Tracker, including the HYPERMART02 `lmp-default-proj.sptproj` and asset files.
 
 Either try the online version: https://johnoestmannmusic.com/1000-SOS/0008/
 
