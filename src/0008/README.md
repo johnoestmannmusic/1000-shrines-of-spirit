@@ -1,8 +1,13 @@
 # 0008 - HYPERMART02
-19 SEP 26
+25 SEP 26
 
-HYPERMART02.sptproj is a project file to be opened with SpectralPrism Tracker (https://github.com/johnoestmannmusic/SpectralPrismTracker)
+This is the web build of SpectralPrism Tracker, including the HYPERMART02 `.crtproj` and asset files.
 
-Also included here is the `\assets\` folder that will need to be copied into the SpectralPrism Tracker's `\assets\` directory (overwriting the files inside)
+Either try the online version: https://johnoestmannmusic.com/1000-SOS/0008/
+
+.. or download this folder, direct your terminal to this directory, and run it via local webserver:
+```
+python3 -m http.server
+```
 
 Source Samples for this project come from my own Mechsounds Sound Pack: https://johnoestmannmusic.com/mechsounds/

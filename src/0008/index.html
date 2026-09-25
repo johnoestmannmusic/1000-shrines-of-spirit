@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="data:," />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="SpectralPrism Tracker — a terminal music tracker, sampler and spectral synthesiser in the browser."
+    />
+    <title>SpectralPrism Tracker — Web Terminal</title>
+    <script type="module" crossorigin src="./assets/index-Dm1xkAgk.js"></script>
+    <link rel="modulepreload" crossorigin href="./assets/vendor-xterm-090Sd8Jx.js">
+    <link rel="modulepreload" crossorigin href="./assets/vendor-yoga-Ba0Z30xj.js">
+    <link rel="modulepreload" crossorigin href="./assets/fs-BuOPwZwb.js">
+    <link rel="modulepreload" crossorigin href="./assets/prism-D6pLoBRG.js">
+    <link rel="stylesheet" crossorigin href="./assets/vendor-xterm-BmfB5bmM.css">
+    <link rel="stylesheet" crossorigin href="./assets/index-DJn5R9OL.css">
+  </head>
+  <body>
+    <div id="app">
+      <header class="shell-bar">
+        <div class="buttons" id="shell-buttons"></div>
+        <span class="status" id="shell-status">Loading…</span>
+      </header>
+      <main class="terminal-frame">
+        <div id="terminal" tabindex="0"></div>
+      </main>
+      <footer class="shell-hint" id="shell-hint">
+        Type <kbd>/</kbd> for commands · <kbd>Tab</kbd> completes ·
+        <kbd>Enter</kbd> opens menus · <kbd>?</kbd> help
+      </footer>
+      <div class="shell-licenses" id="shell-licenses"></div>
+    </div>
+  </body>
+</html>

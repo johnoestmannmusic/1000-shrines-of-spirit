@@ -1,0 +1,1 @@
+import{t as e}from"./prism-D6pLoBRG.js";export{e as initPrismWasmBrowser};
