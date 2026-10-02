@@ -43,6 +43,8 @@ pub struct Description {
     pub break_pattern: &'static str,
     pub break_overview: Vec<f32>,
     pub slice_voices: Vec<Option<Voice>>,
+    /// The drum kit family and how each voice is made.
+    pub drum_voices: crate::drums::VoiceInfo,
     pub fft_size: usize,
     pub hop: usize,
     /// Per glitch layer: (steps, step length in samples).
@@ -103,6 +105,8 @@ pub struct Snapshot {
     pub bass: (f64, f64, f64),
     pub reverb_lines: [f64; 8],
     pub meters: Meters,
+    /// The drone's gain from the drum-aware mix (1 = untouched).
+    pub duck_gain: f64,
     /// The bass's current (gliding) root, MIDI.
     pub bass_root: f64,
     /// Where the chord progression is.
@@ -157,6 +161,7 @@ impl Track {
             break_pattern: self.drums.pattern_name(),
             break_overview: self.drums.overview(512),
             slice_voices: self.drums.slice_voices(),
+            drum_voices: self.drums.voice_info(),
             fft_size: N,
             hop: HOP,
             layers: [
@@ -197,6 +202,7 @@ impl Track {
             reverb_lines: self.reverb.take_peaks(),
             meters: core::mem::take(&mut self.meters),
             bass_root: self.bass.root(),
+            duck_gain: self.duck_gain,
             harmony: self.harmony.at(clock.saturating_sub(1)),
             drum_plan: self.drums.plan_now().cloned(),
             drum_step: self.drums.step(),

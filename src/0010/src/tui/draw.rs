@@ -123,7 +123,7 @@ pub fn header(ui: &Ui, buf: &mut Buffer, r: Rect) {
     let mut spans = vec![
         Span::styled(format!(" {} ", ui.label), Style::new().fg(rgb((20, 20, 20))).bg(rgb(OUTPUT)).add_modifier(Modifier::BOLD)),
         Span::styled(format!(" {} ", super::setup::VERSION), fg(DIM)),
-        Span::styled(format!(" {} ", shrine0010::cli::version_code(seeds, ui.desc.settings)), fg(TEXT)),
+        Span::styled(format!(" {} ", shrine0010::cli::recipe(seeds, ui.desc.settings)), fg(TEXT)),
     ];
     let (state, color) = if ui.quitting {
         ("■ fading out", GLITCH2)

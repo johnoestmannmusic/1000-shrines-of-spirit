@@ -120,10 +120,10 @@ fn screen(f: &mut Frame, t: f64, box_title: &str, box_height: u16, footer: &str)
 enum Step {
     Mode,
     Label,
-    Code,
     Scale,
     Chords,
     Pace,
+    Kit,
     Seed(usize),
     File,
     Overwrite,
@@ -160,6 +160,7 @@ fn list_id(step: Step) -> Option<usize> {
         Step::Scale => Some(1),
         Step::Chords => Some(2),
         Step::Pace => Some(3),
+        Step::Kit => Some(4),
         _ => None,
     }
 }
@@ -182,6 +183,7 @@ fn options(step: Step) -> Vec<(String, String)> {
         Step::Scale => SCALES.iter().map(|s| (s.name().to_string(), s.mood().to_string())).collect(),
         Step::Chords => own(&CHORD_CHOICES),
         Step::Pace => own(&PACE_CHOICES),
+        Step::Kit => shrine0010::kits::KITS.iter().map(|k| (k.name().to_string(), k.blurb().to_string())).collect(),
         _ => Vec::new(),
     }
 }
@@ -189,14 +191,12 @@ fn options(step: Step) -> Vec<(String, String)> {
 struct Setup {
     /// Last session's answers: the defaults for this one.
     last: crate::state::Remembered,
-    /// A version code was entered, so its settings and seeds are used as-is.
-    from_code: bool,
     notice: Option<Notice>,
     exit: bool,
     step: Step,
     back: Vec<Step>,
-    /// Selected entry of each list question (mode, scale, chords, pace).
-    sel: [usize; 4],
+    /// Selected entry of each list question (mode, scale, chords, pace, kit).
+    sel: [usize; 5],
     input: String,
     error: Option<String>,
     mode: Mode,
@@ -212,12 +212,17 @@ impl Setup {
         let d = last.seeds;
         let set = last.settings;
         Setup {
-            from_code: false,
             notice,
             exit: false,
             step: Step::Mode,
             back: Vec::new(),
-            sel: [0, set.scale.index(), set.chords as usize - 1, if set.pace == Pace::Jungle { 1 } else { 0 }],
+            sel: [
+                0,
+                set.scale.index(),
+                set.chords as usize - 1,
+                if set.pace == Pace::Jungle { 1 } else { 0 },
+                set.kit.index(),
+            ],
             input: String::new(),
             error: None,
             mode: Mode::Play,
@@ -234,6 +239,7 @@ impl Setup {
             scale: SCALES[self.sel[1]],
             chords: self.sel[2] as u8 + 1,
             pace: if self.sel[3] == 1 { Pace::Jungle } else { Pace::HalfTime },
+            kit: shrine0010::kits::KITS[self.sel[4]],
         }
     }
 
@@ -246,8 +252,7 @@ impl Setup {
         let l = &self.last;
         let d = [l.seeds.s1, l.seeds.s2, l.seeds.s3, l.seeds.s4, l.seeds.s5];
         match step {
-            Step::Mode | Step::Scale | Step::Chords | Step::Pace => "1".into(),
-            Step::Code => "skip".into(),
+            Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit => "1".into(),
             Step::Label => l.label.clone(),
             Step::Seed(i) => d[i].to_string(),
             Step::File => l.path.clone(),
@@ -258,23 +263,20 @@ impl Setup {
 
     fn question(&self) -> (String, String) {
         const SEED_ROLE: [&str; 5] =
-            ["the key and the chords", "glitch layer 1", "glitch layer 2", "the bass", "the jungle drums"];
+            ["the key and the chords", "glitch layer 1", "glitch layer 2", "the bass", "the drum kit's sounds and break"];
         let list_hint = "↑ ↓ (or a number) to choose, Enter to confirm.".to_string();
         match self.step {
             Step::Mode => ("What would you like to do?".into(), list_hint),
-            Step::Code => (
-                "Version code (optional)".into(),
-                format!(
-                    "Paste a code to recreate a version (last: {}), or Enter to choose step by step.",
-                    cli::version_code(self.last.seeds, self.last.settings)
-                ),
-            ),
             Step::Scale => ("Scale".into(), "The seed picks the key and builds the chords from this scale.".into()),
             Step::Chords => (
                 "How many chords?".into(),
                 "Chords 1 and 2 carry most of the 32-bar cycle; each change is a slow spectral morph.".into(),
             ),
             Step::Pace => ("Chord pace".into(), list_hint),
+            Step::Kit => (
+                "Drum kit".into(),
+                "The next seed shapes this kit's sounds and its break; seed 0 leaves the drums out.".into(),
+            ),
             Step::Label => (
                 "Title shown in the player".into(),
                 "Up to 4 characters. It appears in the header and the explainer ticker.".into(),
@@ -301,13 +303,13 @@ impl Setup {
     fn next_step(&self) -> Option<Step> {
         let play_only = self.mode == Mode::Play;
         match self.step {
-            Step::Mode => Some(if self.mode == Mode::Render { Step::Code } else { Step::Label }),
-            Step::Label => Some(Step::Code),
-            Step::Code if self.from_code => (!play_only).then_some(Step::File),
-            Step::Code => Some(Step::Scale),
+            Step::Mode => Some(if self.mode == Mode::Render { Step::Scale } else { Step::Label }),
+            Step::Label => Some(Step::Scale),
             Step::Scale => Some(Step::Chords),
             Step::Chords => Some(Step::Pace),
             Step::Pace => Some(Step::Seed(0)),
+            Step::Seed(3) => Some(Step::Kit),
+            Step::Kit => Some(Step::Seed(4)),
             Step::Seed(i) if i < 4 => Some(Step::Seed(i + 1)),
             Step::Seed(_) => (!play_only).then_some(Step::File),
             Step::File => Some(if Path::new(&self.path).exists() { Step::Overwrite } else { Step::Length }),
@@ -329,23 +331,7 @@ impl Setup {
                 self.mode = parse_mode(&(self.sel[0] + 1).to_string()).unwrap_or(Mode::Play);
                 true
             }
-            Step::Scale | Step::Chords | Step::Pace => true,
-            Step::Code => {
-                if answer.eq_ignore_ascii_case("skip") {
-                    self.from_code = false;
-                    true
-                } else if let Some((seeds, settings)) = cli::parse_version_code(&answer) {
-                    self.from_code = true;
-                    self.seeds = [seeds.s1, seeds.s2, seeds.s3, seeds.s4, seeds.s5];
-                    self.sel[1] = settings.scale.index();
-                    self.sel[2] = settings.chords as usize - 1;
-                    self.sel[3] = if settings.pace == Pace::Jungle { 1 } else { 0 };
-                    true
-                } else {
-                    self.error = Some("That isn't a version code, e.g. 0010-LYD-3H-1000.9.1009.2026.168".into());
-                    false
-                }
-            }
+            Step::Scale | Step::Chords | Step::Pace | Step::Kit => true,
             Step::Label => match parse_label(&answer) {
                 Some(l) => {
                     self.label = l;
@@ -432,9 +418,8 @@ impl Setup {
                 Step::Scale => ("Scale".into(), SCALES[self.sel[1]].name().to_string()),
                 Step::Chords => ("Chords".into(), format!("{} · {}", CHORD_CHOICES[self.sel[2]].0, CHORD_CHOICES[self.sel[2]].1)),
                 Step::Pace => ("Pace".into(), PACE_CHOICES[self.sel[3]].0.to_string()),
+                Step::Kit => ("Kit".into(), shrine0010::kits::KITS[self.sel[4]].name().to_string()),
                 Step::Label => ("Title".into(), self.label.clone()),
-                Step::Code if self.from_code => ("Code".into(), cli::version_code(self.seeds(), self.settings())),
-                Step::Code => ("Code".into(), "choosing step by step".into()),
                 Step::Seed(i) => (format!("Seed {}", i + 1), self.seeds[*i].to_string()),
                 Step::File => ("File".into(), self.path.clone()),
                 Step::Overwrite => ("Overwrite".into(), "yes".into()),
@@ -583,7 +568,7 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
                 // Any new answer replaces the last round's message.
                 s.notice = None;
             }
-            (Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Overwrite, _) => {}
+            (Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Overwrite, _) => {}
             (_, KeyCode::Backspace) => {
                 s.input.pop();
             }
@@ -683,10 +668,10 @@ pub fn render(terminal: &mut DefaultTerminal, c: &Choices) -> Result<(Notice, bo
         Err(_) => Notice::error("The render stopped unexpectedly."),
         Ok(Err(e)) => Notice::error(format!("Could not write {}: {e}", c.path)),
         Ok(Ok(true)) => Notice::ok(format!(
-            "Rendered {} to {} · code {}",
+            "Rendered {} to {} · recipe {}",
             format_length(c.seconds),
             c.path,
-            cli::version_code(c.seeds, c.settings)
+            cli::recipe(c.seeds, c.settings)
         )),
         Ok(Ok(false)) => {
             let got = done.load(Ordering::Relaxed) as f64 / SAMPLE_RATE as f64;

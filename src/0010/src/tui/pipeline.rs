@@ -476,7 +476,10 @@ fn box_text(ui: &Ui, n: Node) -> BoxText {
         },
         Brk => BoxText {
             title: "BREAK SYNTH".into(),
-            lines: [d.break_pattern.into(), "K S g h O R, 137 BPM".into()],
+            lines: [
+                d.drum_voices.kit.into(),
+                format!("{} · {:.0} BPM", d.break_pattern, d.drum_voices.source_bpm),
+            ],
             color: DRUMS,
             level: if ui.t < 6.0 { 1.0 } else { 0.3 },
             panel: Panel::Drums,
@@ -484,7 +487,10 @@ fn box_text(ui: &Ui, n: Node) -> BoxText {
         },
         Smp => BoxText {
             title: "SAMPLER".into(),
-            lines: ["12-bit · 24 kHz".into(), "sped up to 168 BPM".into()],
+            lines: [
+                format!("{}-bit · {:.0} kHz", d.drum_voices.bits, d.drum_voices.hold_khz),
+                format!("sped up +{:.1} semitones", d.drum_voices.semitones_up),
+            ],
             color: DRUMS,
             level: lv(l.drums) * 0.6,
             panel: Panel::Break,
@@ -540,7 +546,13 @@ fn box_text(ui: &Ui, n: Node) -> BoxText {
             title: "FILTER SWEEP".into(),
             lines: [
                 s.map_or(String::new(), |s| format!("low-pass {}", fmt_hz(s.drone_cutoff))),
-                "moved by slow LFOs".into(),
+                s.map_or(String::new(), |s| {
+                    if s.duck_gain < 0.995 {
+                        format!("drums: ducked {:.1} dB", 20.0 * s.duck_gain.log10())
+                    } else {
+                        "moved by slow LFOs".into()
+                    }
+                }),
             ],
             color: DRONE,
             level: lv(l.drone),

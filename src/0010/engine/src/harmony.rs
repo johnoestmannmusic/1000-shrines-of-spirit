@@ -87,7 +87,7 @@ impl Scale {
         }
     }
 
-    /// Three-letter code used in version codes.
+    /// Three-letter code used in recipes.
     pub fn code(self) -> &'static str {
         match self {
             Scale::Lydian => "LYD",

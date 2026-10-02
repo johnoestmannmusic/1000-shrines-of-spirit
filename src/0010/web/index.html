@@ -54,7 +54,8 @@
 <script type="module">
   // Canonical seeds, the same as DEFAULT_SEEDS in src/lib.rs.
   // Override with ?s1=…&s2=…&s3=…&s4=… (decimal or 0x hex) for alternate renditions.
-  // Seed 5 shapes the drums (0 = none). Settings: ?scale=1-12 (1 = Lydian), ?chords=1-4, ?pace=half|jungle.
+  // Seed 5 shapes the drums (0 = none). Settings: ?scale=1-12 (1 = Lydian), ?chords=1-4, ?pace=half|jungle,
+  // ?kit=1-6 (1 Acoustic, 2 FM metal, 3 Modal, 4 Digital crush, 5 Noise sculpture, 6 Sub & clicks).
   const DEFAULT_SEEDS = ["1000", "9", "1009", "2026", "168"];
   const num = (k, d, lo, hi) => {
     const v = parseInt(params.get(k) ?? "", 10);
@@ -73,8 +74,9 @@
     scale: num("scale", 1, 1, 12) - 1,
     chords: num("chords", 3, 1, 4),
     pace: params.get("pace") === "jungle" ? 1 : 0,
+    kit: num("kit", 1, 1, 6) - 1,
   };
-  const custom = seeds.some((s, i) => s !== DEFAULT_SEEDS[i]) || settings.scale !== 0 || settings.chords !== 3 || settings.pace !== 0;
+  const custom = seeds.some((s, i) => s !== DEFAULT_SEEDS[i]) || settings.scale !== 0 || settings.chords !== 3 || settings.pace !== 0 || settings.kit !== 0;
   document.querySelector("#seeds").textContent =
     `seeds ${seeds.join(" · ")}${custom ? " (alternate rendition)" : ""}`;
 

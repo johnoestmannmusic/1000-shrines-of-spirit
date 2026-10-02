@@ -33,7 +33,7 @@ const SECONDS: usize = 30;
 
 /// The sound of the canonical track. If this changes, the music changed:
 /// only update it deliberately, as a new version of the piece.
-const GOLDEN_HASH: u64 = 0xd2b8263f0847c8a0;
+const GOLDEN_HASH: u64 = 0x1f12e097a350cae1;
 
 #[test]
 fn golden_hash() {
@@ -78,13 +78,15 @@ fn each_setting_changes_the_output() {
         Settings { scale: Scale::Dorian, ..DEFAULT_SETTINGS },
         Settings { chords: 1, ..DEFAULT_SETTINGS },
         Settings { pace: Pace::Jungle, ..DEFAULT_SETTINGS },
+        Settings { kit: shrine0010::kits::Kit::FmMetal, ..DEFAULT_SETTINGS },
     ];
     for v in variants {
         assert_ne!(hash(&render_with(DEFAULT_SEEDS, v, frames, 4096)), base, "{v:?} sounds the same as the default");
     }
 }
 
-/// Seed 5 = 0 switches the drums off: no drum energy, ever.
+/// Seed 5 = 0 switches the drums off: no drum energy, ever, and the drone
+/// is never ducked to make room for them.
 #[test]
 fn drum_seed_zero_is_silent_drums() {
     let mut track = Track::new(Seeds { s5: 0, ..DEFAULT_SEEDS }, DEFAULT_SETTINGS);
@@ -95,6 +97,24 @@ fn drum_seed_zero_is_silent_drums() {
         let s = track.snapshot();
         assert_eq!(s.meters.drums, 0.0);
         assert_eq!(s.drum_hit_count, 0);
+        assert_eq!(s.duck_gain, 1.0);
+    }
+}
+
+/// Each of the six kit families makes a different break, and seed 5 varies
+/// the break within a kit.
+#[test]
+fn every_kit_family_sounds_different() {
+    use shrine0010::kits::KITS;
+    let mut seen = Vec::new();
+    for kit in KITS {
+        let d = Track::new(DEFAULT_SEEDS, Settings { kit, ..DEFAULT_SETTINGS }).describe();
+        assert_eq!(d.drum_voices.kit, kit.name());
+        assert!(!seen.contains(&d.break_overview), "{} repeats another kit's break", kit.name());
+        seen.push(d.break_overview.clone());
+        let other = Track::new(Seeds { s5: 7, ..DEFAULT_SEEDS }, Settings { kit, ..DEFAULT_SETTINGS }).describe();
+        assert_eq!(other.drum_voices.kit, kit.name(), "seed 5 must not change the kit");
+        assert_ne!(other.break_overview, d.break_overview, "seed 5 should vary the {} kit", kit.name());
     }
 }
 

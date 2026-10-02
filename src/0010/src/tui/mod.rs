@@ -516,9 +516,9 @@ pub fn play(
             let (path, _) = rec_info.unwrap_or_default();
             let secs = frames as f64 / SAMPLE_RATE as f64;
             let mut msg = format!(
-                "Recorded {} to {path} · code {}.",
+                "Recorded {} to {path} · recipe {}.",
                 shrine0010::cli::format_length(secs),
-                shrine0010::cli::version_code(seeds, settings)
+                shrine0010::cli::recipe(seeds, settings)
             );
             if quit_at.is_some() {
                 msg += " Stopped early, so it ends with a short fade where you quit.";
@@ -526,8 +526,8 @@ pub fn play(
             setup::Notice::ok(msg)
         }
         Ok(None) => setup::Notice::ok(format!(
-            "Played {heard} live · code {}",
-            shrine0010::cli::version_code(seeds, settings)
+            "Played {heard} live · recipe {}",
+            shrine0010::cli::recipe(seeds, settings)
         )),
         Err(e) => setup::Notice::error(format!("Recording failed: {e}")),
     };

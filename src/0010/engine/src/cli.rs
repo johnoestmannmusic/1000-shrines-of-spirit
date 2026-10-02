@@ -5,6 +5,7 @@
 use crate::math::cos_turns;
 use crate::rng::Rng;
 use crate::harmony::{bar_weights, Pace, Scale, SCALES};
+use crate::kits::{Kit, KITS};
 use crate::{Seeds, Settings, Track, DEFAULT_SEEDS, DEFAULT_SETTINGS, SAMPLE_RATE};
 use std::fs::File;
 use std::io::{self, BufRead, BufWriter, Seek, SeekFrom, Write};
@@ -93,18 +94,19 @@ pub fn parse_scale(s: &str) -> Option<Scale> {
     SCALES.iter().copied().find(|sc| compact(sc.name()).starts_with(&want))
 }
 
-/// The track a version code belongs to.
+/// The track a recipe belongs to.
 pub const TRACK: &str = "0010";
 
-/// A version code: everything needed to regenerate a version of the track,
-/// e.g. `0010-LYD-3H-1000.9.1009.2026.168` (track, scale, chord count +
-/// pace (H half-time / J jungle), seeds 1-5).
-pub fn version_code(seeds: Seeds, settings: Settings) -> String {
+/// A recipe: everything needed to regenerate a version of the track,
+/// e.g. `0010-LYD-3H-ACO-1000.9.1009.2026.168` (track, scale, chord count +
+/// pace (H half-time / J jungle), drum kit, seeds 1-5).
+pub fn recipe(seeds: Seeds, settings: Settings) -> String {
     format!(
-        "{TRACK}-{}-{}{}-{}.{}.{}.{}.{}",
+        "{TRACK}-{}-{}{}-{}-{}.{}.{}.{}.{}",
         settings.scale.code(),
         settings.chords,
         if settings.pace == Pace::Jungle { "J" } else { "H" },
+        settings.kit.code(),
         seeds.s1,
         seeds.s2,
         seeds.s3,
@@ -113,8 +115,8 @@ pub fn version_code(seeds: Seeds, settings: Settings) -> String {
     )
 }
 
-/// Parses a version code (case and surrounding spaces don't matter).
-pub fn parse_version_code(code: &str) -> Option<(Seeds, Settings)> {
+/// Parses a recipe (case and surrounding spaces don't matter).
+pub fn parse_recipe(code: &str) -> Option<(Seeds, Settings)> {
     let code = code.trim();
     let mut parts = code.split('-');
     if !parts.next()?.eq_ignore_ascii_case(TRACK) {
@@ -129,12 +131,33 @@ pub fn parse_version_code(code: &str) -> Option<(Seeds, Settings)> {
         "J" => Pace::Jungle,
         _ => return None,
     };
-    let seeds: Vec<u64> = parts.next()?.split('.').map(|s| s.parse().ok()).collect::<Option<_>>()?;
+    // The kit code; older recipes have none (seed 5 used to pick the kit).
+    let mut next = parts.next()?;
+    let kit = match Kit::from_code(next) {
+        Some(k) => {
+            next = parts.next()?;
+            Some(k)
+        }
+        None => None,
+    };
+    let seeds: Vec<u64> = next.split('.').map(|s| s.parse().ok()).collect::<Option<_>>()?;
     if parts.next().is_some() || seeds.len() != 5 {
         return None;
     }
     let seeds = Seeds { s1: seeds[0], s2: seeds[1], s3: seeds[2], s4: seeds[3], s5: seeds[4] };
-    Some((seeds, Settings { scale, chords, pace }))
+    let kit = kit.unwrap_or_else(|| crate::kits::legacy_kit_for(seeds.s5));
+    Some((seeds, Settings { scale, chords, pace, kit }))
+}
+
+/// A kit by number (1-6), code (e.g. FMM) or (the start of) its name.
+pub fn parse_kit(s: &str) -> Option<Kit> {
+    let s = s.trim();
+    if let Ok(n) = s.parse::<usize>() {
+        return (1..=KITS.len()).contains(&n).then(|| KITS[n - 1]);
+    }
+    let want = s.to_ascii_lowercase();
+    (!want.is_empty()).then_some(())?;
+    Kit::from_code(s).or_else(|| KITS.iter().copied().find(|k| k.name().to_ascii_lowercase().starts_with(&want)))
 }
 
 pub fn parse_chords(s: &str) -> Option<u8> {
@@ -166,8 +189,13 @@ pub fn ask_settings(input: &mut impl BufRead) -> Settings {
     let chords = ask_until(input, "How many chords (1-4)", &DEFAULT_SETTINGS.chords.to_string(), "Enter 1 to 4.", parse_chords);
     println!("Chord pace: 1 = half-time (bars ≈2.9 s), 2 = jungle (bars ≈1.4 s)");
     let pace = ask_until(input, "Chord pace", "1", "Enter 1 or 2.", parse_pace);
+    println!("Drum kits:");
+    for (i, k) in KITS.iter().enumerate() {
+        println!("  {}) {:<16} {}", i + 1, k.name(), k.blurb());
+    }
+    let kit = ask_until(input, "Drum kit (seed 5 shapes it)", "1", "Enter 1-6 or a kit name.", parse_kit);
     println!();
-    Settings { scale, chords, pace }
+    Settings { scale, chords, pace, kit }
 }
 
 pub fn ask_seeds(input: &mut impl BufRead) -> Seeds {
@@ -265,20 +293,20 @@ pub struct WavInfo {
     pub comment: String,
 }
 
-/// The tags for a render: the version code and everything it stands for,
+/// The tags for a render: the recipe and everything it stands for,
 /// so any file explains how to regenerate itself. Nothing time-dependent is
 /// included, so identical renders stay byte-identical.
 pub fn wav_info(title: &str, software: &str, seeds: Seeds, settings: Settings) -> WavInfo {
-    let code = version_code(seeds, settings);
+    let code = recipe(seeds, settings);
     let key = crate::harmony::key_name(crate::harmony::key_for(seeds.s1));
     let pace = if settings.pace == Pace::Jungle { "jungle" } else { "half-time" };
-    let drums = if seeds.s5 == 0 { "off" } else { "on" };
+    let drums = if seeds.s5 == 0 { "off".to_string() } else { format!("{} kit", settings.kit.name()) };
     WavInfo {
         title: title.to_string(),
         software: software.to_string(),
         comment: format!(
-            "GlitchAmbiToolkit track {TRACK}. Version code {code}. {key} {}, {} chord(s) ({}), {pace} pace. \
-             Seeds {} {} {} {} {} (drums {drums}). Regenerate with: --code {code}",
+            "GlitchAmbiToolkit track {TRACK}. Recipe {code}. {key} {}, {} chord(s) ({}), {pace} pace. \
+             Seeds {} {} {} {} {} (drums {drums}). Regenerate with: --recipe {code}",
             settings.scale.name(),
             settings.chords,
             bars_text(settings.chords),
@@ -402,7 +430,7 @@ pub fn render_to_wav(seeds: Seeds, settings: Settings, path: &str, seconds: f64,
         last = done;
         true
     })?;
-    eprintln!("done. Version code: {}", version_code(seeds, settings));
+    eprintln!("done. Recipe: {}", recipe(seeds, settings));
     Ok(())
 }
 
@@ -443,17 +471,25 @@ mod tests {
     use crate::harmony::SCALES;
 
     #[test]
-    fn version_codes_round_trip() {
-        assert_eq!(version_code(DEFAULT_SEEDS, DEFAULT_SETTINGS), "0010-LYD-3H-1000.9.1009.2026.168");
+    fn recipes_round_trip() {
+        assert_eq!(recipe(DEFAULT_SEEDS, DEFAULT_SETTINGS), "0010-LYD-3H-ACO-1000.9.1009.2026.168");
+        // Older recipes without a kit code still read, with the kit seed 5 used to pick.
+        let (seeds, settings) = parse_recipe("0010-LYD-3H-1000.9.1009.2026.168").unwrap();
+        assert_eq!((seeds, settings), (DEFAULT_SEEDS, DEFAULT_SETTINGS));
         for (i, scale) in SCALES.iter().enumerate() {
-            let settings = Settings { scale: *scale, chords: (i % 4) as u8 + 1, pace: if i % 2 == 0 { Pace::Jungle } else { Pace::HalfTime } };
+            let settings = Settings {
+                scale: *scale,
+                chords: (i % 4) as u8 + 1,
+                pace: if i % 2 == 0 { Pace::Jungle } else { Pace::HalfTime },
+                kit: KITS[i % KITS.len()],
+            };
             let seeds = Seeds { s1: i as u64, s2: u64::MAX, s3: 0, s4: 42, s5: 7 };
-            let code = version_code(seeds, settings);
-            assert_eq!(parse_version_code(&code), Some((seeds, settings)), "{code}");
-            assert_eq!(parse_version_code(&code.to_ascii_lowercase()), Some((seeds, settings)));
+            let code = recipe(seeds, settings);
+            assert_eq!(parse_recipe(&code), Some((seeds, settings)), "{code}");
+            assert_eq!(parse_recipe(&code.to_ascii_lowercase()), Some((seeds, settings)));
         }
-        for bad in ["", "0009-LYD-3H-1.2.3.4.5", "0010-XXX-3H-1.2.3.4.5", "0010-LYD-5H-1.2.3.4.5", "0010-LYD-3Q-1.2.3.4.5", "0010-LYD-3H-1.2.3.4", "0010-LYD-3H-1.2.3.4.x"] {
-            assert_eq!(parse_version_code(bad), None, "{bad}");
+        for bad in ["", "0009-LYD-3H-1.2.3.4.5", "0010-XXX-3H-1.2.3.4.5", "0010-LYD-5H-1.2.3.4.5", "0010-LYD-3Q-1.2.3.4.5", "0010-LYD-3H-1.2.3.4", "0010-LYD-3H-1.2.3.4.x", "0010-LYD-3H-XYZ-1.2.3.4.5"] {
+            assert_eq!(parse_recipe(bad), None, "{bad}");
         }
     }
 }

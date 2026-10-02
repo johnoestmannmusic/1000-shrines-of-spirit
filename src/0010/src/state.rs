@@ -53,8 +53,9 @@ pub fn load() -> Remembered {
     for line in text.lines() {
         let Some((k, v)) = line.split_once('=') else { continue };
         match k.trim() {
-            "code" => {
-                if let Some((seeds, settings)) = cli::parse_version_code(v) {
+            // "code" is the old name, still read.
+            "recipe" | "code" => {
+                if let Some((seeds, settings)) = cli::parse_recipe(v) {
                     r.seeds = seeds;
                     r.settings = settings;
                 }
@@ -84,9 +85,9 @@ pub fn save(r: &Remembered) {
     }
     let text = format!(
         "# GlitchAmbiToolkit {}: last answers, used as the next defaults. Safe to edit or delete.\n\
-         code={}\nlabel={}\nfile={}\nlength={}\n",
+         recipe={}\nlabel={}\nfile={}\nlength={}\n",
         cli::TRACK,
-        cli::version_code(r.seeds, r.settings),
+        cli::recipe(r.seeds, r.settings),
         r.label,
         r.path,
         cli::format_length(r.seconds)

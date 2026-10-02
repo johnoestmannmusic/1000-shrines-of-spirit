@@ -219,7 +219,8 @@ fn arrangement(ui: &Ui, buf: &mut Buffer, r: Rect) {
         put(buf, r, 6, 6, &hbar(meter, level_frac(ui.levels.drums, 40.0)), fg(DRUMS));
     }
     if r.height > 8 {
-        put(buf, r, 0, 8, &format!("break: {} at 137 BPM, played at 168", ui.desc.break_pattern), fg(DIM));
+        let v = &ui.desc.drum_voices;
+        put(buf, r, 0, 8, &format!("{} · {} at {:.0} BPM, played at 168", v.kit, ui.desc.break_pattern, v.source_bpm), fg(DIM));
     }
 }
 
@@ -306,10 +307,14 @@ fn chopper(ui: &Ui, buf: &mut Buffer, r: Rect) {
 }
 
 fn voices(ui: &Ui, buf: &mut Buffer, r: Rect) {
+    if !ui.desc.drums_on {
+        put(buf, r, 0, 0, "Drums are off (seed 5 = 0).", fg(DIM));
+        return;
+    }
     if r.height < 4 || r.width < 60 {
         return;
     }
-    let info = drums::voice_info();
+    let info = &ui.desc.drum_voices;
     let col_w = r.width / 4;
     let cols: Vec<Rect> = (0..4).map(|i| Rect::new(r.x + i * col_w, r.y, col_w.saturating_sub(1), r.height)).collect();
     let flash = |v: Voice| ui.drum_flash[voice_index(v)];
@@ -324,73 +329,68 @@ fn voices(ui: &Ui, buf: &mut Buffer, r: Rect) {
         }
     };
     let plot_rows = r.height.saturating_sub(3).max(1);
+    let fx = |c: Rect, hz: f64| {
+        ((hz / 30.0).ln() / (16_000.0f64 / 30.0).ln() * (c.width as f64 - 1.0)).clamp(0.0, c.width as f64 - 1.0) as u16
+    };
 
-    // Kick: its pitch envelope.
+    // Kick: its pitch envelope over the first 150 ms.
     let c = cols[0];
     title(buf, c, "KICK", &[Voice::Kick]);
     let mut k = Braille::new(c.width, plot_rows);
     let (kw, kh) = (k.width(), k.height() as f64);
+    let top = info.kick_from_hz.max(1.0);
     let ys: Vec<f64> = (0..kw)
         .map(|x| {
             let t = x as f64 / kw as f64 * 0.15;
             let f = info.kick_to_hz + (info.kick_from_hz - info.kick_to_hz) * (-t / (info.kick_drop_ms / 1000.0)).exp();
-            (1.0 - (f - 40.0) / 140.0) * (kh - 1.0)
+            (1.0 - (f - info.kick_to_hz * 0.8) / (top - info.kick_to_hz * 0.8)) * (kh - 1.0)
         })
         .collect();
     k.trace(&ys);
     k.draw(buf, c, 0, 1, fg(mix(lit(voice_color(Voice::Kick), 0.6), voice_color(Voice::Kick), flash(Voice::Kick))));
-    put(
-        buf,
-        c,
-        0,
-        r.height - 1,
-        &format!("pitch {:.0}→{:.0} Hz, τ {:.0} ms", info.kick_from_hz, info.kick_to_hz, info.kick_drop_ms),
-        fg(DIM),
-    );
+    put(buf, c, 0, r.height - 1, &info.lines[0], fg(DIM));
 
-    // Snare: tone modes and the noise band, on a log frequency axis.
+    // Snare: its tones on a log frequency axis, with the noise band shaded.
     let c = cols[1];
     title(buf, c, "SNARE", &[Voice::Snare, Voice::Ghost]);
-    let fx = |hz: f64| ((hz / 80.0).ln() / (12_000.0f64 / 80.0).ln() * (c.width as f64 - 1.0)).clamp(0.0, c.width as f64 - 1.0) as u16;
     let fl = flash(Voice::Snare).max(flash(Voice::Ghost));
     for y in 1..1 + plot_rows {
-        for x in fx(1200.0)..=fx(3600.0) {
+        for x in fx(c, 1200.0)..=fx(c, 3600.0) {
             put_char(buf, c, x, y, '░', fg(mix(lit(DRUMS, 0.35), voice_color(Voice::Snare), fl * 0.8)));
         }
-        for hz in info.snare_body_hz {
-            put_char(buf, c, fx(hz), y, '█', fg(mix(lit(voice_color(Voice::Snare), 0.6), WHITE, fl * 0.5)));
+        for hz in info.snare_hz.iter().filter(|h| **h > 0.0) {
+            put_char(buf, c, fx(c, *hz), y, '█', fg(mix(lit(voice_color(Voice::Snare), 0.6), WHITE, fl * 0.5)));
         }
     }
-    put(buf, c, 0, r.height - 1, "█ body 182/331 Hz ░ wires", fg(DIM));
+    put(buf, c, 0, r.height - 1, &info.lines[1], fg(DIM));
 
-    // Hats and ride: the six-square metallic bank.
+    // Cymbals: their oscillators / partials / modes, animated.
     let c = cols[2];
     title(buf, c, "HATS · RIDE", &[Voice::Hat, Voice::OpenHat, Voice::Ride]);
-    let mx = |hz: f64| ((hz - 180.0) / (840.0 - 180.0) * (c.width as f64 - 1.0)).clamp(0.0, c.width as f64 - 1.0) as u16;
     let fl = flash(Voice::Hat).max(flash(Voice::OpenHat)).max(flash(Voice::Ride));
-    for (i, hz) in info.metal_hz.iter().enumerate() {
-        // A little square-wave glyph column per oscillator, animated by its frequency.
+    for (i, hz) in info.cymbal_hz.iter().enumerate() {
         for y in 1..1 + plot_rows {
             let phase = (ui.t * hz / 400.0 + y as f64 * 0.3 + i as f64).sin();
             let ch = if phase > 0.0 { '▀' } else { '▄' };
-            put_char(buf, c, mx(*hz), y, ch, fg(mix(lit(voice_color(Voice::Ride), 0.5), WHITE, fl * 0.7)));
+            put_char(buf, c, fx(c, hz * 8.0), y, ch, fg(mix(lit(voice_color(Voice::Ride), 0.5), WHITE, fl * 0.7)));
         }
     }
-    put(buf, c, 0, r.height - 1, "6 squares (205–800 Hz) + noise", fg(DIM));
+    put(buf, c, 0, r.height - 1, &info.lines[2], fg(DIM));
 
-    // The sampler.
+    // The kit and its sampler.
     let c = cols[3];
-    title(buf, c, "SAMPLER", &[]);
+    title(buf, c, "KIT · SAMPLER", &[]);
     let lines = [
-        format!("{:.0} → {:.0} BPM", info.source_bpm, info.play_bpm),
-        format!("pitch +{:.1} semitones", info.semitones_up),
-        "12-bit · 24 kHz hold".to_string(),
-        "saturation · LP 11 kHz".to_string(),
-        "small room · 32 slices".to_string(),
+        info.kit.to_string(),
+        format!("{:.0} → {:.0} BPM (+{:.1} st)", info.source_bpm, info.play_bpm, info.semitones_up),
+        format!("{}-bit · {:.0} kHz hold", info.bits, info.hold_khz),
+        "punch: comp 4:1 + soft clip".to_string(),
+        "cymbals choke · small room".to_string(),
     ];
     for (i, l) in lines.iter().enumerate() {
         if (i as u16 + 1) < r.height {
-            put(buf, c, 0, i as u16 + 1, l, fg(TEXT));
+            let st = if i == 0 { fg(DRUMS).add_modifier(Modifier::BOLD) } else { fg(TEXT) };
+            put(buf, c, 0, i as u16 + 1, l, st);
         }
     }
 }

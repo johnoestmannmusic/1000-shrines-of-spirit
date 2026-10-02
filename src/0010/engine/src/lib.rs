@@ -22,6 +22,7 @@ pub mod filter;
 pub mod fm;
 pub mod glitch;
 pub mod harmony;
+pub mod kits;
 pub mod math;
 pub mod modulate;
 pub mod pattern;
@@ -41,7 +42,7 @@ use drone::Drone;
 use drums::Drums;
 use harmony::{Harmony, Pace, Scale};
 use rng::Rng;
-use filter::{DcBlock, Svf};
+use filter::{DcBlock, OnePole, Svf};
 use glitch::History;
 use modulate::Mods;
 use pattern::{Layer, LayerConfig};
@@ -70,9 +71,12 @@ pub struct Settings {
     /// 1 to 4.
     pub chords: u8,
     pub pace: Pace,
+    /// The drum kit family (seed 5 shapes it).
+    pub kit: kits::Kit,
 }
 
-pub const DEFAULT_SETTINGS: Settings = Settings { scale: Scale::Lydian, chords: 3, pace: Pace::HalfTime };
+pub const DEFAULT_SETTINGS: Settings =
+    Settings { scale: Scale::Lydian, chords: 3, pace: Pace::HalfTime, kit: kits::Kit::Acoustic };
 
 // Sixteenth note ≈ 84 BPM, divisible by 1-4 for ratchets.
 const SIXTEENTH: u64 = 8568;
@@ -91,8 +95,24 @@ const GLITCH2_SEND: f64 = 0.4;
 const ECHO_DRY: f64 = 0.6;
 const ECHO_SEND: f64 = 0.5;
 const ECHO_FEEDBACK: f64 = 0.55;
-const DRUMS_DRY: f64 = 0.62;
+const DRUMS_DRY: f64 = 0.85;
 const DRUMS_SEND: f64 = 0.1;
+
+// Making room for the drums: while they play, the drone dips and darkens.
+/// Follower times (seconds) for "drums are playing" and for individual hits.
+const PRESENCE_ATTACK: f64 = 0.05;
+const PRESENCE_RELEASE: f64 = 1.5;
+const PUNCH_ATTACK: f64 = 0.002;
+const PUNCH_RELEASE: f64 = 0.12;
+/// Drum-bus levels that count as "fully playing" / "a full hit".
+const PRESENCE_REF: f64 = 0.3;
+const PUNCH_REF: f64 = 0.6;
+/// Depths: drone level (≈ −5 dB), per-hit pump (≈ −2 dB), high shelf (−6 dB), glitch/echo dip.
+const DUCK_DEPTH: f64 = 0.45;
+const PUMP_DEPTH: f64 = 0.2;
+const SHELF_DEPTH: f64 = 0.5;
+const SHELF_HZ: f64 = 2500.0;
+const GLITCH_DUCK: f64 = 0.15;
 const REVERB_WET: f64 = 0.55;
 const MASTER_GAIN: f64 = 0.9;
 const FADE_IN_SECONDS: u64 = 10;
@@ -131,8 +151,34 @@ pub fn layer2(h: &Harmony) -> LayerConfig {
     }
 }
 
+/// Attack/release envelope follower.
+struct Follower {
+    env: f64,
+    attack: f64,
+    release: f64,
+}
+
+impl Follower {
+    fn new(attack_s: f64, release_s: f64) -> Self {
+        let sr = SAMPLE_RATE as f64;
+        let coef = |t: f64| 1.0 - math::exp(-1.0 / (t * sr));
+        Follower { env: 0.0, attack: coef(attack_s), release: coef(release_s) }
+    }
+
+    fn process(&mut self, x: f64) -> f64 {
+        let a = if x > self.env { self.attack } else { self.release };
+        self.env = math::sanitize(self.env + a * (x - self.env));
+        self.env
+    }
+}
+
 pub struct Track {
     seeds: Seeds,
+    presence: Follower,
+    punch: Follower,
+    shelf: [OnePole; 2],
+    /// Drone gain from the drum-aware mix (display only).
+    duck_gain: f64,
     settings: Settings,
     harmony: Harmony,
     drums: Drums,
@@ -165,9 +211,13 @@ impl Track {
             Harmony::new(settings.scale, settings.chords.clamp(1, 4) as usize, settings.pace, key, &mut first, &mut rest);
         Track {
             seeds,
+            presence: Follower::new(PRESENCE_ATTACK, PRESENCE_RELEASE),
+            punch: Follower::new(PUNCH_ATTACK, PUNCH_RELEASE),
+            shelf: [OnePole::new(SHELF_HZ, sr), OnePole::new(SHELF_HZ, sr)],
+            duck_gain: 1.0,
             settings,
             harmony: harmony.clone(),
-            drums: Drums::new(seeds.s5),
+            drums: Drums::new(seeds.s5, settings.kit, &harmony),
             clock: 0,
             mods: Mods::new(seeds.s1),
             glitch1: Layer::new(layer1(&harmony), seeds.s2, 0x61),
@@ -216,6 +266,19 @@ impl Track {
         let dr = self.drone_filter[1].process(dr).low;
         self.history.push(dl, dr);
 
+        // 5 (computed early): jungle drums, and how present they are right now.
+        let d = self.drums.next(clock, &self.mods);
+        let presence = (self.presence.process(d.abs()) / PRESENCE_REF).min(1.0);
+        let punch = (self.punch.process(d.abs()) / PUNCH_REF).min(1.0);
+        // Make room: the drone dips, pumps with each hit, and loses some top end.
+        // (With no drums, presence and punch stay exactly 0 and nothing changes.)
+        let duck = (1.0 - DUCK_DEPTH * presence) * (1.0 - PUMP_DEPTH * punch);
+        let shelf = SHELF_DEPTH * presence;
+        let dl = (dl - (dl - self.shelf[0].process(dl)) * shelf) * duck;
+        let dr = (dr - (dr - self.shelf[1].process(dr)) * shelf) * duck;
+        self.duck_gain = duck;
+        let others = 1.0 - GLITCH_DUCK * presence;
+
         // 2 & 3: glitch layers.
         let g1 = self.glitch1.next(clock, m.density1, &self.history);
         let g2 = self.glitch2.next(clock, m.density2, &self.history);
@@ -232,21 +295,16 @@ impl Track {
         }
         let b = self.bass.next(clock, &m);
 
-        // 5: jungle drums.
-        let d = self.drums.next(clock, &self.mods);
-
         // Shared long reverb.
         let (rl, rr) = self.reverb.process(
             dl * DRONE_SEND + b * BASS_SEND + g1.0 * GLITCH1_SEND + g2.0 * GLITCH2_SEND + el * ECHO_SEND + d * DRUMS_SEND,
             dr * DRONE_SEND + b * BASS_SEND + g1.1 * GLITCH1_SEND + g2.1 * GLITCH2_SEND + er * ECHO_SEND + d * DRUMS_SEND,
         );
 
-        let mut l = dl * DRONE_DRY + b * BASS_DRY + g1.0 * GLITCH1_DRY + g2.0 * GLITCH2_DRY
-            + el * ECHO_DRY
+        let mut l = dl * DRONE_DRY + b * BASS_DRY + (g1.0 * GLITCH1_DRY + g2.0 * GLITCH2_DRY + el * ECHO_DRY) * others
             + d * DRUMS_DRY
             + rl * REVERB_WET;
-        let mut r = dr * DRONE_DRY + b * BASS_DRY + g1.1 * GLITCH1_DRY + g2.1 * GLITCH2_DRY
-            + er * ECHO_DRY
+        let mut r = dr * DRONE_DRY + b * BASS_DRY + (g1.1 * GLITCH1_DRY + g2.1 * GLITCH2_DRY + er * ECHO_DRY) * others
             + d * DRUMS_DRY
             + rr * REVERB_WET;
 

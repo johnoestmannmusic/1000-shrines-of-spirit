@@ -16,7 +16,7 @@ Dates throughout this file include a time (HH:MM), not just a date, since multip
 **Project Description:** A copy of 0009 (`../src/0009/`, untouched apart from one header fix) extended with: fully synthesised jungle breakbeat drums (a seed-5-driven break, played at ~137 BPM by synthesised voices, "sampled" through a vintage-sampler chain, chopped into 32 slices and re-sequenced at 168 BPM with phrase-based arrangement; seed 5 = 0 means no drums); a choice of scale (12 options, Lydian default); 1–4 chords with weighted bar splits (32 / 20-12 / 16-12-4 / 14-10-4-4) at half-time or jungle pace; and seed-1-chosen keys and voicings, with spectral morphs between chords. Same guarantees as 0009: zero-dependency engine, bit-exact native/WASM, golden hash, observation-only TUI.  
 **Implementation Repository:** `../src/0010/`  
 **Plan:** `~/.claude/plans/in-sourcerepo-1000-shrines-of-spirit-src-dynamic-lantern.md`  
-**Board Last Updated:** 2026-10-03 07:40 by Claude  
+**Board Last Updated:** 2026-10-03 08:30 by Claude  
 **Git workflow note:** No commits made; left to the user. No README (the user removed 0009's local README).  
 **Session status 2026-10-03 07:31** — Everything in the plan is built and verified. `cargo test --release --workspace` passes, and the WASM hash matches native (`0xd2b8263f0847c8a0`, provisional until the user has listened). A 5-minute default preview is at `src/0010/0010-preview.wav`. **Awaiting the user's listening check**, especially of drum authenticity, which is subjective; all drum constants are named and tunable in `engine/src/drums.rs`.
 
@@ -38,9 +38,56 @@ _None currently assigned._
 
 ### Completed
 
+#### 0010-PLAN-011 — Drum kit chosen at setup; seed 5 shapes it; kit code in the recipe
+
+- **Card Title:** Drum kit chosen at setup; seed 5 shapes it; kit code in the recipe
+- **Description:** The user asked for a kit question before the drum seed, with the seed shaping timbre and break *within* the chosen kit, and a 3-character kit label in the recipe.
+  - `Settings` gains `kit` (default Acoustic). `KitParams::new(seed, kit, …)` no longer picks the kit from seed 5.
+  - Kit codes: ACO FMM MOD CRU NOI SUB. Recipes now read `0010-LYD-3H-ACO-1000.9.1009.2026.168`. Older recipes without a kit code still parse, mapped through `legacy_kit_for(seed5)` so they sound exactly as they did.
+  - Setup: a new "Drum kit" list (with blurbs) between seed 4 and seed 5, remembered like the other answers.
+  - `--kit` on both programs (number, code or name); `cli::ask_settings` asks it too.
+  - WASM `sos_new` takes a kit index; the web player takes `?kit=1-6`.
+  - The WAV comment names the kit. Insights updated.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 08:30
+- **Card Completion Note:** Complete. The golden hash is unchanged (the default is still Acoustic + seed 168), and WASM matches. Tests: every kit differs; seed 5 varies the break within each kit without changing the kit; old-recipe compatibility; recipe round-trip with kits. A pseudo-terminal flow chose FM metal and produced recipe `…-FMM-…`, saved and written to the metadata.
+- **Process Comments:** 2026-10-03 08:30 — The per-kit previews in `src/0010/previews/` were rendered with the old seed-picks-kit mapping. Their audio is still right, but to reproduce them now, pass `--kit` (e.g. `--kit FMM --seed5 1`).
+
+#### 0010-PLAN-008 — "Version code" renamed "recipe"; setup question removed
+
+- **Card Title:** "Version code" renamed "recipe"; setup question removed
+- **Description:** The user found "version" confusing, since the version is the vYYYYMMDD build. The setup "Version code" question is removed (the flow is back to mode → title → scale → chords → pace → seeds → file / length). Codes are now "recipes": `cli::recipe` / `parse_recipe`, flag `--recipe` (`--code` kept as a silent alias), state-file key `recipe=` (old `code=` still read), the WAV comment "Recipe … Regenerate with: --recipe …", and the header and notices.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 08:14
+- **Card Completion Note:** Complete.
+- **Process Comments:** 2026-10-03 08:14 — None.
+
+#### 0010-PLAN-009 — Drum-aware mix: the drone dips and darkens while drums play
+
+- **Card Title:** Drum-aware mix: the drone dips and darkens while drums play
+- **Description:** The user found the drone too loud against the drums. `lib.rs` now runs two deterministic followers on the drum bus: presence (50 ms / 1.5 s) and punch (2 ms / 120 ms). The filtered drone (after the stutter-history tap) gets ×(1 − 0.45·presence)·(1 − 0.2·punch) and a −6 dB shelf above 2.5 kHz scaled by presence. Glitches and echo dip 15%. The drum bus was raised from 0.62 to 0.85. Seed 5 = 0 leaves presence exactly 0 (tested: `duck_gain == 1`). The duck shows in the pipeline view's FILTER box.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 08:14
+- **Card Completion Note:** Complete; awaiting the user's ears. Measured over 4 minutes: in full-break sections the drums average −10.5 dB against the drone's −13.1 dB (ducked 6.4 dB); in drum-free sections the drone is back to −7.1 dB.
+- **Process Comments:** 2026-10-03 08:14 — The first depths (−4 dB, drums at 0.62) still left the drone 1.4 dB above the drums, so both were raised.
+
+#### 0010-PLAN-010 — Drums v2: six kit families, cymbal choke and variation, punch
+
+- **Card Title:** Drums v2: six kit families, cymbal choke and variation, punch
+- **Description:** Requested: the cymbals sounded artificial (a constant wash), the drums lacked punch, and seeds should explore wider, more novel timbres while still feeling like drums.
+  - **Kit families** (new `engine/src/kits.rs`): seed 5 picks Acoustic break / FM metal / Modal (tuned to key and scale) / Digital crush / Noise sculpture / Sub & clicks, rotated so the canonical seed 168 is Acoustic. Each family has wide seeded ranges for voice pitches and decays, drive, sampler bits (8–14) and hold, source tempo (125–150 BPM, so +2 to +5 semitones), ride-or-hats 8ths and hat density.
+  - **Cymbals:** choke at the next cymbal hit (2 ms fade); per-hit ±3% detune; ring-modulated oscillator pairs; noise cut to ~30%, coloured by two random band-passes; brightness follows velocity; shorter rides.
+  - **Punch** (offline, at start-up): per-voice transient boost + drive (asymmetric on the snare), then a 4:1 bus compressor and an asymmetric soft clip.
+  - `drums.rs` now takes the source tempo per kit (`src16` / `rate` fields replace constants). `VoiceInfo` comes from the kit, so view 3's voice panel and the pipeline view's BREAK SYNTH / SAMPLER boxes describe the actual kit.
+  - 9 new Insights, and drum figures corrected (88 total).
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 08:14
+- **Card Completion Note:** Complete; **awaiting the user's ears** with `src/0010/0010-preview.wav` (default) and `src/0010/previews/kit-*.wav` (one per family). A new test checks that all six families produce different breaks and that the canonical seed is Acoustic. High-band (>5 kHz) crest factors: Acoustic 22 dB (transient, not a wash), Noise sculpture 13.8 → 17 dB after shortening its ride. Mix levels are consistent across kits (RMS ≈ −14.5 dB). New golden hash `0x1f12e097a350cae1`, native = WASM.
+- **Process Comments:** 2026-10-03 08:14 — The flooding came from the old ride: every 8th note, a 1.1 s decay, 75% white noise. Overlapping hits merged into a continuous band. Choke plus shorter, more tonal cymbals fixed it at the source rather than by filtering.
+
 #### 0010-IDEA-001 — Version codes, WAV metadata, seed roll key, remembered answers
 
-- **Card Title:** Version codes, WAV metadata, seed roll key, remembered answers
+- **Card Title:** Version codes, WAV metadata, seed roll key, remembered answers (codes later renamed "recipes", see 0010-PLAN-008)
 - **Description:** The user asked for all three offered UX ideas, plus WAV metadata:
   - **Version code:** `0010-LYD-3H-1000.9.1009.2026.168` (track, scale code, chord count + H/J pace, seeds 1–5), via `cli::version_code` / `parse_version_code` (case-insensitive, strict; round-trip unit test). It is shown in the player header (replacing the seed list) and in every Rendered / Played / Recorded notice. It is accepted as `--code` on both programs, and as a new optional setup question that, when valid, fills in scale, chords, pace and seeds and skips those questions.
   - **WAV metadata:** a `LIST/INFO` chunk before the audio data: INAM (the player title), IGNR "Glitch Ambient", ISFT (`GlitchAmbiToolkit vYYYYMMDD`, or `render-0010 (GlitchAmbiToolkit engine)`), and ICMT (the version code, key, scale, chords + bar split, pace, seeds, drums on/off, and "Regenerate with: --code …"). Nothing time-dependent, so identical renders stay byte-identical. Header sizes and offsets are now computed from the chunk.
