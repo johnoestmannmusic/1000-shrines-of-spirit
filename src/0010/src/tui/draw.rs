@@ -9,11 +9,11 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType};
 use ratatui::Frame;
-use shrine0009::cli::format_length;
-use shrine0009::drone::Algo;
-use shrine0009::glitch::Kind;
-use shrine0009::pattern::Mutation;
-use shrine0009::telemetry::Snapshot;
+use shrine0010::cli::format_length;
+use shrine0010::drone::Algo;
+use shrine0010::glitch::Kind;
+use shrine0010::pattern::Mutation;
+use shrine0010::telemetry::Snapshot;
 use std::f64::consts::TAU;
 
 const CYCLES: Rgb = (228, 214, 150);
@@ -114,6 +114,7 @@ pub fn header(ui: &Ui, buf: &mut Buffer, r: Rect) {
         Span::styled(" [tab]", fg(DIM)),
         tab("1 pipeline", ui.view == super::View::Pipeline),
         tab("2 engine", ui.view == super::View::Engine),
+        tab("3 rhythm", ui.view == super::View::Rhythm),
         Span::styled(" [space] pause [q] quit ", fg(DIM)),
     ]);
     let keys_w = (keys.width() as u16).min(r.width);
@@ -122,7 +123,7 @@ pub fn header(ui: &Ui, buf: &mut Buffer, r: Rect) {
     let mut spans = vec![
         Span::styled(format!(" {} ", ui.label), Style::new().fg(rgb((20, 20, 20))).bg(rgb(OUTPUT)).add_modifier(Modifier::BOLD)),
         Span::styled(format!(" {} ", super::setup::VERSION), fg(DIM)),
-        Span::styled(format!(" seeds {}·{}·{}·{} ", seeds.s1, seeds.s2, seeds.s3, seeds.s4), fg(TEXT)),
+        Span::styled(format!(" {} ", shrine0010::cli::version_code(seeds, ui.desc.settings)), fg(TEXT)),
     ];
     let (state, color) = if ui.quitting {
         ("■ fading out", GLITCH2)
@@ -168,6 +169,9 @@ fn meta(p: Panel) -> Meta {
         Panel::Reverb => ("8 · REVERB · 8-line FDN", REVERB),
         Panel::Output => ("9 · OUTPUT", OUTPUT),
         Panel::Flow => ("SIGNAL FLOW", OUTPUT),
+        Panel::Harmony => ("HARMONY · scale, key and progression · seed 1", HARMONY),
+        Panel::Break => ("BREAK CHOPPER · the sampled break, re-sequenced · seed 5", DRUMS),
+        Panel::Drums => ("DRUM VOICES · how each drum is synthesised", DRUMS),
         Panel::General => ("", TEXT),
     };
     Meta { title, color }
@@ -194,12 +198,15 @@ fn caption(ui: &Ui, p: Panel) -> String {
         ),
         Panel::Reverb => format!("Hadamard mix · T60 {:.0} s", d.reverb_decay),
         Panel::Output => "scope · stereo field · soft clip".into(),
+        Panel::Harmony => "lit keys = this chord · dim keys = the scale".into(),
+        Panel::Break => "→ play  ← reverse  ≡ roll  ↓ pitch down  ½ half-time".into(),
+        Panel::Drums => "flashes show each voice as it is hit".into(),
         _ => String::new(),
     }
 }
 
 /// Draws a panel's frame and returns its inner area.
-fn frame(ui: &Ui, f: &mut Frame, p: Panel, area: Rect, explaining: bool) -> Rect {
+pub(super) fn frame(ui: &Ui, f: &mut Frame, p: Panel, area: Rect, explaining: bool) -> Rect {
     let m = meta(p);
     let border = if explaining { fg(m.color) } else { fg(mix(FAINT, m.color, 0.25)) };
     let title_style = if explaining { fg(m.color).add_modifier(Modifier::BOLD) } else { fg(mix(DIM, m.color, 0.6)) };
@@ -246,7 +253,15 @@ fn spectrum(ui: &Ui, s: &Snapshot, buf: &mut Buffer, r: Rect) {
     let bars = r.height - 2;
     let (fmin, fmax) = (60.0f64, 16_000.0f64);
     let bin_hz = d.sample_rate as f64 / d.fft_size as f64;
-    let mags = &d.magnitudes;
+    // The current chord's frozen spectrum, blended into the next during a morph.
+    let pos = s.harmony;
+    let (ma, mb) = (&d.magnitudes[pos.chord], &d.magnitudes[pos.next]);
+    let x = pos.morph;
+    let mags: Vec<f64> = if x == 0.0 {
+        ma.clone()
+    } else {
+        ma.iter().zip(mb).map(|(a, b)| ((1.0 - x) * a * a + x * b * b).sqrt()).collect()
+    };
     let peak = mags.iter().cloned().fold(1e-12, f64::max);
     let col_freq = |c: f64| fmin * (fmax / fmin).powf(c / w as f64);
     let cutoff = s.drone_cutoff.max(1.0);
@@ -399,18 +414,33 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 
 fn chord(ui: &Ui, buf: &mut Buffer, r: Rect) {
     let d = &ui.desc;
+    let pos = ui.snap.as_ref().map(|s| s.harmony).unwrap_or_default();
+    let h = &d.harmony;
+    let chord = &h.chords[pos.chord];
+    let head = format!(
+        "chord {}/{} · degree {} · bar {}/{}{}",
+        pos.chord + 1,
+        h.chords.len(),
+        chord.degree + 1,
+        pos.bar + 1,
+        chord.bars,
+        if pos.morph > 0.0 { " · morphing" } else { "" }
+    );
+    put(buf, r, 0, 0, &head, fg(CHORD).add_modifier(Modifier::BOLD));
+    let r = Rect::new(r.x, r.y + 1, r.width, r.height.saturating_sub(1));
+    let notes = &chord.notes;
     // Spare rows explain why these waves are never heard directly.
-    let spare = r.height.saturating_sub(d.voicing.len() as u16 + 1);
+    let spare = r.height.saturating_sub(notes.len() as u16 + 1);
     if spare > 0 {
         let note = "Never heard directly: only their frozen spectrum (panel 1).";
         let lines = wrap(note, r.width as usize);
         for (i, line) in lines.iter().take(spare as usize).enumerate() {
-            put(buf, r, 0, d.voicing.len() as u16 + 1 + i as u16, line, fg(DIM));
+            put(buf, r, 0, notes.len() as u16 + 1 + i as u16, line, fg(DIM));
         }
     }
     let show_ratios = r.width >= 44;
     let level = level_frac(ui.levels.drone, 40.0);
-    for (i, (note, (algo, [r2, r3, i2, i3], _fb))) in d.voicing.iter().zip(&d.recipes).enumerate() {
+    for (i, (note, (algo, [r2, r3, i2, i3], _fb))) in notes.iter().zip(&d.recipes[pos.chord]).enumerate() {
         let y = i as u16;
         if y >= r.height {
             break;

@@ -1,0 +1,35 @@
+# 0010 workspace.
+#
+#   engine/  the music: zero dependencies, bit-exact native + WASM, plus the
+#            dependency-free `render-0010` WAV renderer.
+#   (root)   the `shrine-0010` app: play live in a TUI that visualises and
+#            explains the engine, render to WAV, or both. Its crates (audio
+#            device + terminal) only affect the app, never the sound.
+
+[workspace]
+members = ["engine"]
+resolver = "2"
+
+[package]
+name = "shrine-0010"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "0010 - an endless Glitch Ambient track: live TUI player and WAV renderer."
+publish = false
+default-run = "shrine-0010"
+
+[dependencies]
+shrine0010 = { package = "shrine-0010-engine", path = "engine" }
+cpal = "0.18"
+ratatui = "0.30"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+# Tests render tens of seconds of audio, so even dev builds are optimised.
+# (Optimisation level never changes results: Rust performs no fast-math or FMA contraction.)
+[profile.dev]
+opt-level = 2

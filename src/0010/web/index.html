@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>0010</title>
+<style>
+  :root {
+    --bg: #f4f3f0;
+    --fg: #1c1c1a;
+    --muted: #77756f;
+    --line: #c9c6bf;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0e0e0d; --fg: #e9e7e2; --muted: #8a877f; --line: #34332f; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    padding: 16px;
+  }
+  main { width: min(28rem, 100%); }
+  h1 { font-size: 3rem; font-weight: 400; letter-spacing: 0.08em; margin: 0 0 0.25rem; }
+  p { color: var(--muted); margin: 0 0 2rem; }
+  button {
+    font: inherit;
+    color: var(--fg);
+    background: none;
+    border: 1px solid var(--line);
+    padding: 0.7rem 1.6rem;
+    cursor: pointer;
+    min-width: 9rem;
+  }
+  button:hover:not(:disabled) { border-color: var(--fg); }
+  button:disabled { color: var(--muted); cursor: wait; }
+  #status { margin-top: 1.2rem; font-size: 0.85rem; min-height: 1.5em; }
+  #seeds { margin-top: 2.5rem; font-size: 0.8rem; color: var(--muted); word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <h1>0010</h1>
+  <p>An endless glitch ambient piece, generated live by the WASM build of a Rust program.</p>
+  <button id="play">Play</button>
+  <div id="status"></div>
+  <div id="seeds"></div>
+</main>
+<script type="module">
+  // Canonical seeds, the same as DEFAULT_SEEDS in src/lib.rs.
+  // Override with ?s1=…&s2=…&s3=…&s4=… (decimal or 0x hex) for alternate renditions.
+  // Seed 5 shapes the drums (0 = none). Settings: ?scale=1-12 (1 = Lydian), ?chords=1-4, ?pace=half|jungle.
+  const DEFAULT_SEEDS = ["1000", "9", "1009", "2026", "168"];
+  const num = (k, d, lo, hi) => {
+    const v = parseInt(params.get(k) ?? "", 10);
+    return Number.isFinite(v) && v >= lo && v <= hi ? v : d;
+  };
+  const params = new URLSearchParams(location.search);
+  const seeds = DEFAULT_SEEDS.map((d, i) => {
+    const v = params.get(`s${i + 1}`);
+    try {
+      return v === null ? d : BigInt.asUintN(64, BigInt(v)).toString();
+    } catch {
+      return d;
+    }
+  });
+  const settings = {
+    scale: num("scale", 1, 1, 12) - 1,
+    chords: num("chords", 3, 1, 4),
+    pace: params.get("pace") === "jungle" ? 1 : 0,
+  };
+  const custom = seeds.some((s, i) => s !== DEFAULT_SEEDS[i]) || settings.scale !== 0 || settings.chords !== 3 || settings.pace !== 0;
+  document.querySelector("#seeds").textContent =
+    `seeds ${seeds.join(" · ")}${custom ? " (alternate rendition)" : ""}`;
+
+  const button = document.querySelector("#play");
+  const status = document.querySelector("#status");
+  let ctx = null;
+  let gain = null;
+  let playing = false;
+
+  async function start() {
+    button.disabled = true;
+    status.textContent = "Freezing the chord…";
+    ctx = new AudioContext({ sampleRate: 48000, latencyHint: "playback" });
+    if (ctx.sampleRate !== 48000) {
+      status.textContent = `Note: browser is running at ${ctx.sampleRate} Hz and will resample.`;
+    }
+    const [wasm] = await Promise.all([
+      fetch("track.wasm").then((r) => {
+        if (!r.ok) throw new Error(`track.wasm: ${r.status}`);
+        return r.arrayBuffer();
+      }),
+      ctx.audioWorklet.addModule("worklet.js"),
+    ]);
+    const node = new AudioWorkletNode(ctx, "track-0010", {
+      numberOfInputs: 0,
+      outputChannelCount: [2],
+      processorOptions: { wasm, seeds, settings },
+    });
+    await new Promise((resolve) => (node.port.onmessage = resolve));
+    gain = new GainNode(ctx, { gain: 1 });
+    node.connect(gain).connect(ctx.destination);
+  }
+
+  button.addEventListener("click", async () => {
+    try {
+      if (!ctx) {
+        await start();
+      } else if (playing) {
+        // Fade, then suspend: the piece pauses where it is and resumes there.
+        gain.gain.setTargetAtTime(0, ctx.currentTime, 0.4);
+        await new Promise((r) => setTimeout(r, 1500));
+        await ctx.suspend();
+        playing = false;
+        button.textContent = "Play";
+        return;
+      } else {
+        gain.gain.cancelScheduledValues(ctx.currentTime);
+        gain.gain.setTargetAtTime(1, ctx.currentTime, 0.4);
+        await ctx.resume();
+      }
+      playing = true;
+      button.textContent = "Pause";
+      if (!status.textContent.startsWith("Note")) status.textContent = "";
+    } catch (e) {
+      status.textContent = `Could not start audio: ${e.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

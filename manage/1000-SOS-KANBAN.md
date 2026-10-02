@@ -10,6 +10,117 @@ Dates throughout this file include a time (HH:MM), not just a date, since multip
 
 ---
 
+## Project: 0010 — GlitchAmbiToolkit with Jungle Breaks (Rust/WASM)
+
+**Project Title:** 0010 — GlitchAmbiToolkit with Jungle Breaks (Rust/WASM)  
+**Project Description:** A copy of 0009 (`../src/0009/`, untouched apart from one header fix) extended with: fully synthesised jungle breakbeat drums (a seed-5-driven break, played at ~137 BPM by synthesised voices, "sampled" through a vintage-sampler chain, chopped into 32 slices and re-sequenced at 168 BPM with phrase-based arrangement; seed 5 = 0 means no drums); a choice of scale (12 options, Lydian default); 1–4 chords with weighted bar splits (32 / 20-12 / 16-12-4 / 14-10-4-4) at half-time or jungle pace; and seed-1-chosen keys and voicings, with spectral morphs between chords. Same guarantees as 0009: zero-dependency engine, bit-exact native/WASM, golden hash, observation-only TUI.  
+**Implementation Repository:** `../src/0010/`  
+**Plan:** `~/.claude/plans/in-sourcerepo-1000-shrines-of-spirit-src-dynamic-lantern.md`  
+**Board Last Updated:** 2026-10-03 07:40 by Claude  
+**Git workflow note:** No commits made; left to the user. No README (the user removed 0009's local README).  
+**Session status 2026-10-03 07:31** — Everything in the plan is built and verified. `cargo test --release --workspace` passes, and the WASM hash matches native (`0xd2b8263f0847c8a0`, provisional until the user has listened). A 5-minute default preview is at `src/0010/0010-preview.wav`. **Awaiting the user's listening check**, especially of drum authenticity, which is subjective; all drum constants are named and tunable in `engine/src/drums.rs`.
+
+### Ideas
+
+_None open._
+
+### Bugs
+
+_None currently open - see Completed for resolved bugs._
+
+### Planned Features
+
+_None pending._
+
+### Assigned
+
+_None currently assigned._
+
+### Completed
+
+#### 0010-IDEA-001 — Version codes, WAV metadata, seed roll key, remembered answers
+
+- **Card Title:** Version codes, WAV metadata, seed roll key, remembered answers
+- **Description:** The user asked for all three offered UX ideas, plus WAV metadata:
+  - **Version code:** `0010-LYD-3H-1000.9.1009.2026.168` (track, scale code, chord count + H/J pace, seeds 1–5), via `cli::version_code` / `parse_version_code` (case-insensitive, strict; round-trip unit test). It is shown in the player header (replacing the seed list) and in every Rendered / Played / Recorded notice. It is accepted as `--code` on both programs, and as a new optional setup question that, when valid, fills in scale, chords, pace and seeds and skips those questions.
+  - **WAV metadata:** a `LIST/INFO` chunk before the audio data: INAM (the player title), IGNR "Glitch Ambient", ISFT (`GlitchAmbiToolkit vYYYYMMDD`, or `render-0010 (GlitchAmbiToolkit engine)`), and ICMT (the version code, key, scale, chords + bar split, pace, seeds, drums on/off, and "Regenerate with: --code …"). Nothing time-dependent, so identical renders stay byte-identical. Header sizes and offsets are now computed from the chunk.
+  - **`r` key** on seed questions rolls a random seed (0–99,999 from the clock; seed 5 never rolls 0).
+  - **Remembered answers** (`src/state.rs`): code, title, file and length are saved on finishing setup to `$XDG_CONFIG_HOME/glitchambitoolkit/0010.txt` (`~/.config/…`; macOS Application Support; Windows %APPDATA%) and loaded as the next session's defaults (lists preselect them). Seed hints still show the canonical value. A missing or garbled file falls back to the canonical defaults.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 07:40
+- **Card Completion Note:** Complete. `ffprobe` shows title, genre, encoder and comment. Pseudo-terminal tests (with `XDG_CONFIG_HOME` pointed at a scratch folder, so the user's real file was untouched): a pasted code rendered `0010-DOR-2J-5.6.7.8.9`; the next session's defaults were the remembered ones; `r` rolled seed 1. A 15 s live play + record WAV is byte-identical to a render of the same code, metadata included. Golden hash unchanged (the audio didn't change).
+- **Process Comments:** 2026-10-03 07:40 — `cargo build` at the workspace root only builds the root package; `render-0010` (engine package) needs `--workspace`. That caught out the first metadata test.
+
+#### 0010-PLAN-001 — Copy 0009 → 0010 and rename
+
+- **Card Title:** Copy 0009 → 0010 and rename
+- **Description:** `rsync` of `src/0009/` without `target/` or WAVs; renamed packages (`shrine-0010`, `shrine-0010-engine`), the lib (`shrine0010`), the bins (`render-0010`), the label (`0010`) and every textual 0009.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 07:31
+- **Card Completion Note:** Complete; the copy reproduced 0009's golden hash exactly before any changes (parity check).
+- **Process Comments:** 2026-10-03 07:31 — None.
+
+#### 0010-PLAN-002 — Harmony: scales, seeded key, weighted progressions, spectral morphs
+
+- **Card Title:** Harmony: scales, seeded key, weighted progressions, spectral morphs
+- **Description:** New `engine/src/harmony.rs`: 12 scales, with seed 1 picking the key (rotated so the default seed is D). Chord 1 is on the tonic; later chords sit on weighted strong degrees. Voicings come from 6 scale-step shapes (the first four are exactly 0009's D-lydian voicings, so the default chord 1 is 0009's chord, with identical FM recipes thanks to the same random stream). Bar weights by chord count; half-time or jungle pace. The drone freezes one spectrum per chord and power-blends them during each chord's last bar. The bass glides to each chord's root; glitch pitch pools come from the scale and key (identical to 0009's lists for D lydian).
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 07:31
+- **Card Completion Note:** Complete. Tests: each setting changes the output (the test runs past the first chord change at 46 s, since before it every chord count is identical by design).
+- **Process Comments:** 2026-10-03 07:31 — Chord 1's voicing choice must stay the first draw from the drone's 0xD0 stream, so later chords use a separate 0xD7 stream; otherwise the default chord's FM recipes would differ from 0009's.
+
+#### 0010-PLAN-003 — Synthesised jungle breakbeat drums
+
+- **Card Title:** Synthesised jungle breakbeat drums
+- **Description:** New `engine/src/drums.rs`:
+  - **Voices:** a kick (pitch dive 170→48 Hz, a click, soft clip); a snare (182/331 Hz body + band-passed wires + crack); ghost snares; hats and ride (six squares at 808 ratios + band-passed noise wash; the ride adds a bell).
+  - **The break:** one of 3 patterns (Amen / Think / Apache-style), played at ~137 BPM with swing and ±1.2 ms timing, then sampled (saturation, 24 kHz S&H, 12-bit, LP 11 kHz, small room).
+  - **Chopping:** 32 slices played at 168 BPM (+3.5 semitones). Edits: re-order, reverse, roll, pitch down, half-time. Fills (snare rolls) on each phrase's last bar.
+  - **Arrangement:** each 4-bar phrase picks out / hats-only / half-time / full / rolls from a new `drums` LFO. The first 2 phrases are always out, then hats only.
+  - Plans are pure functions of seed 5 and the bar, so playback is block-independent. Declick fades only at jumps. Seed 5 = 0 turns the drums off (tested).
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 07:31
+- **Card Completion Note:** Complete; awaiting the user's ears. The arrangement balance was measured over 400 phrases: ~17% out, 14% hats, 15% half-time, 39% full, 15% rolls.
+- **Process Comments:** 2026-10-03 07:31 — The first arrangement was too relentless (3.5% out); the energy curve and thresholds were retuned. The first cymbals were pure metallic partials (horizontal lines in the spectrogram); band-passed noise was added for an acoustic-ride wash.
+
+#### 0010-PLAN-004 — Setup questions, flags, web parameters
+
+- **Card Title:** Setup questions, flags, web parameters
+- **Description:** The setup screen's list widget was generalised: mode → title → scale (12, with mood descriptions) → chords (1–4, showing the bar splits) → pace → seeds 1–5 (seed 5: "0 switches the drums off") → file / length. Flags `--scale --chords --pace --seed5` on both programs; plain-prompt equivalents in `cli::ask_settings`. WASM `sos_new` gains seed 5 + scale / chords / pace; the web player reads `?s5=&scale=&chords=&pace=`.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 07:31
+- **Card Completion Note:** Complete; a muted pseudo-terminal run with Dorian, 4 chords and jungle pace played cleanly and returned to the menu.
+- **Process Comments:** 2026-10-03 07:31 — None.
+
+#### 0010-PLAN-005 — Pipeline drum lane, Rhythm & Harmony view, shuffled Insights
+
+- **Card Title:** Pipeline drum lane, Rhythm & Harmony view, shuffled Insights
+- **Description:**
+  - **Pipeline view:** a 5th lane (seed 5 → BREAK SYNTH → SAMPLER → CHOPPER → DRUM BUS → OUT) with lettered hit particles (K S g h O R), plus a chord-progression strip with playhead and morph zones. Drum section changes and chord changes are logged in "What's changing".
+  - **New view 3, Rhythm & Harmony (`tui/rhythm.rs`):**
+    - a scale keyboard with the chord lit, the voicing and the progression strip;
+    - an arrangement phrase history;
+    - the break chopper (waveform, 32 labelled slices, playing slice, this bar's plan with op glyphs);
+    - drum voices (kick pitch-envelope plot, snare tone/noise spectrum, cymbal oscillator bank, sampler facts, per-voice hit flashes).
+  - **Insights:** relabelled "INSIGHTS"; 27 new entries and outdated ones corrected (79 in total); shown in a shuffled, non-repeating order seeded from the wall clock (display only).
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 07:31
+- **Card Completion Note:** Complete; checked with `--frame` text previews of all three views.
+- **Process Comments:** 2026-10-03 07:31 — The drum bus → reverb wire was dropped from the diagram because the bus shares the reverb's column (the wire would have to run backwards); the box and legend mention the send instead.
+
+#### 0010-BUG-001 — Long file names pushed the header's key hints off-screen (0009 and 0010)
+
+- **Card Title:** Long file names pushed the header's key hints off-screen (0009 and 0010)
+- **Symptom:** Reported by the user: when recording with a long output filename, the player's top bar overflowed and the key instructions disappeared past the window edge.
+- **Root cause:** The header was one left-to-right line; the REC span (full path) and the device name came before the key hints, so long values pushed them out.
+- **Fix:** The key hints are now right-aligned and drawn last in a reserved space; everything else is clipped to the remaining width. REC shows only the file's name, shortened with a leading "…" past 24 characters (the full path is still printed on leaving the player), and the device name is shortened past 28. Applied to both 0009 and 0010.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 07:31
+- **Card Completion Note:** Fixed; checked at 90–100 columns in both. 0009's sound and tests are unchanged. Not yet confirmed by the user.
+- **Process Comments:** 2026-10-03 07:31 — None.
+
+---
+
 ## Project: 0009 — Glitch Ambient (Rust/WASM)
 
 **Project Title:** 0009 — Glitch Ambient (Rust/WASM)  
