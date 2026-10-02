@@ -57,7 +57,7 @@ pub struct Seeds {
     pub s2: u64,
     pub s3: u64,
     pub s4: u64,
-    /// Drums; 0 switches them off.
+    /// Shapes the drum kit's sounds and break (the kit itself is a setting).
     pub s5: u64,
 }
 
@@ -76,7 +76,7 @@ pub struct Settings {
 }
 
 pub const DEFAULT_SETTINGS: Settings =
-    Settings { scale: Scale::Lydian, chords: 3, pace: Pace::HalfTime, kit: kits::Kit::Acoustic };
+    Settings { scale: Scale::Lydian, chords: 3, pace: Pace::HalfTime, kit: kits::Kit::SubClicks };
 
 // Sixteenth note ≈ 84 BPM, divisible by 1-4 for ratchets.
 const SIXTEENTH: u64 = 8568;
@@ -103,13 +103,13 @@ const DRUMS_SEND: f64 = 0.1;
 const PRESENCE_ATTACK: f64 = 0.05;
 const PRESENCE_RELEASE: f64 = 1.5;
 const PUNCH_ATTACK: f64 = 0.002;
-const PUNCH_RELEASE: f64 = 0.12;
+const PUNCH_RELEASE: f64 = 0.06;
 /// Drum-bus levels that count as "fully playing" / "a full hit".
 const PRESENCE_REF: f64 = 0.3;
 const PUNCH_REF: f64 = 0.6;
-/// Depths: drone level (≈ −5 dB), per-hit pump (≈ −2 dB), high shelf (−6 dB), glitch/echo dip.
+/// Depths: drone level (≈ −5 dB), per-hit pump (≈ −1 dB, quick), high shelf (−6 dB), glitch/echo dip.
 const DUCK_DEPTH: f64 = 0.45;
-const PUMP_DEPTH: f64 = 0.2;
+const PUMP_DEPTH: f64 = 0.12;
 const SHELF_DEPTH: f64 = 0.5;
 const SHELF_HZ: f64 = 2500.0;
 const GLITCH_DUCK: f64 = 0.15;
@@ -118,8 +118,8 @@ const MASTER_GAIN: f64 = 0.9;
 const FADE_IN_SECONDS: u64 = 10;
 
 /// Drone filter sweep range.
-const DRONE_CUTOFF_MIN: f64 = 400.0;
-const DRONE_CUTOFF_OCTAVES: f64 = 4.2;
+pub const DRONE_CUTOFF_MIN: f64 = 400.0;
+pub const DRONE_CUTOFF_OCTAVES: f64 = 4.2;
 
 /// Glitch layer 1; pitched kinds use the scale's notes from D6 up (for D lydian: 0009's list).
 pub fn layer1(h: &Harmony) -> LayerConfig {

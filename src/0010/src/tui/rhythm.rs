@@ -31,7 +31,7 @@ pub fn voice_color(v: Voice) -> Rgb {
     }
 }
 
-fn roman(degree: usize, scale_len: usize) -> String {
+pub fn roman(degree: usize, scale_len: usize) -> String {
     const R: [&str; 7] = ["I", "II", "III", "IV", "V", "VI", "VII"];
     if scale_len == 7 {
         R[degree % 7].to_string()
@@ -40,7 +40,7 @@ fn roman(degree: usize, scale_len: usize) -> String {
     }
 }
 
-fn op_glyph(op: Op) -> char {
+pub fn op_glyph(op: Op) -> char {
     match op {
         Op::Play => '→',
         Op::Reverse => '←',
@@ -50,7 +50,7 @@ fn op_glyph(op: Op) -> char {
     }
 }
 
-fn section_glyph(s: Section) -> char {
+pub fn section_glyph(s: Section) -> char {
     match s {
         Section::Out => '·',
         Section::HatsOnly => '▂',
@@ -172,8 +172,8 @@ fn harmony(ui: &Ui, buf: &mut Buffer, r: Rect) {
 
 fn arrangement(ui: &Ui, buf: &mut Buffer, r: Rect) {
     if !ui.desc.drums_on {
-        put(buf, r, 0, 0, "Drums are off (seed 5 = 0).", fg(TEXT));
-        put(buf, r, 0, 1, "Any other seed 5 brings in the jungle break.", fg(DIM));
+        put(buf, r, 0, 0, "Drums are off (kit: Off).", fg(TEXT));
+        put(buf, r, 0, 1, "Choose any other kit at setup to bring in the break.", fg(DIM));
         return;
     }
     let Some(s) = &ui.snap else { return };
@@ -226,7 +226,7 @@ fn arrangement(ui: &Ui, buf: &mut Buffer, r: Rect) {
 
 fn chopper(ui: &Ui, buf: &mut Buffer, r: Rect) {
     if !ui.desc.drums_on {
-        put(buf, r, 0, 0, "Drums are off (seed 5 = 0): nothing to chop.", fg(DIM));
+        put(buf, r, 0, 0, "Drums are off (kit: Off): nothing to chop.", fg(DIM));
         return;
     }
     if r.height < 5 || r.width < 40 {
@@ -308,7 +308,7 @@ fn chopper(ui: &Ui, buf: &mut Buffer, r: Rect) {
 
 fn voices(ui: &Ui, buf: &mut Buffer, r: Rect) {
     if !ui.desc.drums_on {
-        put(buf, r, 0, 0, "Drums are off (seed 5 = 0).", fg(DIM));
+        put(buf, r, 0, 0, "Drums are off (kit: Off).", fg(DIM));
         return;
     }
     if r.height < 4 || r.width < 60 {

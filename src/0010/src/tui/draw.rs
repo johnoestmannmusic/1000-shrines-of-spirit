@@ -115,16 +115,12 @@ pub fn header(ui: &Ui, buf: &mut Buffer, r: Rect) {
         tab("1 pipeline", ui.view == super::View::Pipeline),
         tab("2 engine", ui.view == super::View::Engine),
         tab("3 rhythm", ui.view == super::View::Rhythm),
+        tab("4 learn", ui.view == super::View::Learn),
         Span::styled(" [space] pause [q] quit ", fg(DIM)),
     ]);
     let keys_w = (keys.width() as u16).min(r.width);
 
     let seeds = ui.desc.seeds;
-    let mut spans = vec![
-        Span::styled(format!(" {} ", ui.label), Style::new().fg(rgb((20, 20, 20))).bg(rgb(OUTPUT)).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" {} ", super::setup::VERSION), fg(DIM)),
-        Span::styled(format!(" {} ", shrine0010::cli::recipe(seeds, ui.desc.settings)), fg(TEXT)),
-    ];
     let (state, color) = if ui.quitting {
         ("■ fading out", GLITCH2)
     } else if ui.paused {
@@ -132,7 +128,11 @@ pub fn header(ui: &Ui, buf: &mut Buffer, r: Rect) {
     } else {
         ("▶ playing", BASS)
     };
-    spans.push(Span::styled(format!(" {state} {} ", format_length(ui.elapsed())), fg(color)));
+    // Most important first: whatever doesn't fit is clipped from the right.
+    let mut spans = vec![
+        Span::styled(format!(" {} ", ui.label), Style::new().fg(rgb((20, 20, 20))).bg(rgb(OUTPUT)).add_modifier(Modifier::BOLD)),
+        Span::styled(format!(" {state} {} ", format_length(ui.elapsed())), fg(color)),
+    ];
     if let Some((path, secs)) = &ui.recording {
         // Just the file's name, shortened if long; the full path is printed when you leave.
         let name = std::path::Path::new(path).file_name().map_or(path.clone(), |n| n.to_string_lossy().into_owned());
@@ -144,6 +144,8 @@ pub fn header(ui: &Ui, buf: &mut Buffer, r: Rect) {
     if ui.underruns > 0 {
         spans.push(Span::styled(format!(" underruns {} ", ui.underruns), fg((255, 95, 85))));
     }
+    spans.push(Span::styled(format!(" {} ", shrine0010::cli::recipe(seeds, ui.desc.settings)), fg(TEXT)));
+    spans.push(Span::styled(format!(" {} ", super::setup::VERSION), fg(DIM)));
     let rate = if ui.device_rate == 48_000 { String::new() } else { format!(" (resampled from {} Hz)", ui.device_rate) };
     spans.push(Span::styled(format!(" {}{rate} ", shorten(&ui.device, 28)), fg(DIM)));
 

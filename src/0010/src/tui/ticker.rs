@@ -7,7 +7,8 @@
 //! short sessions see a different selection each time. The shuffle is seeded
 //! from the wall clock: it only affects the display, never the sound.
 
-use super::explain::EXPLAINERS;
+use super::explain::{fill, Vars, EXPLAINERS};
+use shrine0010::kits::Kit;
 use super::gfx::*;
 use super::Panel;
 use ratatui::buffer::Buffer;
@@ -23,6 +24,10 @@ const READ_CHARS_PER_SECOND: f64 = 15.0;
 const LABEL_W: u16 = 18;
 
 pub struct Ticker {
+    /// The insights that are true for this version (indices into EXPLAINERS),
+    /// and this version's values for their placeholders.
+    pool: Vec<usize>,
+    vars: Vars,
     /// Position in `order`.
     at: usize,
     /// A shuffled permutation of the explainers.
@@ -66,20 +71,23 @@ fn shuffled(n: usize, seed: &mut u64) -> Vec<usize> {
 }
 
 impl Ticker {
-    pub fn new() -> Self {
+    pub fn new(kit: Kit, vars: Vars) -> Self {
+        let pool: Vec<usize> =
+            EXPLAINERS.iter().enumerate().filter(|(_, (_, when, _))| when.applies(kit)).map(|(i, _)| i).collect();
         let mut shuffle = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
             .unwrap_or(0x9E37_79B9)
             | 1;
-        let order = shuffled(EXPLAINERS.len(), &mut shuffle);
+        let order: Vec<usize> = shuffled(pool.len(), &mut shuffle).into_iter().map(|i| pool[i]).collect();
         let index = order[0];
-        Ticker { at: 0, order, shuffle, index, page: 0, shown_at: 0.0, width: Cell::new(100), rows: Cell::new(2) }
+        Ticker { pool, vars, at: 0, order, shuffle, index, page: 0, shown_at: 0.0, width: Cell::new(100), rows: Cell::new(2) }
     }
 
     fn pages(&self) -> Vec<Vec<String>> {
         // Two columns spare for the "…" that marks a continued explainer.
-        let lines = wrap(EXPLAINERS[self.index].1, self.width.get().saturating_sub(2).max(20));
+        let text = fill(EXPLAINERS[self.index].2, &self.vars);
+        let lines = wrap(&text, self.width.get().saturating_sub(2).max(20));
         lines.chunks(self.rows.get().max(1)).map(|c| c.to_vec()).collect()
     }
 
@@ -106,7 +114,7 @@ impl Ticker {
         if self.at >= self.order.len() {
             // Everything has been shown once: reshuffle, avoiding an immediate repeat.
             let last = self.index;
-            self.order = shuffled(EXPLAINERS.len(), &mut self.shuffle);
+            self.order = shuffled(self.pool.len(), &mut self.shuffle).into_iter().map(|i| self.pool[i]).collect();
             if self.order[0] == last && self.order.len() > 1 {
                 self.order.swap(0, 1);
             }
@@ -146,7 +154,7 @@ impl Ticker {
         let page_no = self.page.min(pages.len() - 1);
         let page = &pages[page_no];
         let left = (1.0 - (t - self.shown_at) / Self::duration(page)).clamp(0.0, 1.0);
-        let counter = format!(" {:>2}/{} {} ←→", self.at + 1, EXPLAINERS.len(), hbar(5, left));
+        let counter = format!(" {:>2}/{} {} ←→", self.at + 1, self.order.len(), hbar(5, left));
         let row = if r.height > 1 { 1 } else { 0 };
         if r.height > 1 {
             put(buf, r, 0, row, &format!("{counter:<w$}", w = LABEL_W as usize), soft);

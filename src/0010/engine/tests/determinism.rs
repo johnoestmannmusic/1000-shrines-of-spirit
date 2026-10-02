@@ -33,7 +33,7 @@ const SECONDS: usize = 30;
 
 /// The sound of the canonical track. If this changes, the music changed:
 /// only update it deliberately, as a new version of the piece.
-const GOLDEN_HASH: u64 = 0x1f12e097a350cae1;
+const GOLDEN_HASH: u64 = 0x2c58bac59719fe83;
 
 #[test]
 fn golden_hash() {
@@ -85,11 +85,12 @@ fn each_setting_changes_the_output() {
     }
 }
 
-/// Seed 5 = 0 switches the drums off: no drum energy, ever, and the drone
-/// is never ducked to make room for them.
+/// The "Off" kit switches the drums off: no drum energy, ever, and the
+/// drone is never ducked to make room for them.
 #[test]
-fn drum_seed_zero_is_silent_drums() {
-    let mut track = Track::new(Seeds { s5: 0, ..DEFAULT_SEEDS }, DEFAULT_SETTINGS);
+fn kit_off_is_silent_drums() {
+    let off = Settings { kit: shrine0010::kits::Kit::Off, ..DEFAULT_SETTINGS };
+    let mut track = Track::new(DEFAULT_SEEDS, off);
     assert!(!track.describe().drums_on);
     let mut buf = vec![0f32; 48_000 * 2];
     for _ in 0..60 {
@@ -101,13 +102,27 @@ fn drum_seed_zero_is_silent_drums() {
     }
 }
 
+/// Seed 5 = 0 is an ordinary seed: with a kit chosen, the drums play.
+#[test]
+fn drum_seed_zero_still_plays() {
+    let mut track = Track::new(Seeds { s5: 0, ..DEFAULT_SEEDS }, DEFAULT_SETTINGS);
+    assert!(track.describe().drums_on);
+    let mut buf = vec![0f32; 48_000 * 2];
+    let mut hits = 0;
+    for _ in 0..40 {
+        track.render(&mut buf);
+        hits = track.snapshot().drum_hit_count;
+    }
+    assert!(hits > 0);
+}
+
 /// Each of the six kit families makes a different break, and seed 5 varies
 /// the break within a kit.
 #[test]
 fn every_kit_family_sounds_different() {
     use shrine0010::kits::KITS;
     let mut seen = Vec::new();
-    for kit in KITS {
+    for kit in KITS.into_iter().filter(|k| *k != shrine0010::kits::Kit::Off) {
         let d = Track::new(DEFAULT_SEEDS, Settings { kit, ..DEFAULT_SETTINGS }).describe();
         assert_eq!(d.drum_voices.kit, kit.name());
         assert!(!seen.contains(&d.break_overview), "{} repeats another kit's break", kit.name());

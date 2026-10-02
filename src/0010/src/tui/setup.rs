@@ -275,7 +275,7 @@ impl Setup {
             Step::Pace => ("Chord pace".into(), list_hint),
             Step::Kit => (
                 "Drum kit".into(),
-                "The next seed shapes this kit's sounds and its break; seed 0 leaves the drums out.".into(),
+                "The next seed shapes this kit's sounds and its break. Choose Off for no drums.".into(),
             ),
             Step::Label => (
                 "Title shown in the player".into(),
@@ -287,7 +287,7 @@ impl Setup {
                     format!("Seed {}: shapes {}", i + 1, SEED_ROLE[i]),
                     format!(
                         "Decimal or 0x hex · r rolls a random seed · canonical: {canonical}{}",
-                        if i == 4 { " · 0 = no drums" } else { "" }
+                        ""
                     ),
                 )
             }
@@ -309,6 +309,10 @@ impl Setup {
             Step::Chords => Some(Step::Pace),
             Step::Pace => Some(Step::Seed(0)),
             Step::Seed(3) => Some(Step::Kit),
+            // No drums: nothing for seed 5 to shape.
+            Step::Kit if shrine0010::kits::KITS[self.sel[4]] == shrine0010::kits::Kit::Off => {
+                (!play_only).then_some(Step::File)
+            }
             Step::Kit => Some(Step::Seed(4)),
             Step::Seed(i) if i < 4 => Some(Step::Seed(i + 1)),
             Step::Seed(_) => (!play_only).then_some(Step::File),

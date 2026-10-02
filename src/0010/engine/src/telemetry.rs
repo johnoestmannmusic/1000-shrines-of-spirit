@@ -45,6 +45,9 @@ pub struct Description {
     pub slice_voices: Vec<Option<Voice>>,
     /// The drum kit family and how each voice is made.
     pub drum_voices: crate::drums::VoiceInfo,
+    /// The drum section of each of the first 128 four-bar phrases (all "out"
+    /// when the kit is Off): the arrangement, known in advance.
+    pub sections: Vec<crate::drums::Section>,
     pub fft_size: usize,
     pub hop: usize,
     /// Per glitch layer: (steps, step length in samples).
@@ -162,6 +165,15 @@ impl Track {
             break_overview: self.drums.overview(512),
             slice_voices: self.drums.slice_voices(),
             drum_voices: self.drums.voice_info(),
+            sections: (0..128u64)
+                .map(|p| {
+                    if self.drums.enabled() {
+                        self.drums.plan(p * crate::drums::PHRASE_BARS, &self.mods).section
+                    } else {
+                        crate::drums::Section::Out
+                    }
+                })
+                .collect(),
             fft_size: N,
             hop: HOP,
             layers: [

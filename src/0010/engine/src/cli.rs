@@ -145,11 +145,12 @@ pub fn parse_recipe(code: &str) -> Option<(Seeds, Settings)> {
         return None;
     }
     let seeds = Seeds { s1: seeds[0], s2: seeds[1], s3: seeds[2], s4: seeds[3], s5: seeds[4] };
-    let kit = kit.unwrap_or_else(|| crate::kits::legacy_kit_for(seeds.s5));
+    // Older recipes: seed 5 picked the kit, and 0 meant no drums.
+    let kit = kit.unwrap_or_else(|| if seeds.s5 == 0 { Kit::Off } else { crate::kits::legacy_kit_for(seeds.s5) });
     Some((seeds, Settings { scale, chords, pace, kit }))
 }
 
-/// A kit by number (1-6), code (e.g. FMM) or (the start of) its name.
+/// A kit by number (1-11), code (e.g. FMM) or (the start of) its name.
 pub fn parse_kit(s: &str) -> Option<Kit> {
     let s = s.trim();
     if let Ok(n) = s.parse::<usize>() {
@@ -193,7 +194,7 @@ pub fn ask_settings(input: &mut impl BufRead) -> Settings {
     for (i, k) in KITS.iter().enumerate() {
         println!("  {}) {:<16} {}", i + 1, k.name(), k.blurb());
     }
-    let kit = ask_until(input, "Drum kit (seed 5 shapes it)", "1", "Enter 1-6 or a kit name.", parse_kit);
+    let kit = ask_until(input, "Drum kit (seed 5 shapes it)", "1", "Enter 1-11, a code or a kit name (11 = Off).", parse_kit);
     println!();
     Settings { scale, chords, pace, kit }
 }
@@ -210,7 +211,7 @@ pub fn ask_seeds(input: &mut impl BufRead) -> Seeds {
         s3: seed(3, DEFAULT_SEEDS.s3),
         s4: seed(4, DEFAULT_SEEDS.s4),
         s5: {
-            println!("  (seed 5 shapes the drums; 0 = no drums)");
+            println!("  (seed 5 shapes the drum kit's sounds and break)");
             seed(5, DEFAULT_SEEDS.s5)
         },
     };
@@ -300,7 +301,7 @@ pub fn wav_info(title: &str, software: &str, seeds: Seeds, settings: Settings) -
     let code = recipe(seeds, settings);
     let key = crate::harmony::key_name(crate::harmony::key_for(seeds.s1));
     let pace = if settings.pace == Pace::Jungle { "jungle" } else { "half-time" };
-    let drums = if seeds.s5 == 0 { "off".to_string() } else { format!("{} kit", settings.kit.name()) };
+    let drums = if settings.kit == Kit::Off { "off".to_string() } else { format!("{} kit", settings.kit.name()) };
     WavInfo {
         title: title.to_string(),
         software: software.to_string(),
@@ -472,10 +473,15 @@ mod tests {
 
     #[test]
     fn recipes_round_trip() {
-        assert_eq!(recipe(DEFAULT_SEEDS, DEFAULT_SETTINGS), "0010-LYD-3H-ACO-1000.9.1009.2026.168");
+        assert_eq!(recipe(DEFAULT_SEEDS, DEFAULT_SETTINGS), "0010-LYD-3H-SUB-1000.9.1009.2026.168");
         // Older recipes without a kit code still read, with the kit seed 5 used to pick.
         let (seeds, settings) = parse_recipe("0010-LYD-3H-1000.9.1009.2026.168").unwrap();
-        assert_eq!((seeds, settings), (DEFAULT_SEEDS, DEFAULT_SETTINGS));
+        assert_eq!((seeds, settings), (DEFAULT_SEEDS, Settings { kit: Kit::Acoustic, ..DEFAULT_SETTINGS }));
+        // …and seed 5 = 0 meant "no drums".
+        assert_eq!(parse_recipe("0010-LYD-3H-1.2.3.4.0").unwrap().1.kit, Kit::Off);
+        // New recipes say OFF explicitly, and seed 5 = 0 is an ordinary seed.
+        assert_eq!(parse_recipe("0010-LYD-3H-OFF-1.2.3.4.5").unwrap().1.kit, Kit::Off);
+        assert_eq!(parse_recipe("0010-LYD-3H-SUB-1.2.3.4.0").unwrap().1.kit, Kit::SubClicks);
         for (i, scale) in SCALES.iter().enumerate() {
             let settings = Settings {
                 scale: *scale,

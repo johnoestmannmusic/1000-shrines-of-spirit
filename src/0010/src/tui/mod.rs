@@ -9,6 +9,7 @@
 mod draw;
 mod explain;
 mod gfx;
+mod learn;
 mod pipeline;
 mod rhythm;
 pub mod setup;
@@ -50,6 +51,7 @@ pub enum View {
     Pipeline,
     Engine,
     Rhythm,
+    Learn,
 }
 
 /// Recent output frames kept for the oscilloscope.
@@ -99,6 +101,14 @@ pub struct Ui {
     /// Drum hits: flash per voice (K S g h O R) and the last seen count.
     pub drum_flash: [f64; 6],
     last_drum_hits: u64,
+    /// The Learn view: chosen lesson, and when it was last chosen or advanced.
+    pub lesson: usize,
+    pub lesson_since: f64,
+    /// (drum level, drone duck gain) per block, for the "making room" lesson.
+    pub duck_history: VecDeque<(f64, f64)>,
+    /// The slow cycles, rebuilt here so the Learn view can draw the future
+    /// (they are a pure function of the clock).
+    pub mods: shrine0010::modulate::Mods,
     /// (phrase, section) for recent phrases, oldest first.
     pub sections: VecDeque<(u64, shrine0010::drums::Section)>,
     last_mutation: [Option<u64>; 2],
@@ -120,6 +130,16 @@ impl Ui {
     fn new(desc: Description, device: String, device_rate: u32, recording: Option<(String, f64)>, label: String) -> Self {
         let (s1, s2) = (desc.layers[0].0, desc.layers[1].0);
         let pipe = pipeline::Pipeline::new(desc.drums_on);
+        let mods = shrine0010::modulate::Mods::new(desc.seeds.s1);
+        let kit = desc.settings.kit;
+        let n = desc.harmony.chords.len();
+        let vars = explain::Vars {
+            kit: kit.name().to_string(),
+            key: shrine0010::harmony::key_name(desc.harmony.key).to_string(),
+            scale: desc.harmony.scale.name().to_string(),
+            chords: format!("{n} chord{}", if n == 1 { "" } else { "s" }),
+            recipe: shrine0010::cli::recipe(desc.seeds, desc.settings),
+        };
         Ui {
             label,
             view: View::Pipeline,
@@ -139,6 +159,10 @@ impl Ui {
             drum_flash: [0.0; 6],
             last_drum_hits: 0,
             sections: VecDeque::new(),
+            lesson: 0,
+            lesson_since: 0.0,
+            duck_history: VecDeque::new(),
+            mods,
             last_mutation: [None; 2],
             last_audible: [None; 2],
             last_update: Instant::now(),
@@ -150,7 +174,7 @@ impl Ui {
             device,
             device_rate,
             underruns: 0,
-            ticker: ticker::Ticker::new(),
+            ticker: ticker::Ticker::new(kit, vars),
         }
     }
 
@@ -215,6 +239,11 @@ impl Ui {
         for f in self.drum_flash.iter_mut() {
             *f *= (-dt * 9.0).exp();
         }
+        // The Learn view moves on by itself after a while without a keypress.
+        if self.view == View::Learn && self.t - self.lesson_since > learn::AUTO_ADVANCE {
+            self.lesson = (self.lesson + 1) % learn::LESSONS.len();
+            self.lesson_since = self.t;
+        }
         if !self.paused {
             self.frame_age += dt;
             let sr = self.desc.sample_rate as f64;
@@ -249,6 +278,10 @@ impl Ui {
         if self.echo_history.len() >= ECHO_HISTORY {
             self.echo_history.pop_front();
         }
+        if self.duck_history.len() >= ECHO_HISTORY {
+            self.duck_history.pop_front();
+        }
+        self.duck_history.push_back((m.drums, s.duck_gain));
         self.echo_history.push_back((m.echo_l, m.echo_r));
         for frame in p.samples.chunks_exact(2) {
             if self.scope.len() >= SCOPE_FRAMES {
@@ -373,6 +406,7 @@ impl Ui {
             View::Pipeline => pipeline::draw(self, f, main, explaining),
             View::Engine => self.draw_engine(f, main, explaining),
             View::Rhythm => rhythm::draw(self, f, main, explaining),
+            View::Learn => learn::draw(self, f, main, explaining),
         }
     }
 
@@ -415,15 +449,31 @@ impl Ui {
                 self.view = match self.view {
                     View::Pipeline => View::Engine,
                     View::Engine => View::Rhythm,
-                    View::Rhythm => View::Pipeline,
+                    View::Rhythm => View::Learn,
+                    View::Learn => View::Pipeline,
                 };
+                self.lesson_since = self.t;
             }
             KeyCode::BackTab => {
                 self.view = match self.view {
-                    View::Pipeline => View::Rhythm,
+                    View::Pipeline => View::Learn,
                     View::Engine => View::Pipeline,
                     View::Rhythm => View::Engine,
+                    View::Learn => View::Rhythm,
                 };
+                self.lesson_since = self.t;
+            }
+            KeyCode::Char('4') => {
+                self.view = View::Learn;
+                self.lesson_since = self.t;
+            }
+            KeyCode::Up | KeyCode::Char('[') if self.view == View::Learn => {
+                self.lesson = (self.lesson + learn::LESSONS.len() - 1) % learn::LESSONS.len();
+                self.lesson_since = self.t;
+            }
+            KeyCode::Down | KeyCode::Char(']') if self.view == View::Learn => {
+                self.lesson = (self.lesson + 1) % learn::LESSONS.len();
+                self.lesson_since = self.t;
             }
             KeyCode::Char('1') => self.view = View::Pipeline,
             KeyCode::Char('2') => self.view = View::Engine,
@@ -570,7 +620,8 @@ pub fn print_frame(seeds: Seeds, settings: Settings, seconds: f64, width: u16, h
     for line in setup::preview(width, height) {
         println!("{line}");
     }
-    for view in [View::Pipeline, View::Engine, View::Rhythm] {
+    for (view, lesson) in [(View::Pipeline, 0), (View::Engine, 0), (View::Rhythm, 0), (View::Learn, 0), (View::Learn, 4), (View::Learn, 6)] {
+        ui.lesson = lesson;
         ui.view = view;
         let mut terminal = ratatui::Terminal::new(TestBackend::new(width, height)).map_err(|e| e.to_string())?;
         // Draw twice: the first draw measures the wires the particles travel along.

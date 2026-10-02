@@ -12,7 +12,7 @@
 //!
 //! Every bar's slice plan is a pure function of seed 5, the bar number and
 //! the slow LFOs, so playback never depends on block size or history.
-//! Seed 5 = 0 switches the drums off.
+//! The kit "Off" switches the drums off.
 
 use crate::filter::{OnePole, Svf};
 use crate::harmony::Harmony;
@@ -157,7 +157,7 @@ impl Drums {
         let params = KitParams::new(seed, kit, harmony);
         let src16 = (60.0 / params.source_bpm / 4.0 * SR).round() as usize;
         let mut d = Drums {
-            enabled: seed != 0,
+            enabled: kit != crate::kits::Kit::Off,
             seed,
             rate: src16 as f64 / SIXTEENTH as f64,
             src16,
@@ -238,7 +238,7 @@ impl Drums {
         self.hits = hits.iter().map(|(p, v, _)| (*p, *v)).collect();
 
         // Punch: compress and soft-clip the whole break, as if bussed through hardware.
-        kits::punch_bus(&mut buf);
+        kits::punch_bus(&mut buf, p.punch);
 
         // The sampler: saturation, sample-and-hold, bit depth, a lowpass, a small room.
         let peak = buf.iter().fold(1e-9f64, |a, x| a.max(x.abs()));

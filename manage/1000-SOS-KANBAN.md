@@ -16,7 +16,7 @@ Dates throughout this file include a time (HH:MM), not just a date, since multip
 **Project Description:** A copy of 0009 (`../src/0009/`, untouched apart from one header fix) extended with: fully synthesised jungle breakbeat drums (a seed-5-driven break, played at ~137 BPM by synthesised voices, "sampled" through a vintage-sampler chain, chopped into 32 slices and re-sequenced at 168 BPM with phrase-based arrangement; seed 5 = 0 means no drums); a choice of scale (12 options, Lydian default); 1–4 chords with weighted bar splits (32 / 20-12 / 16-12-4 / 14-10-4-4) at half-time or jungle pace; and seed-1-chosen keys and voicings, with spectral morphs between chords. Same guarantees as 0009: zero-dependency engine, bit-exact native/WASM, golden hash, observation-only TUI.  
 **Implementation Repository:** `../src/0010/`  
 **Plan:** `~/.claude/plans/in-sourcerepo-1000-shrines-of-spirit-src-dynamic-lantern.md`  
-**Board Last Updated:** 2026-10-03 08:30 by Claude  
+**Board Last Updated:** 2026-10-03 09:09 by Claude  
 **Git workflow note:** No commits made; left to the user. No README (the user removed 0009's local README).  
 **Session status 2026-10-03 07:31** — Everything in the plan is built and verified. `cargo test --release --workspace` passes, and the WASM hash matches native (`0xd2b8263f0847c8a0`, provisional until the user has listened). A 5-minute default preview is at `src/0010/0010-preview.wav`. **Awaiting the user's listening check**, especially of drum authenticity, which is subjective; all drum constants are named and tunable in `engine/src/drums.rs`.
 
@@ -37,6 +37,55 @@ _None pending._
 _None currently assigned._
 
 ### Completed
+
+#### 0010-PLAN-013 — Context-aware Insights, Learn view (4), explicit "Off" kit
+
+- **Card Title:** Context-aware Insights, Learn view (4), explicit "Off" kit
+- **Description:** User feedback, three parts:
+  - **Insights mentioned kits that weren't playing.** Each entry now carries a `When` condition (Always / Kit(k) / Drums / NoDrums / LightKit / HeavyKit). The ticker shuffles only the entries that apply to this version, and `{kit} {key} {scale} {chords} {recipe}` placeholders are filled with live values (e.g. the recipe Insight shows the actual recipe). Version-specific claims were audited: the punch/grit entry → heavy kits only; the per-hit metal detune → Acoustic only; drum mixing → Drums only; a new NoDrums entry. Unit tests check that no other kit's entry can show, nothing drum-related shows with Off, and every placeholder fills.
+  - **New view 4, Learn** (`src/tui/learn.rs`): 8 lessons, each with a live visualisation of this version's data, "How it's made here" and a tool-agnostic "Recreate it" checklist with this version's real values:
+    - **The score:** 5-lane timeline of the next 8 min (chords, drum sections, filter, glitch densities), computed ahead from the pure `Mods` and the harmony schedule.
+    - **The chord:** piano roll + 3-op FM wiring and live waveform.
+    - **Freezing:** a waveform moment → frozen spectrum with phase glints.
+    - **Slow motion:** filter curve over the next 6 min, with chord changes marked.
+    - **Glitch loops:** 7- and 11-step rings with clock hands and a realignment countdown (154 sixteenths).
+    - **Space:** echo bounces + the reverb's 18 s decay curve.
+    - **The break:** pattern → sampler → this bar's chop → upcoming phrases.
+    - **Making room:** drum level vs the drone's ducked gain.
+    - Controls: ↑/↓ or [ ] choose a lesson; it auto-advances after 25 s; the ◆ marks the lesson the current Insight is about.
+    - Engine support (read-only): `Description.sections` (128 phrases); `DRONE_CUTOFF_*` made public.
+  - **Explicit "Off" kit:** `Kit::Off` (code `OFF`, listed last). Drums are enabled ⇔ kit ≠ Off, so seed 5 = 0 is now an ordinary seed. Old kit-less recipes with seed 5 = 0 still map to Off. Setup skips the seed-5 question when Off is chosen. All "seed 5 = 0" wording replaced.
+  - **Header:** reordered so the state and time come first (they were being clipped with 4 tabs).
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 09:09
+- **Card Completion Note:** Complete; awaiting the user's look.
+  - Golden hash unchanged (`0x2c58bac59719fe83`), WASM matches; engine tests cover Off, seed-0-plays and legacy mapping.
+  - Pseudo-terminal: setup with Off skipped seed 5 and played `…-OFF-…` (remembered); the Learn view's `]`/`[` switch lessons; a Glass pings live recording is byte-identical to its render.
+- **Process Comments:** 2026-10-03 09:09 — In the scripted pseudo-terminal, arrow-key escape sequences can arrive split and be read as Esc (which quits playback), so lesson switching was verified with `[`/`]`. Real terminals deliver arrows whole.
+
+#### 0010-PLAN-012 — Four light glitch kits; Sub & clicks default; shorter sub kick; lighter pump
+
+- **Card Title:** Four light glitch kits; Sub & clicks default; shorter sub kick; lighter pump
+- **Description:** The user loves Sub & clicks and wants the program to lean into minimal, light, digital / glitch drums like the glitch-artifact sounds, not harsh resonant ones.
+  - **New kits**, built from the glitch layers' palette, with seeded ranges:
+    - **Micro blips** `MIC`: 50–80 ms sine thumps, crushed FM-blip snares, noise-tick hats.
+    - **Glass pings** `GLS`: soft bumps; scale-tuned 1 : 2.756 bell snares and hats.
+    - **Data dust** `DST`: sine tock + impulse, crackle-burst snares, single-sample dust hats.
+    - **Pulse code** `PCM`: square beeps, two-tone dropout buzz, 1–2-sample polarity clicks.
+  - **Order and default:** `KITS` reordered with the light kits first. **Sub & clicks is the new default** (the user chose to keep the older kits further down). `LEGACY_KITS` freezes the original order, so old kit-less recipes still map to the same kit.
+  - **Lighter processing:** `KitParams.punch` (light kits 0.2–0.3, older 1.0) scales the transient boost and drive and blends the bus compressor / soft clip. Light kits use a clean 14-bit sampler, mostly hats on the 8ths and lower hat density.
+  - **Sub & clicks kick** decay 0.7–1.1 s → 0.28–0.45 s (drop 0.04–0.07 s).
+  - **Ducking pump:** release 0.12 → 0.06 s, depth 0.2 → 0.12, so the drone's per-hit dip lets go quickly.
+  - 7 new Insights (94 total); the web takes `?kit=1-10`.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 08:46
+- **Card Completion Note:** Complete; **awaiting the user's ears** with `src/0010/0010-preview.wav` (default, Sub & clicks) and `src/0010/previews/kit-{SUB,MIC,GLS,DST,PCM,ACO}.wav` (2 min each).
+  - The Sub & clicks kick is now below −40 dB at 256 ms.
+  - Drums-only spectrograms show short, sparse hits with silence between them for all five light kits.
+  - Full-mix levels are consistent (light kits ≈ −15.6 dB RMS vs −14.3 dB for Sub & clicks / Acoustic).
+  - New golden hash `0x2c58bac59719fe83` (because the default kit changed); WASM matches.
+  - The 10-kit distinctness test passes; a Micro blips live recording is byte-identical to its render.
+- **Process Comments:** 2026-10-03 08:46 — Reordering `KITS` would have silently changed which kit old kit-less recipes play (`legacy_kit_for` indexed into it), hence the separate frozen `LEGACY_KITS`; the recipe unit test checks that the old canonical recipe still maps to Acoustic.
 
 #### 0010-PLAN-011 — Drum kit chosen at setup; seed 5 shapes it; kit code in the recipe
 

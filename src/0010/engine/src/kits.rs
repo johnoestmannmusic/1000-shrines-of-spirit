@@ -23,11 +23,37 @@ pub enum Kit {
     Crush,
     /// Filtered noise only: resonant sweeps and pings.
     NoiseSculpt,
-    /// Deep long sine kicks and tiny clicks: sparse and airy.
+    /// Deep short sine kicks and tiny clicks: sparse and airy.
     SubClicks,
+    /// Glitch blips: tiny sine thumps, crushed FM blips, noise ticks.
+    MicroBlips,
+    /// Bell pings tuned to the scale, soft round kicks.
+    GlassPings,
+    /// Vinyl-dust crackle and single-sample clicks.
+    DataDust,
+    /// Square beeps and dropout buzzes, like a modem.
+    PulseCode,
+    /// No drums at all: pure ambient.
+    Off,
 }
 
-pub const KITS: [Kit; 6] = [Kit::Acoustic, Kit::FmMetal, Kit::Modal, Kit::Crush, Kit::NoiseSculpt, Kit::SubClicks];
+/// In setup order: the light, minimal kits first.
+pub const KITS: [Kit; 11] = [
+    Kit::SubClicks,
+    Kit::MicroBlips,
+    Kit::GlassPings,
+    Kit::DataDust,
+    Kit::PulseCode,
+    Kit::Acoustic,
+    Kit::FmMetal,
+    Kit::Modal,
+    Kit::Crush,
+    Kit::NoiseSculpt,
+    Kit::Off,
+];
+
+/// The original order, frozen: old recipes without a kit code map seed 5 through it.
+const LEGACY_KITS: [Kit; 6] = [Kit::Acoustic, Kit::FmMetal, Kit::Modal, Kit::Crush, Kit::NoiseSculpt, Kit::SubClicks];
 
 impl Kit {
     /// Three-letter code used in recipes.
@@ -39,7 +65,17 @@ impl Kit {
             Kit::Crush => "CRU",
             Kit::NoiseSculpt => "NOI",
             Kit::SubClicks => "SUB",
+            Kit::MicroBlips => "MIC",
+            Kit::GlassPings => "GLS",
+            Kit::DataDust => "DST",
+            Kit::PulseCode => "PCM",
+            Kit::Off => "OFF",
         }
+    }
+
+    /// The light, minimal kits (gentle processing, short sounds).
+    pub fn is_light(self) -> bool {
+        matches!(self, Kit::SubClicks | Kit::MicroBlips | Kit::GlassPings | Kit::DataDust | Kit::PulseCode)
     }
 
     pub fn from_code(code: &str) -> Option<Kit> {
@@ -58,7 +94,12 @@ impl Kit {
             Kit::Modal => "resonant drums tuned to the key and scale",
             Kit::Crush => "crushed to a few bits, 1-bit pulse hats",
             Kit::NoiseSculpt => "resonant noise sweeps and pings",
-            Kit::SubClicks => "deep long sine kicks and tiny clicks",
+            Kit::SubClicks => "deep short sine kicks and tiny clicks",
+            Kit::MicroBlips => "tiny thumps, crushed FM blips, noise ticks",
+            Kit::GlassPings => "bell pings tuned to the scale, soft kicks",
+            Kit::DataDust => "vinyl-dust crackle and single-sample clicks",
+            Kit::PulseCode => "square beeps and dropout buzzes",
+            Kit::Off => "no drums: pure ambient",
         }
     }
 
@@ -70,6 +111,11 @@ impl Kit {
             Kit::Crush => "Digital crush",
             Kit::NoiseSculpt => "Noise sculpture",
             Kit::SubClicks => "Sub & clicks",
+            Kit::MicroBlips => "Micro blips",
+            Kit::GlassPings => "Glass pings",
+            Kit::DataDust => "Data dust",
+            Kit::PulseCode => "Pulse code",
+            Kit::Off => "Off",
         }
     }
 }
@@ -108,6 +154,9 @@ pub struct KitParams {
     /// 8ths on the ride (else closed hats), and how many off-beat hats.
     pub ride_on_8ths: bool,
     pub hat_density: f64,
+    /// How much of the punch chain (transient boost, drive, bus compression)
+    /// to use: light kits keep only a touch of it.
+    pub punch: f64,
 }
 
 /// The classic 808-style metallic oscillator bank (Hz).
@@ -116,8 +165,9 @@ const METAL: [f64; 6] = [205.3, 304.4, 369.6, 522.7, 540.0, 800.0];
 /// How seed 5 picked the kit before kits were chosen at setup. Only used to
 /// read older recipes (without a kit code) so they still sound the same.
 pub fn legacy_kit_for(seed: u64) -> Kit {
-    let pick = |s: u64| (Rng::stream(s, 0x4B17).next_u64() % KITS.len() as u64) as i64;
-    KITS[(pick(seed) - pick(crate::DEFAULT_SEEDS.s5)).rem_euclid(KITS.len() as i64) as usize]
+    let n = LEGACY_KITS.len() as i64;
+    let pick = |s: u64| (Rng::stream(s, 0x4B17).next_u64() % n as u64) as i64;
+    LEGACY_KITS[(pick(seed) - pick(crate::DEFAULT_SEEDS.s5)).rem_euclid(n) as usize]
 }
 
 impl KitParams {
@@ -154,6 +204,19 @@ impl KitParams {
             tuned,
             ride_on_8ths: r.chance(0.7),
             hat_density: r.range(0.25, 0.45),
+            punch: 1.0,
+        };
+        // Shared by the light kits: a clean sampler and gentle drive.
+        let light = |p: &mut KitParams, r: &mut Rng| {
+            p.source_bpm = r.range(125.0, 140.0);
+            p.bits = 14;
+            p.hold = 1;
+            p.lp_hz = r.range(14_000.0, 16_000.0);
+            p.kick_drive = r.range(1.0, 1.3);
+            p.snare_drive = r.range(1.0, 1.2);
+            p.ride_on_8ths = r.chance(0.2);
+            p.hat_density = r.range(0.2, 0.45);
+            p.punch = r.range(0.2, 0.3);
         };
         match kit {
             Kit::Acoustic => {}
@@ -211,18 +274,68 @@ impl KitParams {
                 p.ride_on_8ths = r.chance(0.4);
             }
             Kit::SubClicks => {
-                p.source_bpm = r.range(125.0, 138.0);
-                p.bits = 14;
-                p.hold = 1;
-                p.lp_hz = 14_000.0;
+                light(&mut p, &mut r);
                 p.kick_from = r.range(70.0, 90.0);
                 p.kick_to = r.range(38.0, 45.0);
-                p.kick_drop = r.range(0.06, 0.1);
-                p.kick_decay = r.range(0.7, 1.1);
+                p.kick_drop = r.range(0.04, 0.07);
+                // Short enough that the drone's duck lets go quickly.
+                p.kick_decay = r.range(0.28, 0.45);
                 p.kick_drive = r.range(1.1, 1.4);
                 p.snare_decay = r.range(0.05, 0.08);
                 p.ride_on_8ths = false;
                 p.hat_density = r.range(0.1, 0.25);
+            }
+            Kit::MicroBlips => {
+                light(&mut p, &mut r);
+                p.kick_from = r.range(110.0, 140.0);
+                p.kick_to = r.range(55.0, 70.0);
+                p.kick_drop = r.range(0.008, 0.015);
+                p.kick_decay = r.range(0.05, 0.08);
+                p.snare_tones = [r.range(600.0, 1400.0), 0.0]; // blip pitch
+                p.snare_fm = (r.int(3, 7) as f64, r.int(2, 6) as f64); // (levels, hold)
+                p.snare_decay = r.range(0.03, 0.05);
+                p.hat_decay = r.range(0.002, 0.006);
+                p.ride_decay = r.range(0.03, 0.06);
+                p.cymbal_centre = r.range(5000.0, 9000.0);
+            }
+            Kit::GlassPings => {
+                light(&mut p, &mut r);
+                p.kick_from = r.range(70.0, 95.0);
+                p.kick_to = r.range(55.0, 65.0);
+                p.kick_drop = r.range(0.015, 0.025);
+                p.kick_decay = r.range(0.08, 0.15);
+                let bells = harmony.scale_notes(72.0, 84.0);
+                p.snare_tones = [midi_hz(r.pick(&bells)), 0.0];
+                p.snare_decay = r.range(0.06, 0.1);
+                p.hat_decay = r.range(0.02, 0.04);
+                p.ride_decay = r.range(0.08, 0.15);
+            }
+            Kit::DataDust => {
+                light(&mut p, &mut r);
+                p.kick_from = r.range(90.0, 120.0);
+                p.kick_to = r.range(50.0, 60.0);
+                p.kick_drop = r.range(0.01, 0.02);
+                p.kick_decay = r.range(0.04, 0.07);
+                p.snare_wire = r.range(1500.0, 3500.0);
+                p.snare_decay = r.range(0.06, 0.12);
+                p.snare_fm = (r.range(0.015, 0.04), 0.0); // crackle density
+                p.hat_decay = r.range(0.004, 0.01);
+                p.ride_decay = r.range(0.05, 0.1);
+                p.cymbal_centre = r.range(3000.0, 7000.0);
+            }
+            Kit::Off => {}
+            Kit::PulseCode => {
+                light(&mut p, &mut r);
+                p.kick_from = r.range(60.0, 90.0);
+                p.kick_to = p.kick_from * 0.9;
+                p.kick_drop = 0.02;
+                p.kick_decay = r.range(0.04, 0.07);
+                let t = r.range(400.0, 900.0);
+                p.snare_tones = [t, t * r.pick(&[1.25, 1.5, 2.0])];
+                p.snare_decay = r.range(0.015, 0.03);
+                p.hat_decay = r.range(0.0005, 0.0015);
+                p.ride_decay = r.range(0.015, 0.03);
+                p.cymbal_centre = r.range(5000.0, 9000.0);
             }
         }
         p
@@ -257,9 +370,30 @@ impl KitParams {
                 format!("resonant noise pings ~{:.1} kHz", self.cymbal_centre / 1000.0),
             ],
             Kit::SubClicks => [
-                format!("long sine {:.0}→{:.0} Hz", self.kick_from, self.kick_to),
+                format!("short sine {:.0}→{:.0} Hz", self.kick_from, self.kick_to),
                 "a click + a breath of noise".to_string(),
                 "micro clicks".to_string(),
+            ],
+            Kit::MicroBlips => [
+                format!("{:.0} ms thump {:.0}→{:.0} Hz", self.kick_decay * 1000.0, self.kick_from, self.kick_to),
+                format!("crushed FM blip {:.0} Hz, {} levels", self.snare_tones[0], self.snare_fm.0),
+                "noise ticks · high blips".to_string(),
+            ],
+            Kit::GlassPings => [
+                format!("soft bump {:.0}→{:.0} Hz", self.kick_from, self.kick_to),
+                format!("bell ping {:.0} Hz (1 : 2.756)", self.snare_tones[0]),
+                "pings on scale notes".to_string(),
+            ],
+            Kit::DataDust => [
+                format!("tock {:.0}→{:.0} Hz + impulse", self.kick_from, self.kick_to),
+                format!("crackle burst ~{:.1} kHz", self.snare_wire / 1000.0),
+                "single-sample dust".to_string(),
+            ],
+            Kit::Off => ["no drums".to_string(), String::new(), String::new()],
+            Kit::PulseCode => [
+                format!("square beep {:.0} Hz", self.kick_from),
+                format!("buzz {:.0}/{:.0} Hz", self.snare_tones[0], self.snare_tones[1]),
+                format!("clicks · beeps ~{:.1} kHz", self.cymbal_centre / 1000.0),
             ],
         }
     }
@@ -269,7 +403,7 @@ impl KitParams {
         match self.kit {
             Kit::Acoustic => self.metal.to_vec(),
             Kit::FmMetal => (1..=5).map(|k| self.cymbal_centre * (1.0 + k as f64 * self.metal[0] / 4.0) / 6.0).collect(),
-            Kit::Modal => self.tuned.iter().take(6).map(|f| f / 8.0).collect(),
+            Kit::Modal | Kit::GlassPings => self.tuned.iter().take(6).map(|f| f / 8.0).collect(),
             _ => vec![self.cymbal_centre / 10.0],
         }
     }
@@ -291,8 +425,11 @@ fn shape(v: &mut [f64], boost: f64, ms: f64, drive: f64, asym: f64) {
 }
 
 /// Feed-forward compressor over the whole break (3 ms attack, 80 ms release,
-/// 4:1 above −12 dB of the peak), then an asymmetric soft clip.
-pub fn punch_bus(buf: &mut [f64]) {
+/// 4:1 above −12 dB of the peak), then an asymmetric soft clip, blended with
+/// the dry break by `amount` (light kits keep only a touch).
+pub fn punch_bus(buf: &mut [f64], amount: f64) {
+    let dry_peak = buf.iter().fold(1e-9f64, |a, x| a.max(x.abs()));
+    let dry: Vec<f64> = buf.iter().map(|x| x / dry_peak).collect();
     let peak = buf.iter().fold(1e-9f64, |a, x| a.max(x.abs()));
     let thr = peak * 0.25; // −12 dB
     let att = 1.0 - exp(-1.0 / (0.003 * SR));
@@ -308,9 +445,10 @@ pub fn punch_bus(buf: &mut [f64]) {
         }
     }
     let peak = buf.iter().fold(1e-9f64, |a, x| a.max(x.abs()));
-    for x in buf.iter_mut() {
+    for (x, d) in buf.iter_mut().zip(dry) {
         let v = *x / peak * 1.4;
-        *x = tanh(v + 0.06) - tanh(0.06);
+        let wet = tanh(v + 0.06) - tanh(0.06);
+        *x = d + (wet - d) * amount;
     }
 }
 
@@ -380,6 +518,12 @@ pub fn kick(p: &KitParams, vel: f64, rng: &mut Rng) -> Vec<f64> {
                     }
                     held
                 }
+                Kit::PulseCode => {
+                    if i % 3 == 0 {
+                        held = crush(if sin_turns(ph) > 0.0 { 0.7 } else { -0.7 }, 8.0);
+                    }
+                    held
+                }
                 _ => sin_turns(ph),
             };
             ph += f / SR;
@@ -388,14 +532,16 @@ pub fn kick(p: &KitParams, vel: f64, rng: &mut Rng) -> Vec<f64> {
             amp *= amp_k;
             let click = match p.kit {
                 Kit::SubClicks if i < 48 => (1.0 - i as f64 / 48.0) * 0.5,
-                Kit::NoiseSculpt => 0.0,
+                Kit::MicroBlips if i < 24 => rng.bipolar() * (1.0 - i as f64 / 24.0) * 0.25,
+                Kit::DataDust if i < 3 => 0.8,
+                Kit::NoiseSculpt | Kit::GlassPings | Kit::PulseCode | Kit::SubClicks | Kit::MicroBlips | Kit::DataDust => 0.0,
                 _ if i < 96 => rng.bipolar() * (1.0 - i as f64 / 96.0) * 0.4,
                 _ => 0.0,
             };
             (out + click) * vel
         })
         .collect();
-    shape(&mut v, 0.6, 7.0, p.kick_drive, 0.0);
+    shape(&mut v, 0.6 * p.punch, 7.0, p.kick_drive, 0.0);
     v
 }
 
@@ -450,7 +596,35 @@ pub fn snare(p: &KitParams, vel: f64, ghost: bool, rng: &mut Rng) -> Vec<f64> {
                     let click = if i < 72 { 1.0 - i as f64 / 72.0 } else { 0.0 };
                     click * 0.9 + bp.process(n).band * 0.8 * ne
                 }
-                Kit::Acoustic => {
+                Kit::MicroBlips => {
+                    // A glitch blip: FM tone, sample-held and crushed to a few levels.
+                    let (levels, hold) = (p.snare_fm.0.max(2.0), p.snare_fm.1.max(1.0) as usize);
+                    if i % hold == 0 {
+                        held = crush(sin_turns(ph + 0.35 * sin_turns(ph2)), levels);
+                    }
+                    ph += p.snare_tones[0] / SR;
+                    ph2 += p.snare_tones[0] * 3.0 / SR;
+                    let tick = if i < 96 { n * (1.0 - i as f64 / 96.0) * 0.35 } else { 0.0 };
+                    held * ne + tick
+                }
+                Kit::GlassPings => {
+                    let s = 0.7 * sin_turns(ph) + 0.3 * sin_turns(ph2);
+                    ph += p.snare_tones[0] / SR;
+                    ph2 += p.snare_tones[0] * 2.756 / SR;
+                    s * ne + bp.process(n).band * 0.15 * exp(-t / 0.01)
+                }
+                Kit::DataDust => {
+                    // Crackle: sparse random impulses, rung through a band-pass.
+                    let imp = if rng.chance(p.snare_fm.0.max(0.005)) { rng.bipolar() * 3.0 } else { 0.0 };
+                    bp.process(imp).band * 1.4 * ne + imp * 0.25 * ne
+                }
+                Kit::PulseCode => {
+                    // A dropout buzz: two square tones swapping every few milliseconds.
+                    let f = if (i / 240) % 2 == 0 { p.snare_tones[0] } else { p.snare_tones[1] };
+                    ph += f / SR;
+                    (if ph.fract() < 0.5 { 0.55 } else { -0.55 }) * ne
+                }
+                Kit::Acoustic | Kit::Off => {
                     let mut body = 0.0;
                     for (k, f) in p.snare_tones.iter().enumerate() {
                         let phase = if k == 0 { &mut ph } else { &mut ph2 };
@@ -469,7 +643,7 @@ pub fn snare(p: &KitParams, vel: f64, ghost: bool, rng: &mut Rng) -> Vec<f64> {
             s * attack * vel
         })
         .collect();
-    shape(&mut v, 0.5, 6.0, p.snare_drive, 0.12);
+    shape(&mut v, 0.5 * p.punch, 6.0, p.snare_drive, 0.12 * p.punch);
     v
 }
 
@@ -534,13 +708,46 @@ pub fn cymbal(p: &KitParams, voice: crate::drums::Voice, vel: f64, max_len: usiz
                     held
                 }
                 Kit::NoiseSculpt => ping.process(n).band * 2.4,
+                Kit::MicroBlips => {
+                    if ride {
+                        // A short high blip on a scale note.
+                        let s = crush(sin_turns(ph), 5.0);
+                        ph += note / SR;
+                        s * 0.6
+                    } else {
+                        // A tick: differentiated noise, only the crackly top.
+                        let tick = n - held;
+                        held = n;
+                        tick * 0.5
+                    }
+                }
+                Kit::GlassPings => {
+                    let s = 0.7 * sin_turns(ph) + 0.3 * sin_turns(ph * 2.756);
+                    ph += note / SR;
+                    s * if ride { 0.45 } else { 0.6 }
+                }
+                Kit::DataDust => {
+                    let density = if ride { 0.05 } else { 0.15 };
+                    if rng.chance(density) { rng.bipolar() } else { 0.0 }
+                }
+                Kit::PulseCode => {
+                    if ride {
+                        let s = sin_turns(ph) * 0.5;
+                        ph += centre / SR;
+                        s
+                    } else if i < 2 {
+                        if i == 0 { 0.8 } else { -0.8 }
+                    } else {
+                        0.0
+                    }
+                }
                 Kit::SubClicks => {
                     let click = if i < 30 { n * (1.0 - i as f64 / 30.0) } else { 0.0 };
                     let tick = if ride { sin_turns(ph) * 0.3 } else { 0.0 };
                     ph += 5200.0 / SR;
                     click + tick
                 }
-                Kit::Acoustic => {
+                Kit::Acoustic | Kit::Off => {
                     // Squares, plus ring-modulated pairs for denser, less regular partials.
                     let mut sq = [0.0; 6];
                     for (k, (p_, f)) in phases.iter_mut().zip(p.metal).enumerate() {
@@ -562,7 +769,7 @@ pub fn cymbal(p: &KitParams, voice: crate::drums::Voice, vel: f64, max_len: usiz
             };
             ph -= ph.floor();
             let high = s - hp.process(s);
-            let out = if matches!(p.kit, Kit::Modal | Kit::FmMetal | Kit::SubClicks) { s } else { high * 1.8 };
+            let out = if matches!(p.kit, Kit::Acoustic | Kit::Crush | Kit::NoiseSculpt) { high * 1.8 } else { s };
             let o = out * env * vel;
             env *= env_k;
             let attack = (i as f64 / 8.0).min(1.0);
@@ -571,6 +778,6 @@ pub fn cymbal(p: &KitParams, voice: crate::drums::Voice, vel: f64, max_len: usiz
             o * attack * fade
         })
         .collect();
-    shape(&mut v, 0.3, 3.0, 1.2, 0.0);
+    shape(&mut v, 0.3 * p.punch, 3.0, 1.0 + 0.2 * p.punch, 0.0);
     v
 }

@@ -468,7 +468,7 @@ fn box_text(ui: &Ui, n: Node) -> BoxText {
                 _ => "DRUM BUS",
             }
             .into(),
-            lines: ["off (seed 5 = 0)".into(), String::new()],
+            lines: ["off (kit: Off)".into(), String::new()],
             color: FAINT,
             level: 0.0,
             panel: Panel::Drums,
