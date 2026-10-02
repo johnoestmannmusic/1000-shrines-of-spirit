@@ -379,22 +379,27 @@ pub fn run(seeds: Seeds, recording: Option<Recording>, label: String) -> Result<
     let _ = setup::starting(&mut terminal, &label);
     let result = play(&mut terminal, seeds, recording, label);
     ratatui::restore();
-    if let Ok(Some(msg)) = &result {
-        println!("{msg}");
+    let (notice, _) = result?;
+    if notice.error {
+        return Err(notice.text);
     }
-    result.map(|_| ())
+    println!("{}", notice.text);
+    Ok(())
 }
 
-/// Plays in an already-open TUI terminal. Returns a message to print once the
-/// terminal is restored (about the recording), if any.
+/// Plays in an already-open TUI terminal until the user quits or a recording
+/// ends. Returns (what happened, whether the user asked to exit the app).
 pub fn play(
     terminal: &mut ratatui::DefaultTerminal,
     seeds: Seeds,
     recording: Option<Recording>,
     label: String,
-) -> Result<Option<String>, String> {
+) -> Result<(setup::Notice, bool), String> {
     let rec_info = recording.as_ref().map(|r| (r.path.clone(), r.seconds));
-    let mut live = Live::start(seeds, recording)?;
+    let mut live = match Live::start(seeds, recording) {
+        Ok(live) => live,
+        Err(e) => return Ok((setup::Notice::error(format!("Could not start playback: {e}")), false)),
+    };
     // Diagnostics: SHRINE_MUTE=1 runs everything but outputs silence.
     if std::env::var_os("SHRINE_MUTE").is_some() {
         live.shared.mute.store(true, Ordering::Relaxed);
@@ -402,6 +407,7 @@ pub fn play(
 
     let mut ui = Ui::new(live.description.clone(), live.device.clone(), live.device_rate, rec_info.clone(), label);
     let mut quit_at: Option<Instant> = None;
+    let mut exit_app = false;
     let result = loop {
         ui.update(&live);
         if let Err(e) = terminal.draw(|f| ui.draw(f)) {
@@ -413,6 +419,7 @@ pub fn play(
                     if k.kind == KeyEventKind::Press {
                         let ctrl_c = k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL);
                         if ctrl_c || matches!(k.code, KeyCode::Char('q') | KeyCode::Esc) {
+                            exit_app |= ctrl_c;
                             quit(&live, &mut ui, &mut quit_at);
                         } else {
                             ui.key(k.code, &live);
@@ -433,19 +440,21 @@ pub fn play(
     };
     result?;
 
-    match live.join() {
+    let heard = shrine0009::cli::format_length(live.shared.played.load(Ordering::Relaxed) as f64 / SAMPLE_RATE as f64);
+    let notice = match live.join() {
         Ok(Some(frames)) => {
             let (path, _) = rec_info.unwrap_or_default();
             let secs = frames as f64 / SAMPLE_RATE as f64;
             let mut msg = format!("Recorded {} to {path}.", shrine0009::cli::format_length(secs));
             if quit_at.is_some() {
-                msg += "\n(Stopped early, so the recording ends with a short fade where you quit.)";
+                msg += " Stopped early, so it ends with a short fade where you quit.";
             }
-            Ok(Some(msg))
+            setup::Notice::ok(msg)
         }
-        Ok(None) => Ok(None),
-        Err(e) => Err(format!("recording failed: {e}")),
-    }
+        Ok(None) => setup::Notice::ok(format!("Played {heard} live.")),
+        Err(e) => setup::Notice::error(format!("Recording failed: {e}")),
+    };
+    Ok((notice, exit_app))
 }
 
 fn quit(live: &Live, ui: &mut Ui, quit_at: &mut Option<Instant>) {

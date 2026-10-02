@@ -243,19 +243,21 @@ pub fn render_to_wav(seeds: Seeds, path: &str, seconds: f64) -> io::Result<()> {
             eprintln!("  {} / {}", format_length(done as f64 / sr), format_length(seconds));
         }
         last = done;
+        true
     })?;
     eprintln!("done.");
     Ok(())
 }
 
 /// Renders like `render_to_wav`, silently, calling `progress(frames done,
-/// frames total)` after every chunk.
+/// frames total)` after every chunk. If `progress` returns false the render
+/// stops early, leaving a valid but shorter file; returns whether it completed.
 pub fn render_with_progress(
     seeds: Seeds,
     path: &str,
     seconds: f64,
-    mut progress: impl FnMut(u64, u64),
-) -> io::Result<()> {
+    mut progress: impl FnMut(u64, u64) -> bool,
+) -> io::Result<bool> {
     const CHUNK_FRAMES: usize = 4096;
     let total = (seconds * SAMPLE_RATE as f64) as u64;
     let fade = Fade::new(total);
@@ -267,8 +269,11 @@ pub fn render_with_progress(
         let chunk = &mut buf[..frames * 2];
         track.render(chunk);
         wav.write(chunk, |pos| fade.gain(pos))?;
-        progress(wav.frames(), total);
+        if !progress(wav.frames(), total) {
+            wav.finish()?;
+            return Ok(false);
+        }
     }
     wav.finish()?;
-    Ok(())
+    Ok(true)
 }

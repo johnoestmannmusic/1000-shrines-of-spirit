@@ -28,12 +28,12 @@ cargo run --release
 ```
 
 The screen clears to the **GlitchAmbiToolkit** title, with the version underneath, then asks its questions in a box. Enter accepts the default shown, and Esc goes back a question:
-1. **What to do:** play live, render to WAV, or play live and record at the same time.
+1. **What to do:** play live, render to WAV, play live and record at the same time, or exit.
 2. **When playing:** the title shown in the player, up to 4 characters (default `0009`).
 3. **The four seeds.** The defaults shown (1000, 9, 1009, 2026, from `DEFAULT_SEEDS` in `engine/src/lib.rs`) are the canonical version of the track. Press Enter to keep each one, or type any number (decimal or `0x` hex) for an alternate rendition.
 4. **When rendering or recording:** the file name (`.wav` is added if missing, and it asks before overwriting) and the length (seconds, `m:ss` or `h:mm:ss`, up to 4 hours, the WAV limit at this quality).
 
-Rendering shows a progress bar in the same box; playing goes straight into the player. The version is the build date (`vYYYYMMDD`), stamped by `build.rs` whenever the app's sources change; set `SOURCE_DATE_EPOCH` for a reproducible stamp.
+Rendering shows a progress bar in the same box (Esc cancels, leaving a valid but shorter file); playing goes straight into the player. When a render finishes or you leave the player, you're back at the menu, with the outcome shown at the top of the box. Choose **Exit**, or press Esc at the menu, to close the app. Ctrl-C quits from anywhere. The version is the build date (`vYYYYMMDD`), stamped by `build.rs` whenever the app's sources change; set `SOURCE_DATE_EPOCH` for a reproducible stamp.
 
 Rendered and recorded files fade out over their last 40 s (over the last quarter for anything shorter than 2:40). Live playback never ends.
 
@@ -51,7 +51,7 @@ Keys:
 - **Tab** (or **1** / **2**) switches between the two views.
 - **← →** step through the explainers.
 - **Space** pauses. When recording, the recording pauses too.
-- **q** quits with a short fade. A recording stopped early gets a 1.5 s fade at that point.
+- **q** (or Esc) fades out and returns to the menu. A recording stopped early gets a 1.5 s fade at that point. **Ctrl-C** does the same, then exits the app.
 
 **1 · Pipeline view** (the default). Every chain from the signal-flow diagram, drawn large, with the sound shown as particles travelling through it. Each particle is spawned by a real engine event at the moment you hear it:
 - a drone grain (`•`) every time a new FFT frame starts sounding, splitting at the filter into the dry path and the reverb send;

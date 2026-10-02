@@ -124,13 +124,32 @@ enum Step {
     Length,
 }
 
-const MODES: [(&str, &str); 3] = [
+const MODES: [(&str, &str); 4] = [
     ("Play live", "endless, with a visual tour of the engine"),
     ("Render to WAV", "as fast as the computer can"),
     ("Play and record", "hear it while it is saved to a WAV file"),
+    ("Exit", "close GlitchAmbiToolkit"),
 ];
 
+/// The outcome of the last round, shown at the top of the menu.
+pub struct Notice {
+    pub text: String,
+    pub error: bool,
+}
+
+impl Notice {
+    pub fn ok(text: impl Into<String>) -> Self {
+        Notice { text: text.into(), error: false }
+    }
+
+    pub fn error(text: impl Into<String>) -> Self {
+        Notice { text: text.into(), error: true }
+    }
+}
+
 struct Setup {
+    notice: Option<Notice>,
+    exit: bool,
     step: Step,
     back: Vec<Step>,
     mode_sel: usize,
@@ -144,9 +163,11 @@ struct Setup {
 }
 
 impl Setup {
-    fn new() -> Self {
+    fn new(notice: Option<Notice>) -> Self {
         let d = DEFAULT_SEEDS;
         Setup {
+            notice,
+            exit: false,
             step: Step::Mode,
             back: Vec::new(),
             mode_sel: 0,
@@ -175,7 +196,7 @@ impl Setup {
     fn question(&self) -> (String, String) {
         const SEED_ROLE: [&str; 4] = ["the frozen chord", "glitch layer 1", "glitch layer 2", "the bass"];
         match self.step {
-            Step::Mode => ("What would you like to do?".into(), "↑ ↓ or 1-3 to choose, Enter to confirm.".into()),
+            Step::Mode => ("What would you like to do?".into(), "↑ ↓ or 1-4 to choose, Enter to confirm.".into()),
             Step::Label => (
                 "Title shown in the player".into(),
                 "Up to 4 characters. It appears in the header and the explainer ticker.".into(),
@@ -212,6 +233,10 @@ impl Setup {
         let answer = if raw.is_empty() { self.default_for(self.step) } else { raw };
         let ok = match self.step {
             Step::Mode => {
+                if self.mode_sel == MODES.len() - 1 {
+                    self.exit = true;
+                    return true;
+                }
                 self.mode = parse_mode(&(self.mode_sel + 1).to_string()).unwrap_or(Mode::Play);
                 true
             }
@@ -312,11 +337,25 @@ impl Setup {
     fn draw(&self, f: &mut Frame, t: f64) {
         let summary = self.summary();
         let options = if self.step == Step::Mode { MODES.len() as u16 } else { 1 };
-        // summary (+ gap), question, options or input, gap, hint, error line, borders
-        let height = summary.len() as u16 + (!summary.is_empty()) as u16 + 1 + options + 1 + 1 + 1 + 2;
-        let r = screen(f, t, "SETUP", height, "Enter accept · Esc back · Ctrl-C quit");
+        let text_w = BOX_W.min(f.area().width.saturating_sub(2)).saturating_sub(6) as usize;
+        let notice_lines = self.notice.as_ref().map(|n| super::ticker::wrap(&n.text, text_w)).unwrap_or_default();
+        let notice_rows = if notice_lines.is_empty() { 0 } else { notice_lines.len() as u16 + 1 };
+        // notice, summary (+ gap), question, options or input, gap, hint, error line, borders
+        let height =
+            notice_rows + summary.len() as u16 + (!summary.is_empty()) as u16 + 1 + options + 1 + 1 + 1 + 2;
+        let footer = if self.step == Step::Mode { "Enter accept · Esc exit" } else { "Enter accept · Esc back · Ctrl-C exit" };
+        let r = screen(f, t, "SETUP", height, footer);
         let buf = f.buffer_mut();
         let mut y = 0;
+        if let Some(n) = &self.notice {
+            let (mark, color) = if n.error { ("!", (255, 95, 85)) } else { ("✓", BASS) };
+            put(buf, r, 0, y, mark, fg(color).add_modifier(Modifier::BOLD));
+            for line in &notice_lines {
+                put(buf, r, 2, y, line, fg(if n.error { color } else { TEXT }));
+                y += 1;
+            }
+            y += 1;
+        }
         for (k, v) in &summary {
             put(buf, r, 0, y, "✓", fg(BASS));
             put(buf, r, 2, y, &format!("{k:<10}"), fg(DIM));
@@ -373,10 +412,11 @@ fn quit_key(code: KeyCode, mods: KeyModifiers) -> bool {
     code == KeyCode::Char('c') && mods.contains(KeyModifiers::CONTROL)
 }
 
-/// Asks the setup questions. `None` if the user quit.
-pub fn run(terminal: &mut DefaultTerminal) -> Result<Option<Choices>, String> {
+/// Asks the setup questions, showing `notice` (the last round's outcome) on
+/// top. `None` if the user chose Exit or quit.
+pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Option<Choices>, String> {
     let start = Instant::now();
-    let mut s = Setup::new();
+    let mut s = Setup::new(notice);
     loop {
         let t = start.elapsed().as_secs_f64();
         terminal.draw(|f| s.draw(f, t)).map_err(|e| e.to_string())?;
@@ -398,7 +438,7 @@ pub fn run(terminal: &mut DefaultTerminal) -> Result<Option<Choices>, String> {
             }
             (Step::Mode, KeyCode::Up) => s.mode_sel = (s.mode_sel + MODES.len() - 1) % MODES.len(),
             (Step::Mode, KeyCode::Down) => s.mode_sel = (s.mode_sel + 1) % MODES.len(),
-            (Step::Mode, KeyCode::Char(c @ '1'..='3')) => {
+            (Step::Mode, KeyCode::Char(c @ '1'..='4')) => {
                 s.mode_sel = c as usize - '1' as usize;
             }
             (Step::Overwrite, KeyCode::Char(c)) if "yYnN".contains(c) => {
@@ -411,6 +451,8 @@ pub fn run(terminal: &mut DefaultTerminal) -> Result<Option<Choices>, String> {
                 if s.submit() {
                     break;
                 }
+                // Any new answer replaces the last round's message.
+                s.notice = None;
             }
             (Step::Mode | Step::Overwrite, _) => {}
             (_, KeyCode::Backspace) => {
@@ -422,6 +464,9 @@ pub fn run(terminal: &mut DefaultTerminal) -> Result<Option<Choices>, String> {
             }
             _ => {}
         }
+    }
+    if s.exit {
+        return Ok(None);
     }
     Ok(Some(Choices {
         mode: s.mode,
@@ -444,22 +489,27 @@ pub fn starting(terminal: &mut DefaultTerminal, label: &str) -> Result<(), Strin
         .map_err(|e| e.to_string())
 }
 
-/// Renders the WAV with a progress bar in the setup box. Returns a summary
-/// line to print after the screen closes.
-pub fn render(terminal: &mut DefaultTerminal, c: &Choices) -> Result<String, String> {
+/// Renders the WAV with a progress bar in the setup box. Esc cancels back to
+/// the menu, Ctrl-C cancels and exits. Returns (outcome, exit the app).
+pub fn render(terminal: &mut DefaultTerminal, c: &Choices) -> Result<(Notice, bool), String> {
     let done = Arc::new(AtomicU64::new(0));
     let finished = Arc::new(AtomicBool::new(false));
+    let cancel = Arc::new(AtomicBool::new(false));
     let total = (c.seconds * SAMPLE_RATE as f64) as u64;
     let worker = {
-        let (done, finished, seeds, path, seconds) = (done.clone(), finished.clone(), c.seeds, c.path.clone(), c.seconds);
+        let (done, finished, cancel) = (done.clone(), finished.clone(), cancel.clone());
+        let (seeds, path, seconds) = (c.seeds, c.path.clone(), c.seconds);
         std::thread::spawn(move || {
-            let r = cli::render_with_progress(seeds, &path, seconds, |d, _| done.store(d, Ordering::Relaxed));
+            let r = cli::render_with_progress(seeds, &path, seconds, |d, _| {
+                done.store(d, Ordering::Relaxed);
+                !cancel.load(Ordering::Relaxed)
+            });
             finished.store(true, Ordering::Relaxed);
             r
         })
     };
     let start = Instant::now();
-    let mut cancelled = false;
+    let mut exit_app = false;
     while !finished.load(Ordering::Relaxed) {
         let t = start.elapsed().as_secs_f64();
         let d = done.load(Ordering::Relaxed);
@@ -467,7 +517,7 @@ pub fn render(terminal: &mut DefaultTerminal, c: &Choices) -> Result<String, Str
         let speed = d as f64 / SAMPLE_RATE as f64 / t.max(0.001);
         terminal
             .draw(|f| {
-                let r = screen(f, t, "RENDERING", 5, "Ctrl-C cancel");
+                let r = screen(f, t, "RENDERING", 5, "Esc cancel · Ctrl-C cancel and exit");
                 let buf = f.buffer_mut();
                 put(buf, r, 0, 0, &format!("{} → {}", format_length(c.seconds), c.path), fg(TEXT));
                 let bar_w = r.width.saturating_sub(8) as usize;
@@ -483,19 +533,23 @@ pub fn render(terminal: &mut DefaultTerminal, c: &Choices) -> Result<String, Str
             .map_err(|e| e.to_string())?;
         if event::poll(FRAME).map_err(|e| e.to_string())? {
             if let Event::Key(k) = event::read().map_err(|e| e.to_string())? {
-                if k.kind == KeyEventKind::Press && quit_key(k.code, k.modifiers) {
-                    cancelled = true;
-                    break;
+                if k.kind == KeyEventKind::Press && (quit_key(k.code, k.modifiers) || k.code == KeyCode::Esc) {
+                    exit_app = k.code != KeyCode::Esc;
+                    cancel.store(true, Ordering::Relaxed);
                 }
             }
         }
     }
-    if cancelled {
-        // The render thread is left to stop with the process; the file is incomplete.
-        return Ok(format!("Cancelled. {} is incomplete.", c.path));
-    }
-    worker.join().map_err(|_| "render thread panicked".to_string())?.map_err(|e| format!("{}: {e}", c.path))?;
-    Ok(format!("Rendered {} to {}.", format_length(c.seconds), c.path))
+    let notice = match worker.join() {
+        Err(_) => Notice::error("The render stopped unexpectedly."),
+        Ok(Err(e)) => Notice::error(format!("Could not write {}: {e}", c.path)),
+        Ok(Ok(true)) => Notice::ok(format!("Rendered {} to {}.", format_length(c.seconds), c.path)),
+        Ok(Ok(false)) => {
+            let got = done.load(Ordering::Relaxed) as f64 / SAMPLE_RATE as f64;
+            Notice::ok(format!("Render cancelled: {} holds the first {} (no fade-out).", c.path, format_length(got)))
+        }
+    };
+    Ok((notice, exit_app))
 }
 
 /// Text previews of the setup screen (for `--frame`): the first question, and
@@ -503,8 +557,8 @@ pub fn render(terminal: &mut DefaultTerminal, c: &Choices) -> Result<String, Str
 pub fn preview(width: u16, height: u16) -> Vec<String> {
     use ratatui::backend::TestBackend;
     let mut out = Vec::new();
-    let mut s = Setup::new();
-    let mut later = Setup::new();
+    let mut s = Setup::new(None);
+    let mut later = Setup::new(Some(Notice::ok("Rendered 10:00 to 0009.wav.")));
     later.mode_sel = 2;
     for answer in ["", "SOS9", "", "42"] {
         later.input = answer.to_string();

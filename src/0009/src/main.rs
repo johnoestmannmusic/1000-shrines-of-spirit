@@ -85,27 +85,41 @@ fn interactive() -> (Mode, Seeds, String, f64, String) {
     (mode, seeds, path, seconds, label)
 }
 
-/// The setup screen, then playback or rendering in the same terminal.
+/// The setup menu, then playback or rendering in the same terminal, then
+/// back to the menu (showing what happened) until the user chooses Exit.
 fn interactive_tui() -> Result<(), String> {
     let mut terminal = ratatui::init();
-    let outcome = (|| -> Result<Option<String>, String> {
-        let Some(c) = tui::setup::run(&mut terminal)? else {
-            return Ok(None);
-        };
-        match c.mode {
-            Mode::Render => tui::setup::render(&mut terminal, &c).map(Some),
-            Mode::Play | Mode::Both => {
-                tui::setup::starting(&mut terminal, &c.label)?;
-                let recording = (c.mode == Mode::Both).then(|| Recording { path: c.path.clone(), seconds: c.seconds });
-                tui::play(&mut terminal, c.seeds, recording, c.label)
+    let mut last: Option<tui::setup::Notice> = None;
+    let outcome = (|| -> Result<(), String> {
+        loop {
+            let Some(c) = tui::setup::run(&mut terminal, last.take())? else {
+                return Ok(());
+            };
+            let (notice, exit) = match c.mode {
+                Mode::Render => tui::setup::render(&mut terminal, &c)?,
+                Mode::Play | Mode::Both => {
+                    tui::setup::starting(&mut terminal, &c.label)?;
+                    let recording =
+                        (c.mode == Mode::Both).then(|| Recording { path: c.path.clone(), seconds: c.seconds });
+                    tui::play(&mut terminal, c.seeds, recording, c.label)?
+                }
+            };
+            last = Some(notice);
+            if exit {
+                return Ok(());
             }
         }
     })();
     ratatui::restore();
-    if let Ok(Some(msg)) = &outcome {
-        println!("{msg}");
+    // Leave the last outcome (e.g. where a file was saved) in the shell.
+    if let Some(n) = last {
+        if n.error {
+            eprintln!("{}", n.text);
+        } else {
+            println!("{}", n.text);
+        }
     }
-    outcome.map(|_| ())
+    outcome
 }
 
 fn from_flags(args: Vec<String>) -> (Mode, Seeds, String, f64, String) {

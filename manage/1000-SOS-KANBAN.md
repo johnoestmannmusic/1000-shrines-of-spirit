@@ -16,7 +16,7 @@ Dates throughout this file include a time (HH:MM), not just a date, since multip
 **Project Description:** An endless Glitch Ambient track built from scratch as a software artifact (not based on earlier tracks). A frozen FM chord (random-phase FFT freeze + cyclic long filter mod) and an FM bass/sub drone sit underneath two cycling glitch-artifact layers (cyclic repeats → echo), all into a long reverb. Four seeds, fixed in source (`DEFAULT_SEEDS`) and overridable. Compiles to a native WAV renderer and a WASM browser player that are bit-identical, and designed to stay that way for decades: zero crates, own deterministic math/RNG/FFT, block-size-independent DSP, golden-hash tests.  
 **Implementation Repository:** `../src/0009/` (workspace: `engine/` = the zero-dependency music + `render-0009`; root = the `shrine-0009` live/TUI app using cpal + ratatui)  
 **Plan:** `~/.claude/plans/in-sourcerepo-1000-shrines-of-spirit-src-dynamic-lantern.md`  
-**Board Last Updated:** 2026-10-02 12:40 by Claude  
+**Board Last Updated:** 2026-10-02 13:12 by Claude  
 **Git workflow note:** No commits made; left to the user.  
 **Session status 2026-10-02 11:25** — Whole pipeline built and verified end-to-end. `cargo test` passes (5 unit + 3 determinism). The WASM build (`web/track.wasm`, ~69 KB, zero imports) reproduces the native golden hash `0xfc10492b802ca878` exactly, both via `web/verify.mjs` and via the real `worklet.js` run under a Node shim. **Awaiting the first listening checkpoint** (0009-PLAN-002..004): all mix and composition constants are first guesses, tuned only by spectrogram and levels (peak ≈ −1.7 dBFS, RMS ≈ −13 dB).
 
@@ -43,6 +43,15 @@ _None pending - see Assigned/Completed._
 _None currently assigned._
 
 ### Completed
+
+#### 0009-PLAN-012 — Return to the main menu after playing/rendering; Exit option
+
+- **Card Title:** Return to the main menu after playing/rendering; Exit option
+- **Description:** The interactive app now loops: setup menu → play / render / play + record → back to the menu, until the user picks the new 4th option **Exit** (or Esc at the menu). Each round's outcome appears at the top of the menu box, wrapped if long: "Played 0:06 live.", "Rendered … to …", "Recorded …", a cancelled render, or a red error such as no audio device (previously fatal, now shown and recoverable). In the player, q/Esc fade out and return to the menu, while Ctrl-C fades out and exits. Rendering is now cancellable: `cli::render_with_progress` takes a callback returning whether to continue. Esc returns to the menu, Ctrl-C exits, and either way the render thread stops promptly and the partial WAV is finalised with a correct header (no fade-out), instead of being left running in the background.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 13:12
+- **Card Completion Note:** Complete; awaiting the user's look. Muted pseudo-terminal tests: play → q → menu ("Played 0:06 live.") → render 3 s → menu → 3-hour render cancelled with Esc after ~1.5 s (valid partial file) → Exit; and playing twice in one session (the sound card reopens cleanly, 0 underruns). Golden hash unchanged.
+- **Process Comments:** 2026-10-02 13:12 — Making rendering cancellable was needed for the loop. The previous Ctrl-C cancel left the render thread writing in the background, which was harmless when the app exited right after, but not once it returns to the menu.
 
 #### 0009-PLAN-011 — Start screen: animated "GlitchAmbiToolkit" title, build-date version, boxed setup
 
