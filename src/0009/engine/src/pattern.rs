@@ -26,6 +26,19 @@ pub struct LayerConfig {
 
 const MAX_VOICES: usize = 8;
 
+/// What the last mutation did (for display; never read by the audio path).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mutation {
+    /// A step was given a new random event of this kind.
+    Replace(Kind),
+    /// A step was emptied.
+    Clear,
+    /// The whole pattern rotated one step left.
+    Rotate,
+    /// A step kept its sound but got a new pitch/pan.
+    Nudge,
+}
+
 pub struct Layer {
     cfg: LayerConfig,
     rng: Rng,
@@ -33,6 +46,9 @@ pub struct Layer {
     loops: u64,
     loops_until_mutation: u64,
     voices: Vec<Voice>,
+    /// (clock, step, what) of the latest mutation.
+    last_mutation: Option<(u64, usize, Mutation)>,
+    triggers: u64,
 }
 
 impl Layer {
@@ -43,6 +59,8 @@ impl Layer {
             loops: 0,
             loops_until_mutation: rng.int(cfg.repeats.0, cfg.repeats.1),
             voices: Vec::with_capacity(MAX_VOICES),
+            last_mutation: None,
+            triggers: 0,
             cfg,
             rng,
         };
@@ -96,12 +114,22 @@ impl Layer {
         }
     }
 
-    fn mutate(&mut self) {
+    fn mutate(&mut self, clock: u64) {
         let i = self.rng.below(self.cfg.steps);
-        match self.rng.weighted(&[0.55, 0.2, 0.15, 0.1]) {
-            0 => self.pattern[i] = Some(self.random_event()),
-            1 => self.pattern[i] = None,
-            2 => self.pattern.rotate_left(1),
+        let what = match self.rng.weighted(&[0.55, 0.2, 0.15, 0.1]) {
+            0 => {
+                let ev = self.random_event();
+                self.pattern[i] = Some(ev);
+                Mutation::Replace(ev.kind)
+            }
+            1 => {
+                self.pattern[i] = None;
+                Mutation::Clear
+            }
+            2 => {
+                self.pattern.rotate_left(1);
+                Mutation::Rotate
+            }
             _ => {
                 // Nudge an existing step's pitch / pan, keeping its character.
                 let note = self.rng.pick(self.cfg.notes);
@@ -112,8 +140,10 @@ impl Layer {
                     }
                     ev.pan = pan;
                 }
+                Mutation::Nudge
             }
-        }
+        };
+        self.last_mutation = Some((clock, i, what));
     }
 
     fn trigger(&mut self, ev: Event, history: &History) {
@@ -122,6 +152,33 @@ impl Layer {
             self.voices.remove(0);
         }
         self.voices.push(Voice::new(ev, history));
+        self.triggers += 1;
+    }
+
+    pub fn config(&self) -> &LayerConfig {
+        &self.cfg
+    }
+
+    pub fn pattern(&self) -> &[Option<Event>] {
+        &self.pattern
+    }
+
+    /// (completed loops, loops before the next mutation).
+    pub fn loops(&self) -> (u64, u64) {
+        (self.loops, self.loops_until_mutation)
+    }
+
+    pub fn voices(&self) -> impl Iterator<Item = &Voice> {
+        self.voices.iter().filter(|v| v.active())
+    }
+
+    pub fn last_mutation(&self) -> Option<(u64, usize, Mutation)> {
+        self.last_mutation
+    }
+
+    /// Total events triggered so far.
+    pub fn triggers(&self) -> u64 {
+        self.triggers
     }
 
     pub fn next(&mut self, clock: u64, density: f64, history: &History) -> (f64, f64) {
@@ -131,7 +188,7 @@ impl Layer {
         if phase == 0 && step == 0 && clock > 0 {
             self.loops += 1;
             if self.loops >= self.loops_until_mutation {
-                self.mutate();
+                self.mutate(clock);
                 self.loops = 0;
                 self.loops_until_mutation = self.rng.int(self.cfg.repeats.0, self.cfg.repeats.1);
             }

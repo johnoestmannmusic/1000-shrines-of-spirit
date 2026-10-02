@@ -10,6 +10,9 @@ use crate::math::sin_turns;
 use crate::rng::Rng;
 use crate::SAMPLE_RATE;
 
+/// The LFO periods, in seconds (all prime).
+pub const PERIODS: [u64; 7] = [41, 61, 97, 151, 233, 307, 113];
+
 pub struct Lfo {
     period: u64,
     offset: u64,
@@ -29,6 +32,7 @@ impl Lfo {
 }
 
 /// The modulation sources, sampled at one moment.
+#[derive(Clone, Copy, Debug, Default)]
 pub struct ModState {
     /// Drone filter openness, 0..1.
     pub drone_open: f64,
@@ -65,6 +69,16 @@ impl Mods {
             l307: Lfo::new(307, &mut rng),
             l113: Lfo::new(113, &mut rng),
         }
+    }
+
+    /// Every LFO's (period in seconds, value) at `clock`, in `PERIODS` order.
+    pub fn lfos(&self, clock: u64) -> [(u64, f64); 7] {
+        let all = [&self.l41, &self.l61, &self.l97, &self.l151, &self.l233, &self.l307, &self.l113];
+        let mut out = [(0, 0.0); 7];
+        for ((o, lfo), secs) in out.iter_mut().zip(all).zip(PERIODS) {
+            *o = (secs, lfo.at(clock));
+        }
+        out
     }
 
     pub fn at(&self, clock: u64) -> ModState {

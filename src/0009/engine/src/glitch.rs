@@ -112,6 +112,15 @@ impl Voice {
         self.age < self.ev.len
     }
 
+    pub fn event(&self) -> &Event {
+        &self.ev
+    }
+
+    /// How far through its sound this voice is, 0..1.
+    pub fn progress(&self) -> f64 {
+        self.age as f64 / self.ev.len as f64
+    }
+
     pub fn next(&mut self, history: &History) -> (f64, f64) {
         let sr = SAMPLE_RATE as f64;
         let ev = &self.ev;

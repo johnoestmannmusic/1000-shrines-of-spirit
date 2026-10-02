@@ -28,6 +28,11 @@ impl PingPong {
         }
     }
 
+    /// (delay in samples, feedback).
+    pub fn settings(&self) -> (usize, f64) {
+        (self.delay, self.feedback)
+    }
+
     /// Input enters on the left and bounces right, left, right...
     pub fn process(&mut self, in_l: f64, in_r: f64) -> (f64, f64) {
         let len = self.left.len();

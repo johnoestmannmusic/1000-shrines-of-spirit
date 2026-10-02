@@ -1,7 +1,7 @@
 //! 0009 — an endless Glitch Ambient track, built as a software artifact.
 //!
 //! ```text
-//! seed1 → 3-op FM chord → Paulstretch-like FFT freeze → cyclic long filter mod ─┐
+//! seed1 → 3-op FM chord → random-phase FFT freeze → cyclic long filter mod ─┐
 //! seed2 → glitch artifacts 1 → cyclic repeats 1 ─┐                              │
 //! seed3 → glitch artifacts 2 → cyclic repeats 2 ─┴→ echo/delay ─────────────────┼→ long reverb
 //! seed4 → FM bass + sub-bass → low-pass ─────────────────────────────────────────┘
@@ -23,6 +23,10 @@ pub mod modulate;
 pub mod pattern;
 pub mod reverb;
 pub mod rng;
+pub mod telemetry;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cli;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm;
@@ -35,6 +39,7 @@ use glitch::History;
 use modulate::Mods;
 use pattern::{Layer, LayerConfig};
 use reverb::Reverb;
+use telemetry::Meters;
 
 pub const SAMPLE_RATE: u32 = 48_000;
 
@@ -104,6 +109,7 @@ pub fn layer2() -> LayerConfig {
 }
 
 pub struct Track {
+    seeds: Seeds,
     clock: u64,
     mods: Mods,
     drone: Drone,
@@ -115,12 +121,18 @@ pub struct Track {
     bass: Bass,
     reverb: Reverb,
     dc: [DcBlock; 2],
+    // Display-only state: written by `tick`, never read by it.
+    meters: Meters,
+    drone_cutoff: f64,
+    drone_q: f64,
+    overview_frame: u64,
 }
 
 impl Track {
     pub fn new(seeds: Seeds) -> Self {
         let sr = SAMPLE_RATE as f64;
         Track {
+            seeds,
             clock: 0,
             mods: Mods::new(seeds.s1),
             drone: Drone::new(seeds.s1),
@@ -132,6 +144,10 @@ impl Track {
             bass: Bass::new(seeds.s4),
             reverb: Reverb::new(),
             dc: Default::default(),
+            meters: Meters::default(),
+            drone_cutoff: 0.0,
+            drone_q: 0.0,
+            overview_frame: u64::MAX,
         }
     }
 
@@ -157,6 +173,8 @@ impl Track {
             for f in self.drone_filter.iter_mut() {
                 f.set(cutoff, q, sr);
             }
+            self.drone_cutoff = cutoff;
+            self.drone_q = q;
         }
         let (dl, dr) = self.drone.next();
         let dl = self.drone_filter[0].process(dl).low;
@@ -197,6 +215,17 @@ impl Track {
         self.clock += 1;
         let l = math::tanh(self.dc[0].process(l) * MASTER_GAIN);
         let r = math::tanh(self.dc[1].process(r) * MASTER_GAIN);
+
+        let mt = &mut self.meters;
+        mt.drone = mt.drone.max(dl.abs()).max(dr.abs());
+        mt.bass = mt.bass.max(b.abs());
+        mt.glitch1 = mt.glitch1.max(g1.0.abs()).max(g1.1.abs());
+        mt.glitch2 = mt.glitch2.max(g2.0.abs()).max(g2.1.abs());
+        mt.echo_l = mt.echo_l.max(el.abs());
+        mt.echo_r = mt.echo_r.max(er.abs());
+        mt.reverb = mt.reverb.max(rl.abs()).max(rr.abs());
+        mt.out_l = mt.out_l.max(l.abs());
+        mt.out_r = mt.out_r.max(r.abs());
         (l, r)
     }
 }

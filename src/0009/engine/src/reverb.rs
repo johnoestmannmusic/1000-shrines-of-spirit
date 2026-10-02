@@ -6,11 +6,11 @@ use crate::math::{decay_gain, sanitize};
 use crate::SAMPLE_RATE;
 
 /// Time for the tail to fall by 60 dB.
-const DECAY_SECONDS: f64 = 18.0;
+pub const DECAY_SECONDS: f64 = 18.0;
 const DAMP_HZ: f64 = 5200.0;
 /// Keeps the low end out of the long tail so it doesn't pile up into mud.
 const INPUT_HIGHPASS_HZ: f64 = 180.0;
-const LINES: [usize; 8] = [3049, 3779, 4513, 5153, 5869, 6577, 7351, 8101];
+pub const LINES: [usize; 8] = [3049, 3779, 4513, 5153, 5869, 6577, 7351, 8101];
 const DIFFUSERS: [[usize; 4]; 2] = [[142, 379, 107, 277], [151, 353, 113, 263]];
 
 struct Allpass {
@@ -44,6 +44,8 @@ pub struct Reverb {
     lines: Vec<Line>,
     diffusers: [Vec<Allpass>; 2],
     highpass: [OnePole; 2],
+    /// Peak level per delay line since last read (for display).
+    peaks: [f64; 8],
 }
 
 impl Reverb {
@@ -61,7 +63,13 @@ impl Reverb {
                 .collect(),
             diffusers: DIFFUSERS.map(|lens| lens.iter().map(|&l| Allpass::new(l)).collect()),
             highpass: [OnePole::new(INPUT_HIGHPASS_HZ, sr), OnePole::new(INPUT_HIGHPASS_HZ, sr)],
+            peaks: [0.0; 8],
         }
+    }
+
+    /// Peak level of each delay line since the last call.
+    pub fn take_peaks(&mut self) -> [f64; 8] {
+        core::mem::replace(&mut self.peaks, [0.0; 8])
     }
 
     pub fn process(&mut self, in_l: f64, in_r: f64) -> (f64, f64) {
@@ -77,6 +85,9 @@ impl Reverb {
         let mut v = [0.0; 8];
         for (x, line) in v.iter_mut().zip(self.lines.iter_mut()) {
             *x = line.damp.process(line.buf[line.pos]);
+        }
+        for (p, x) in self.peaks.iter_mut().zip(v) {
+            *p = p.max(x.abs());
         }
         let out_l = 0.5 * (v[0] - v[2] + v[4] - v[6]);
         let out_r = 0.5 * (v[1] - v[3] + v[5] - v[7]);

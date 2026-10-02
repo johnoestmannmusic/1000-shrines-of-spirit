@@ -20,6 +20,9 @@ pub struct Bass {
     index_lo: f64,
     index_hi: f64,
     lp: Svf,
+    /// Latest modulation index and low-pass cutoff (for display).
+    index: f64,
+    cutoff: f64,
 }
 
 impl Bass {
@@ -35,15 +38,24 @@ impl Bass {
             index_lo: rng.range(0.1, 0.5),
             index_hi: rng.range(0.9, 2.4),
             lp: Svf::new(300.0, 0.7, sr),
+            index: 0.0,
+            cutoff: 300.0,
         }
+    }
+
+    /// (FM ratio, modulation index, low-pass cutoff Hz).
+    pub fn state(&self) -> (f64, f64, f64) {
+        (self.fm.ratio, self.index, self.cutoff)
     }
 
     pub fn next(&mut self, clock: u64, m: &ModState) -> f64 {
         let sr = SAMPLE_RATE as f64;
         if clock % 32 == 0 {
-            self.lp.set(140.0 + 360.0 * m.bass_bright, 0.9, sr);
+            self.cutoff = 140.0 + 360.0 * m.bass_bright;
+            self.lp.set(self.cutoff, 0.9, sr);
         }
         let index = self.index_lo + (self.index_hi - self.index_lo) * m.bass_bright;
+        self.index = index;
         let fm = self.fm.next(sr, index);
         let sub = sin_turns(self.sub_phase);
         self.sub_phase += self.sub_freq / sr;

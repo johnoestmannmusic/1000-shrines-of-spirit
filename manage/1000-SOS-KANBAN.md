@@ -13,12 +13,18 @@ Dates throughout this file include a time (HH:MM), not just a date, since multip
 ## Project: 0009 — Glitch Ambient (Rust/WASM)
 
 **Project Title:** 0009 — Glitch Ambient (Rust/WASM)  
-**Project Description:** An endless Glitch Ambient track built from scratch as a software artifact (not based on earlier tracks). A frozen FM chord (Paulstretch-like FFT freeze + cyclic long filter mod) and an FM bass/sub drone sit underneath two cycling glitch-artifact layers (cyclic repeats → echo), all into a long reverb. Four seeds, fixed in source (`DEFAULT_SEEDS`) and overridable. Compiles to a native WAV renderer and a WASM browser player that are bit-identical, and designed to stay that way for decades: zero crates, own deterministic math/RNG/FFT, block-size-independent DSP, golden-hash tests.  
-**Implementation Repository:** `../src/0009/`  
+**Project Description:** An endless Glitch Ambient track built from scratch as a software artifact (not based on earlier tracks). A frozen FM chord (random-phase FFT freeze + cyclic long filter mod) and an FM bass/sub drone sit underneath two cycling glitch-artifact layers (cyclic repeats → echo), all into a long reverb. Four seeds, fixed in source (`DEFAULT_SEEDS`) and overridable. Compiles to a native WAV renderer and a WASM browser player that are bit-identical, and designed to stay that way for decades: zero crates, own deterministic math/RNG/FFT, block-size-independent DSP, golden-hash tests.  
+**Implementation Repository:** `../src/0009/` (workspace: `engine/` = the zero-dependency music + `render-0009`; root = the `shrine-0009` live/TUI app using cpal + ratatui)  
 **Plan:** `~/.claude/plans/in-sourcerepo-1000-shrines-of-spirit-src-dynamic-lantern.md`  
-**Board Last Updated:** 2026-10-02 11:25 by Claude  
+**Board Last Updated:** 2026-10-02 12:40 by Claude  
 **Git workflow note:** No commits made; left to the user.  
 **Session status 2026-10-02 11:25** — Whole pipeline built and verified end-to-end. `cargo test` passes (5 unit + 3 determinism). The WASM build (`web/track.wasm`, ~69 KB, zero imports) reproduces the native golden hash `0xfc10492b802ca878` exactly, both via `web/verify.mjs` and via the real `worklet.js` run under a Node shim. **Awaiting the first listening checkpoint** (0009-PLAN-002..004): all mix and composition constants are first guesses, tuned only by spectrogram and levels (peak ≈ −1.7 dBFS, RMS ≈ −13 dB).
+
+**Session status 2026-10-02 11:40** — The user listened to the first render and said it "sounds amazing", which closes the listening checkpoint for 0009-PLAN-002..004 (moved to Completed). Added 0009-PLAN-008: the native renderer now asks interactively for seeds, file name and length, and fades out over the last 40 s.
+
+**Session status 2026-10-02 12:10** — Added 0009-PLAN-009: live playback in a TUI (play / render / play + record), with nine animated panels that both visualise the audio and document the algorithms, plus a news-ticker marquee of 55 explainers. The user chose to keep the engine zero-dependency and give the live app its own crates. During the work, the user asked whether everything is deterministic. Verified: two renders with the same seeds are byte-identical, and a 30 s live play + record session is byte-identical to both an app render and an engine `render-0009` render. Golden hash unchanged, WASM still matches. **Not yet confirmed live by the user**: the agent tested it silently on a temporary PipeWire null sink (20 s real time, zero underruns), not on speakers.
+
+**Session status 2026-10-02 12:30** — The user confirmed the TUI "looks amazing" and asked four things. (1) **Licence:** audited every compiled crate (`cargo tree`); all are permissive (MIT / Apache-2.0 / Zlib / BSL / Unicode), nothing GPL, and ALSA is LGPL but dynamically linked. The user also asked to remove every reference to Paulstretch, since it is GPL. Nothing was ever copied from it (the random-phase technique was written from scratch), but the name is now gone from the code, explainers, README and this board. (2) Added the animated pipeline view (0009-PLAN-010). (3) The ticker was hard to read while scrolling, so it now shows explainers as paged, held headlines. (4) Fixed the red underrun counter (0009-BUG-001). Also added a startup prompt for a 4-character player title (default `0009`, `--label`), since "0009" is a working title. Golden hash unchanged.
 
 ### Ideas
 
@@ -34,13 +40,64 @@ _None pending - see Assigned/Completed._
 
 ### Assigned
 
-#### 0009-PLAN-002 — FM chord + Paulstretch-like FFT freeze drone
+_None currently assigned._
 
-- **Card Title:** FM chord + Paulstretch-like FFT freeze drone
+### Completed
+
+#### 0009-PLAN-011 — Start screen: animated "GlitchAmbiToolkit" title, build-date version, boxed setup
+
+- **Card Title:** Start screen: animated "GlitchAmbiToolkit" title, build-date version, boxed setup
+- **Description:** Running with no arguments in a terminal now opens a full-screen setup (`src/tui/setup.rs`). It clears the screen and shows a hand-drawn block-letter "GlitchAmbiToolkit" title (90 columns; a one-line bold fallback below 94). The title is mildly animated: a slow colour sweep through the TUI palette, a drifting highlight, and a brief 2-cell sideways "glitch" of one row every 3.7 s. Below it sits the version `vYYYYMMDD`, the build date stamped by a new `build.rs` (local date from `date`, UTC fallback, honours `SOURCE_DATE_EPOCH`). The questions appear one at a time in a rounded box, with a ✓ summary of earlier answers: mode as an ↑/↓/1-3 list; title; seeds; file with a y/n overwrite check (n returns to the file name); length. Defaults are shown, Enter keeps them, invalid answers explain themselves in red, Esc goes back (or quits at the first question), Ctrl-C quits. Render mode shows a progress bar in the same box (via a new `cli::render_with_progress`); play modes go straight into the player in the same terminal. Flags and non-terminal stdin still use the old plain prompts.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 12:40
+- **Card Completion Note:** Complete; awaiting the user's look. Tested in a pseudo-terminal: setup → play (custom title shown, 0 underruns), setup → render (file byte-identical to a flag-driven render), overwrite → n → new name (original untouched), and Esc-quit restoring the terminal. Golden hash unchanged.
+- **Process Comments:** 2026-10-02 12:40 — The user renamed the title from "GlitchAmbiGen" to "GlitchAmbiToolkit" mid-build; that needed new T/o/k glyphs. The render test caught a 60-character input cap that silently truncated a long path (wrote to the wrong file, since deleted); the cap is now 1024, and long input scrolls so its end stays visible.
+
+#### 0009-PLAN-010 — Pipeline view, readable ticker, player title prompt
+
+- **Card Title:** Pipeline view, readable ticker, player title prompt
+- **Description:** New default view (Tab / 1 / 2 to switch): every chain drawn as boxes and wires (merged junction glyphs ┬ ├ ┤ ┴), with particles spawned by real engine events at the moment they are heard. Drone grains spawn per FFT frame and split dry/reverb at the filter. Glitch hits carry their kind letter into the echo, which emits dimmer `○` repeats at the real delay time, scaled by the feedback. The reverb streams out by level; the bass goes straight to OUT. Boxes glow by level, show live values and carry engine-panel numbers. A "What's changing" log narrates mutations and glitch layers thinning out or filling in. The ticker now types each explainer on, holds it for 2.5 s plus 15 chars/s of reading time, wraps it to 2 rows (paging long ones with "…"), shows a counter and time-left bar, and lets ←/→ step manually. Startup asks for a 1–4 character title (`--label`) used in the header and ticker. The old signal-flow strip was removed from the engine view, since the pipeline view replaces it.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 12:30
+- **Card Completion Note:** Complete; awaiting the user's live check. Muted live run with Tab, ←/→ and pause on the user's real device: no underruns, clean exit. The pipeline view needs 94×30, and shows a message pointing to Tab below that.
+- **Process Comments:** 2026-10-02 12:30 — The ticker's continuous character scroll was replaced, not tuned: a terminal can only move text whole cells, so any scroll speed judders. Holding still, timed to reading speed, is the readable option.
+
+#### 0009-BUG-001 — Red "underruns 1" shown although playback sounds fine
+
+- **Card Title:** Red "underruns 1" shown although playback sounds fine
+- **Symptom:** User saw a red underrun count in the header, but heard nothing wrong.
+- **Root cause:** Diagnosed on the user's own device with a new hidden `--audio-check`, which plays silence only. The device pulls a steady 512 frames per ~10.7 ms callback, and the muted pipeline alone had 0 underruns in 15 s. With the full TUI (muted, `SHRINE_MUTE=1`), exactly one underrun occurred, at 0:00: the stream started before the producer had filled its queue, while terminal setup competed for time. It was inaudible because the piece fades in from silence.
+- **Fix:** The producer now fills the whole queue (counted with a new `queued` atomic) before `stream.play()`, and the queue doubled to 16 blocks (~170 ms) for headroom against terminal or system hiccups.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 12:30
+- **Card Completion Note:** Fixed; 3 of 3 muted full-TUI runs on the user's device showed 0 underruns. Not yet confirmed by the user.
+- **Process Comments:** 2026-10-02 12:30 — The first hypothesis (Bluetooth asking for larger buffers than the queue) was wrong; measuring before fixing avoided an unnecessary change.
+
+#### 0009-PLAN-009 — Live playback TUI: animated self-documenting panels + explainer marquee
+
+- **Card Title:** Live playback TUI: animated self-documenting panels + explainer marquee
+- **Description:** The repo is now a workspace. `engine/` holds the music (still zero dependencies) plus `render-0009`. The root crate `shrine-0009` adds `cpal` (audio) and `ratatui` (terminal). The first prompt offers play / render / play + record; `--mode` covers scripting. Audio: a producer thread renders 512-frame blocks about 85 ms ahead (and writes the WAV in record mode); the device callback only copies out, with a linear resampler that is an exact pass-through at 48 kHz. Each block publishes a `telemetry::Snapshot` stamped with its sample position, and the UI shows a snapshot only once its audio has reached the sound card, so the visuals stay in sync with what you hear. Panels: signal flow (stages lit by level, pulses along the wires); FFT freeze (log-frequency spectrum swept by the filter response, sparkles on each phase re-roll); overlap-add (the 4 sounding Hann grains plus the one being built, with live Σw² = 1.50); FM chord (animated per-note waveforms); glitch sequencers (current step, ratchets, muted steps, hit flashes, sounding voices, last mutation); slow LFOs and the controls they drive; bass waveforms; ping-pong echo history; reverb lines next to the Hadamard matrix; output scope, goniometer and meters. The bottom marquee scrolls 55 explainers, and the panel being explained lights up. Keys: space pauses, q quits with a 1.5 s fade. A hidden `--frame SECONDS [W H]` flag prints the TUI as text, without a sound card.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 12:10
+- **Card Completion Note:** Complete; awaiting the user's own live test. Engine telemetry is read-only, and the golden hash is unchanged (`0xfc10492b802ca878`, native and WASM). A play + record WAV is byte-identical to the offline renders. Layout checked at 140×46, 100×30 and 80×24, and below the 80×22 minimum.
+- **Process Comments:** 2026-10-02 12:10 — The first live test used ALSA's `null` device, which consumes audio as fast as it can (2 minutes of music in 4 s), so it said nothing about real-time behaviour. Switched to a temporary PipeWire null sink (`pactl load-module module-null-sink`, unloaded afterwards) selected with `PIPEWIRE_NODE`. Fixed the underrun counter, which counted every silent sample at start-up; it now counts real dropouts only after playback starts, once per episode. One test session stalled because stdin was `/dev/null`: stray input paused the app, and pausing pauses the recording. That was a harness artifact; rerunning with stdin held open worked. `git mv` of `src/`, `tests/` → `engine/` staged those renames in the user's index (no commit).
+
+#### 0009-PLAN-008 — Interactive native renderer + 40 s fade-out
+
+- **Card Title:** Interactive native renderer + 40 s fade-out
+- **Description:** Running `render-0009` with no arguments asks for the four seeds (showing the defaults; Enter keeps them; decimal or 0x hex), the output file name (adds `.wav`, asks before overwriting) and the length (seconds, m:ss or h:mm:ss, capped at 4 h by the WAV 32-bit size field). Invalid answers are explained and asked again. The fade-out is now 40 s (was 12 s) with a raised-cosine curve, or the last quarter for renders under 2:40. Flags still work for scripting and skip all prompts; `--seconds` now also accepts m:ss.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 11:40
+- **Card Completion Note:** Complete. Tested with piped input covering all-defaults, a rejected seed, a hex seed, declining an overwrite, an auto-added `.wav`, a rejected over-4-hour length, and flags. The 10:00 render's RMS goes −12.7 dB at 9:20, −19.5 dB at 9:40, −48 dB at 9:56, then silence. Engine output untouched, so the golden hash is unchanged.
+- **Process Comments:** 2026-10-02 11:40 — None.
+
+#### 0009-PLAN-002 — FM chord + random-phase FFT freeze drone
+
+- **Card Title:** FM chord + random-phase FFT freeze drone
 - **Description:** `src/drone.rs`, `src/fm.rs`. Seed 1 picks one of four D-lydian voicings plus a 3-op FM recipe per note. 8 s of the chord are rendered per channel and averaged into a magnitude spectrum (32k FFT), then resynthesised endlessly with fresh random phases every ¼-window hop (Hann OLA). L and R use one complex IFFT (Z = X_L + i·X_R).
 - **Assigned Agent:** Claude
 - **Card Creation Date:** 2026-10-02 11:25
-- **Card Completion Note:** Built and tested; awaiting the user's listening checkpoint.
+- **Card Completion Note:** Complete. **Confirmed by ear 2026-10-02 11:40**: the user said the first render "sounds amazing".
 - **Process Comments:** 2026-10-02 11:25 — First render was ~44 dB too loud: the normalisation assumed mean power Σ|X|²/N, but for an unscaled inverse FFT Parseval gives Σ|X|². Fixed. Separately, a whole 32k IFFT at each hop took 3.3 ms in one 128-frame quantum (budget 2.67 ms), so frame building is now split into 25 work units scheduled every 256 samples by sample position. The worst quantum is now 0.57 ms, and the golden hash is unchanged (bit-identical to the one-shot version).
 
 #### 0009-PLAN-003 — Cyclic filter mod, FM bass/sub + low-pass, long reverb
@@ -49,7 +106,7 @@ _None pending - see Assigned/Completed._
 - **Description:** `src/modulate.rs` (LFOs at mutually prime periods 41–307 s, computed from `clock % period` so there is no drift), `src/bass.rs` (seed 4: 2-op FM on D2 + sine sub on D1, SVF low-pass whose cutoff follows the brightness LFO), `src/reverb.rs` (8-line Hadamard FDN with ~18 s T60, damping, input diffusers, 180 Hz input high-pass).
 - **Assigned Agent:** Claude
 - **Card Creation Date:** 2026-10-02 11:25
-- **Card Completion Note:** Built and tested; awaiting the user's listening checkpoint.
+- **Card Completion Note:** Complete. **Confirmed by ear 2026-10-02 11:40**: the user said the first render "sounds amazing".
 - **Process Comments:** 2026-10-02 11:25 — The spectrogram showed the long reverb piling the low end into mud. Added a high-pass on the reverb input, set the bass reverb send to 0, and raised the drone's low cut to 110 Hz (the bass owns the sub range).
 
 #### 0009-PLAN-004 — Glitch artifacts, cyclic repeats, echo
@@ -58,10 +115,8 @@ _None pending - see Assigned/Completed._
 - **Description:** `src/glitch.rs` (six one-shot kinds: crushed FM blip, noise tick, drone stutter from a 1.4 s history buffer, inharmonic bell ping, square dropout, crushed noise), `src/pattern.rs` (layer 1 / seed 2: 7 sixteenth-note steps; layer 2 / seed 3: 11 eighth-note steps; each loops N times then mutates one step; ratchets; density gated by slow LFOs), `src/delay.rs` (ping-pong at 3/16 with a damped feedback loop).
 - **Assigned Agent:** Claude
 - **Card Creation Date:** 2026-10-02 11:25
-- **Card Completion Note:** Built and tested; awaiting the user's listening checkpoint.
+- **Card Completion Note:** Complete. **Confirmed by ear 2026-10-02 11:40**: the user said the first render "sounds amazing".
 - **Process Comments:** 2026-10-02 11:25 — Glitches were first buried about 80 dB down. Raised the layer gains about 9 dB and the density baselines so both layers rarely go silent together for long; the cyclic structure is now clearly visible in the spectrogram. Balance still needs ears.
-
-### Completed
 
 #### 0009-PLAN-001 — Zero-dependency crate scaffold + deterministic math, RNG, FFT
 

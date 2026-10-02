@@ -1,9 +1,11 @@
 //! The frozen chord: a 3-operator FM chord is rendered once, analysed into an
-//! average magnitude spectrum, then resynthesised forever Paulstretch-style
-//! (same magnitudes, fresh random phases every hop, windowed overlap-add).
+//! average magnitude spectrum, then resynthesised forever by random-phase
+//! spectral freezing (same magnitudes, fresh random phases every hop,
+//! windowed overlap-add).
 
 use crate::fft::Fft;
-use crate::fm::{Algo, Fm3, Op};
+pub use crate::fm::Algo;
+use crate::fm::{Fm3, Op};
 use crate::math::{cos_turns, midi_hz, sin_turns};
 use crate::rng::Rng;
 use crate::SAMPLE_RATE;
@@ -20,7 +22,7 @@ pub const VOICINGS: [&[f64]; 4] = [
 const RATIOS: [f64; 7] = [0.5, 1.0, 1.0, 2.0, 2.0, 3.0, 4.003];
 /// Length of the FM chord rendered for analysis.
 const CHORD_SECONDS: f64 = 8.0;
-/// FFT / window size. 2^15 at 48 kHz ≈ 0.68 s window: a deep Paulstretch smear.
+/// FFT / window size. 2^15 at 48 kHz ≈ 0.68 s window: a deep, smooth smear.
 pub const N: usize = 1 << 15;
 /// Hop: quarter window. Hann² over 4 overlapping hops sums to a constant 1.5.
 /// Must leave room for all of a frame's work units (checked in `new`).
@@ -54,9 +56,16 @@ pub struct Drone {
     building: usize,
     /// Position within the current hop.
     offset: usize,
+    /// Frames that have started sounding so far.
+    frames: u64,
+    voicing: &'static [f64],
+    recipes: Vec<Recipe>,
 }
 
-fn render_chord(rng: &mut Rng, voicing: &[f64], recipes: &[(Algo, [f64; 4], f64)]) -> Vec<f64> {
+/// One chord note's FM settings: (wiring, [op2 ratio, op3 ratio, op2 index, op3 index], op3 feedback).
+pub type Recipe = (Algo, [f64; 4], f64);
+
+fn render_chord(rng: &mut Rng, voicing: &[f64], recipes: &[Recipe]) -> Vec<f64> {
     let sr = SAMPLE_RATE as f64;
     let len = (CHORD_SECONDS * sr) as usize;
     let mut out = vec![0.0; len];
@@ -91,7 +100,7 @@ impl Drone {
         let voicing = VOICINGS[rng.below(VOICINGS.len())];
         // One FM recipe per chord note, shared by both channels so they're
         // the same chord, but each channel gets its own detune and phases.
-        let recipes: Vec<(Algo, [f64; 4], f64)> = voicing
+        let recipes: Vec<Recipe> = voicing
             .iter()
             .map(|_| {
                 let algo = if rng.chance(0.5) { Algo::Stack } else { Algo::Pair };
@@ -140,6 +149,9 @@ impl Drone {
             sounding: [2, 1, 0, 3],
             building: 4,
             offset: 0,
+            frames: 0,
+            voicing,
+            recipes,
         };
         // Start in the steady state: three frames already sounding, a fourth
         // built and waiting to enter at the first sample.
@@ -197,6 +209,7 @@ impl Drone {
             let freed = self.sounding[3];
             self.sounding = [self.building, self.sounding[0], self.sounding[1], self.sounding[2]];
             self.building = freed;
+            self.frames += 1;
         }
         if self.offset % UNIT_SPACING == 0 {
             self.work(self.offset / UNIT_SPACING);
@@ -210,6 +223,41 @@ impl Drone {
         }
         self.offset = (self.offset + 1) % HOP;
         (l, r)
+    }
+}
+
+/// Read-only views for visualisation.
+impl Drone {
+    /// Frozen magnitude spectra (left, right), bins 0..=N/2.
+    pub fn magnitudes(&self) -> (&[f64], &[f64]) {
+        (&self.mag_l, &self.mag_r)
+    }
+
+    pub fn voicing(&self) -> &[f64] {
+        self.voicing
+    }
+
+    pub fn recipes(&self) -> &[Recipe] {
+        &self.recipes
+    }
+
+    /// Frames that have started sounding so far.
+    pub fn frames(&self) -> u64 {
+        self.frames
+    }
+
+    /// Position within the current hop, 0..HOP.
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    /// The newest sounding frame (left), as `points` peak values.
+    pub fn newest_frame_overview(&self, points: usize) -> Vec<f32> {
+        let frame = &self.slots_l[self.sounding[0]];
+        frame
+            .chunks(N.div_ceil(points))
+            .map(|c| c.iter().fold(0.0f64, |a, x| a.max(x.abs())) as f32)
+            .collect()
     }
 }
 

@@ -1,22 +1,28 @@
+# 0009 workspace.
+#
+#   engine/  the music: zero dependencies, bit-exact native + WASM, plus the
+#            dependency-free `render-0009` WAV renderer.
+#   (root)   the `shrine-0009` app: play live in a TUI that visualises and
+#            explains the engine, render to WAV, or both. Its crates (audio
+#            device + terminal) only affect the app, never the sound.
+
+[workspace]
+members = ["engine"]
+resolver = "2"
+
 [package]
 name = "shrine-0009"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "0009 - an endless Glitch Ambient track, built as a deterministic software artifact (native WAV renderer + WASM player)."
+description = "0009 - an endless Glitch Ambient track: live TUI player and WAV renderer."
 publish = false
+default-run = "shrine-0009"
 
-# Deliberately zero dependencies: everything (math, RNG, FFT, DSP) is
-# implemented here so the track renders bit-identically for decades.
 [dependencies]
-
-[lib]
-name = "shrine0009"
-crate-type = ["rlib", "cdylib"]
-
-[[bin]]
-name = "render-0009"
-path = "src/main.rs"
+shrine0009 = { package = "shrine-0009-engine", path = "engine" }
+cpal = "0.18"
+ratatui = "0.30"
 
 [profile.release]
 opt-level = 3

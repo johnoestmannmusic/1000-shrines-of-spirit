@@ -3,7 +3,7 @@
 use crate::math::{sin_turns, TAU};
 
 /// How three operators are wired. Operator 1 is always the carrier.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Algo {
     /// 3 → 2 → 1
     Stack,
