@@ -10,6 +10,98 @@ Dates throughout this file include a time (HH:MM), not just a date, since multip
 
 ---
 
+## Project: 0009 — Glitch Ambient (Rust/WASM)
+
+**Project Title:** 0009 — Glitch Ambient (Rust/WASM)  
+**Project Description:** An endless Glitch Ambient track built from scratch as a software artifact (not based on earlier tracks). A frozen FM chord (Paulstretch-like FFT freeze + cyclic long filter mod) and an FM bass/sub drone sit underneath two cycling glitch-artifact layers (cyclic repeats → echo), all into a long reverb. Four seeds, fixed in source (`DEFAULT_SEEDS`) and overridable. Compiles to a native WAV renderer and a WASM browser player that are bit-identical, and designed to stay that way for decades: zero crates, own deterministic math/RNG/FFT, block-size-independent DSP, golden-hash tests.  
+**Implementation Repository:** `../src/0009/`  
+**Plan:** `~/.claude/plans/in-sourcerepo-1000-shrines-of-spirit-src-dynamic-lantern.md`  
+**Board Last Updated:** 2026-10-02 11:25 by Claude  
+**Git workflow note:** No commits made; left to the user.  
+**Session status 2026-10-02 11:25** — Whole pipeline built and verified end-to-end. `cargo test` passes (5 unit + 3 determinism). The WASM build (`web/track.wasm`, ~69 KB, zero imports) reproduces the native golden hash `0xfc10492b802ca878` exactly, both via `web/verify.mjs` and via the real `worklet.js` run under a Node shim. **Awaiting the first listening checkpoint** (0009-PLAN-002..004): all mix and composition constants are first guesses, tuned only by spectrogram and levels (peak ≈ −1.7 dBFS, RMS ≈ −13 dB).
+
+### Ideas
+
+_None yet._
+
+### Bugs
+
+_None currently open - see Completed for resolved bugs._
+
+### Planned Features
+
+_None pending - see Assigned/Completed._
+
+### Assigned
+
+#### 0009-PLAN-002 — FM chord + Paulstretch-like FFT freeze drone
+
+- **Card Title:** FM chord + Paulstretch-like FFT freeze drone
+- **Description:** `src/drone.rs`, `src/fm.rs`. Seed 1 picks one of four D-lydian voicings plus a 3-op FM recipe per note. 8 s of the chord are rendered per channel and averaged into a magnitude spectrum (32k FFT), then resynthesised endlessly with fresh random phases every ¼-window hop (Hann OLA). L and R use one complex IFFT (Z = X_L + i·X_R).
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 11:25
+- **Card Completion Note:** Built and tested; awaiting the user's listening checkpoint.
+- **Process Comments:** 2026-10-02 11:25 — First render was ~44 dB too loud: the normalisation assumed mean power Σ|X|²/N, but for an unscaled inverse FFT Parseval gives Σ|X|². Fixed. Separately, a whole 32k IFFT at each hop took 3.3 ms in one 128-frame quantum (budget 2.67 ms), so frame building is now split into 25 work units scheduled every 256 samples by sample position. The worst quantum is now 0.57 ms, and the golden hash is unchanged (bit-identical to the one-shot version).
+
+#### 0009-PLAN-003 — Cyclic filter mod, FM bass/sub + low-pass, long reverb
+
+- **Card Title:** Cyclic filter mod, FM bass/sub + low-pass, long reverb
+- **Description:** `src/modulate.rs` (LFOs at mutually prime periods 41–307 s, computed from `clock % period` so there is no drift), `src/bass.rs` (seed 4: 2-op FM on D2 + sine sub on D1, SVF low-pass whose cutoff follows the brightness LFO), `src/reverb.rs` (8-line Hadamard FDN with ~18 s T60, damping, input diffusers, 180 Hz input high-pass).
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 11:25
+- **Card Completion Note:** Built and tested; awaiting the user's listening checkpoint.
+- **Process Comments:** 2026-10-02 11:25 — The spectrogram showed the long reverb piling the low end into mud. Added a high-pass on the reverb input, set the bass reverb send to 0, and raised the drone's low cut to 110 Hz (the bass owns the sub range).
+
+#### 0009-PLAN-004 — Glitch artifacts, cyclic repeats, echo
+
+- **Card Title:** Glitch artifacts, cyclic repeats, echo
+- **Description:** `src/glitch.rs` (six one-shot kinds: crushed FM blip, noise tick, drone stutter from a 1.4 s history buffer, inharmonic bell ping, square dropout, crushed noise), `src/pattern.rs` (layer 1 / seed 2: 7 sixteenth-note steps; layer 2 / seed 3: 11 eighth-note steps; each loops N times then mutates one step; ratchets; density gated by slow LFOs), `src/delay.rs` (ping-pong at 3/16 with a damped feedback loop).
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 11:25
+- **Card Completion Note:** Built and tested; awaiting the user's listening checkpoint.
+- **Process Comments:** 2026-10-02 11:25 — Glitches were first buried about 80 dB down. Raised the layer gains about 9 dB and the density baselines so both layers rarely go silent together for long; the cyclic structure is now clearly visible in the spectrogram. Balance still needs ears.
+
+### Completed
+
+#### 0009-PLAN-001 — Zero-dependency crate scaffold + deterministic math, RNG, FFT
+
+- **Card Title:** Zero-dependency crate scaffold + deterministic math, RNG, FFT
+- **Description:** `Cargo.toml` (lib rlib+cdylib, bin `render-0009`, no dependencies), `rust-toolchain.toml` (pinned 1.98.1 + wasm32 target). `src/math.rs`: sin/cos (Taylor to r^19), exp2/exp/tanh built only from IEEE-exact ops. `src/rng.rs`: SplitMix64. `src/fft.rs`: radix-2 FFT, exposed as bit-reverse + per-stage steps.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 11:25
+- **Card Completion Note:** Complete; unit tests compare against std within 1e-14 and check the SplitMix64 reference sequence and the FFT round trip.
+- **Process Comments:** 2026-10-02 11:25 — The first sine (Taylor to r^15, ~7e-10 error) failed the FFT round-trip test, so the series was extended to r^19. Avoided `powi` too: it is not guaranteed bit-exact across platforms, so decay gains go through `exp2`. `panic = "abort"` was removed from the release profile because it made cargo build the library twice for tests (filename-collision warning).
+
+#### 0009-PLAN-005 — Master stage + determinism tests
+
+- **Card Title:** Master stage + determinism tests
+- **Description:** DC blocker, 10 s fade-in at clock 0, deterministic `tanh` soft clip. `tests/determinism.rs`: golden hash of the first 30 s, block sizes 1/128/1000/65536 identical, each seed changes the output, and an `#[ignore]`d 2-hour stability test (finite, never clipping, never silent).
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 11:25
+- **Card Completion Note:** Complete. `GOLDEN_HASH = 0xfc10492b802ca878` is provisional and will change whenever the composition is tuned at the listening checkpoints.
+- **Process Comments:** 2026-10-02 11:25 — None.
+
+#### 0009-PLAN-006 — WASM exports + browser player + native/WASM verification
+
+- **Card Title:** WASM exports + browser player + native/WASM verification
+- **Description:** `src/wasm.rs`: plain `extern "C"` exports (`sos_new`, `sos_render`, `sos_free`; seeds passed as hi/lo u32 pairs), with no wasm-bindgen. `web/index.html` + `web/worklet.js`: AudioWorklet at 48 kHz, seeds via `?s1..s4`, fade on pause. `build-web.sh`. `web/verify.mjs`: hashes 30 s of WASM output.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 11:25
+- **Card Completion Note:** Complete. Hashes match native (`0xfc10492b802ca878`). Init takes ~0.6 s (the chord render and analysis run on the audio thread before the first sound). **Not yet confirmed in a real browser.**
+- **Process Comments:** 2026-10-02 11:25 — None.
+
+#### 0009-PLAN-007 — README
+
+- **Card Title:** README
+- **Description:** `src/0009/README.md`: signal flow, file map, render/play/verify instructions, determinism rationale.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-02 11:25
+- **Card Completion Note:** Complete.
+- **Process Comments:** 2026-10-02 11:25 — None.
+
+---
+
+
 ## Project: 0006 Lantern Music Player — Rust egui/eframe Port
 
 **⚠ MOVED OUT OF THIS FILE on 2026-09-11** — This project's Kanban board now lives in its own file at `../../../0006-rust/manage/KANBAN.md`, the same way `SpectralPrism` moved to its own board on 2026-09-07 below. All of this project's Ideas/Bugs/Planned Features/Assigned/Completed cards (0006-IDEA-001..003, 0006-PLAN-001..010, 0006-ASGN-001, 0006-BUG-001..007, 0006-DONE-001..007) and its Technical Handoff Notes moved there verbatim, with card IDs preserved and four new Planned Features cards (0006-PLAN-007..010) added. Unlike SpectralPrism, no historical copy is kept here — `0006-rust/` was already an external implementation repository referenced by path from this file, not something that just left this monorepo's tree, so this pointer is sufficient. **Any future 0006 Lantern Music Player work should happen against that board, not this one.**

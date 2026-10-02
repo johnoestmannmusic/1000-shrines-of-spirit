@@ -1,0 +1,29 @@
+[package]
+name = "shrine-0009"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "0009 - an endless Glitch Ambient track, built as a deterministic software artifact (native WAV renderer + WASM player)."
+publish = false
+
+# Deliberately zero dependencies: everything (math, RNG, FFT, DSP) is
+# implemented here so the track renders bit-identically for decades.
+[dependencies]
+
+[lib]
+name = "shrine0009"
+crate-type = ["rlib", "cdylib"]
+
+[[bin]]
+name = "render-0009"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+# Tests render tens of seconds of audio, so even dev builds are optimised.
+# (Optimisation level never changes results: Rust performs no fast-math or FMA contraction.)
+[profile.dev]
+opt-level = 2
