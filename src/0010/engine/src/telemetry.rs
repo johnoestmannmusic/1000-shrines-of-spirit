@@ -108,6 +108,9 @@ pub struct Snapshot {
     pub bass: (f64, f64, f64),
     pub reverb_lines: [f64; 8],
     pub meters: Meters,
+    /// The layer soloed on the monitor (if any) and how far faded in.
+    pub solo: Option<crate::Solo>,
+    pub solo_amount: f64,
     /// The drone's gain from the drum-aware mix (1 = untouched).
     pub duck_gain: f64,
     /// The bass's current (gliding) root, MIDI.
@@ -215,6 +218,8 @@ impl Track {
             meters: core::mem::take(&mut self.meters),
             bass_root: self.bass.root(),
             duck_gain: self.duck_gain,
+            solo: self.solo().0,
+            solo_amount: self.solo().1,
             harmony: self.harmony.at(clock.saturating_sub(1)),
             drum_plan: self.drums.plan_now().cloned(),
             drum_step: self.drums.step(),

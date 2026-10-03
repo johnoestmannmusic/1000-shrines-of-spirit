@@ -133,6 +133,23 @@ pub fn header(ui: &Ui, buf: &mut Buffer, r: Rect) {
         Span::styled(format!(" {} ", ui.label), Style::new().fg(rgb((20, 20, 20))).bg(rgb(OUTPUT)).add_modifier(Modifier::BOLD)),
         Span::styled(format!(" {state} {} ", format_length(ui.elapsed())), fg(color)),
     ];
+    if let Some(solo) = ui.wanted_solo() {
+        let name = match solo {
+            shrine0010::Solo::Drone => "drone",
+            shrine0010::Solo::Glitch1 => "glitch 1",
+            shrine0010::Solo::Glitch2 => "glitch 2",
+            shrine0010::Solo::Bass => "bass",
+            shrine0010::Solo::Drums => "drums",
+            shrine0010::Solo::Space => "echo+reverb",
+        };
+        spans.push(Span::styled(
+            format!(" SOLO {name} "),
+            Style::new().fg(rgb((20, 20, 20))).bg(rgb((255, 214, 120))).add_modifier(Modifier::BOLD),
+        ));
+        if ui.recording.is_some() {
+            spans.push(Span::styled(" (recording full mix) ", fg(DIM)));
+        }
+    }
     if let Some((path, secs)) = &ui.recording {
         // Just the file's name, shortened if long; the full path is printed when you leave.
         let name = std::path::Path::new(path).file_name().map_or(path.clone(), |n| n.to_string_lossy().into_owned());

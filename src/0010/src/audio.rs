@@ -27,6 +27,16 @@ pub const STOP_FADE_SECONDS: f64 = 1.5;
 /// Snapshots kept waiting for the UI before old ones are dropped.
 const MAX_PENDING: usize = 256;
 
+/// The layers that can be soloed, in `Shared::solo` order.
+pub const SOLOS: [shrine0010::Solo; 6] = [
+    shrine0010::Solo::Drone,
+    shrine0010::Solo::Glitch1,
+    shrine0010::Solo::Glitch2,
+    shrine0010::Solo::Bass,
+    shrine0010::Solo::Drums,
+    shrine0010::Solo::Space,
+];
+
 /// One rendered block and the engine state at its end.
 pub struct Published {
     pub snapshot: Snapshot,
@@ -42,6 +52,9 @@ pub struct Shared {
     pub paused: AtomicBool,
     /// Consume audio as normal but output silence (diagnostics).
     pub mute: AtomicBool,
+    /// The layer to hear on its own (0 = none, else 1 + index in `SOLOS`).
+    /// Only what you hear changes; recordings always get the full mix.
+    pub solo: std::sync::atomic::AtomicU8,
     /// Times playback ran dry after it had started (each is an audible gap).
     pub underruns: AtomicU64,
     /// Asks the producer to fade out and finish.
@@ -272,6 +285,7 @@ fn produce(
     };
     let mut fade = recording.as_ref().map(|r| Fade::new((r.seconds * SAMPLE_RATE as f64) as u64));
     let mut result = Ok(());
+    let mut mix: Vec<f32> = Vec::new();
 
     loop {
         let pos = track.clock();
@@ -286,14 +300,22 @@ fn produce(
             Some(f) => BLOCK.min((f.total() - pos) as usize),
             None => BLOCK,
         };
+        let solo = match shared.solo.load(Ordering::Relaxed) {
+            0 => None,
+            n => SOLOS.get(n as usize - 1).copied(),
+        };
+        track.set_solo(solo);
+        // `mix` is the piece itself (it goes to the recording); `buf` is what
+        // you hear (the mix, or a soloed layer).
         let mut buf = recycle.try_recv().unwrap_or_default();
         buf.resize(frames * 2, 0.0);
-        track.render(&mut buf);
+        mix.resize(frames * 2, 0.0);
+        track.render_split(&mut mix, &mut buf);
 
         if let Some(w) = wav.as_mut() {
             if result.is_ok() {
                 let f = fade;
-                result = w.write(&buf, |p| f.map_or(1.0, |f| f.gain(p)));
+                result = w.write(&mix, |p| f.map_or(1.0, |f| f.gain(p)));
             }
         }
         if let Some(f) = fade {

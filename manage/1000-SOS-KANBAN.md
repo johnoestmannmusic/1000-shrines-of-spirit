@@ -16,7 +16,7 @@ Dates throughout this file include a time (HH:MM), not just a date, since multip
 **Project Description:** A copy of 0009 (`../src/0009/`, untouched apart from one header fix) extended with: fully synthesised jungle breakbeat drums (a seed-5-driven break, played at ~137 BPM by synthesised voices, "sampled" through a vintage-sampler chain, chopped into 32 slices and re-sequenced at 168 BPM with phrase-based arrangement; seed 5 = 0 means no drums); a choice of scale (12 options, Lydian default); 1–4 chords with weighted bar splits (32 / 20-12 / 16-12-4 / 14-10-4-4) at half-time or jungle pace; and seed-1-chosen keys and voicings, with spectral morphs between chords. Same guarantees as 0009: zero-dependency engine, bit-exact native/WASM, golden hash, observation-only TUI.  
 **Implementation Repository:** `../src/0010/`  
 **Plan:** `~/.claude/plans/in-sourcerepo-1000-shrines-of-spirit-src-dynamic-lantern.md`  
-**Board Last Updated:** 2026-10-03 09:09 by Claude  
+**Board Last Updated:** 2026-10-03 09:23 by Claude  
 **Git workflow note:** No commits made; left to the user. No README (the user removed 0009's local README).  
 **Session status 2026-10-03 07:31** — Everything in the plan is built and verified. `cargo test --release --workspace` passes, and the WASM hash matches native (`0xd2b8263f0847c8a0`, provisional until the user has listened). A 5-minute default preview is at `src/0010/0010-preview.wav`. **Awaiting the user's listening check**, especially of drum authenticity, which is subjective; all drum constants are named and tunable in `engine/src/drums.rs`.
 
@@ -37,6 +37,26 @@ _None pending._
 _None currently assigned._
 
 ### Completed
+
+#### 0010-PLAN-014 — Learn: per-instrument lessons with live solo (monitor-only)
+
+- **Card Title:** Learn: per-instrument lessons with live solo (monitor-only)
+- **Description:** The user asked for per-instrument analysis in Learn that solos each layer while explaining it.
+  - **Engine (`lib.rs`):** `Solo { Drone, Glitch1, Glitch2, Bass, Drums, Space }`, `Track::set_solo`, and `Track::render_split(mix, monitor)`. The monitor is computed after the mix from the same signals: the layer's dry signal plus its own monitor echo (glitches) and monitor reverb; Space = the echo + reverb returns only. It has its own DC / tanh stage and a 20 ms ramp (fade to the mix, swap with a fresh echo / reverb, fade in), and runs only while soloing. `render()` and the mix are untouched.
+  - **App:** `Shared.solo` (AtomicU8). The producer writes the **mix** to the WAV and sends the **monitor** to the speakers and visuals.
+  - **Learn view:** an INSTRUMENTS section (lessons 9–14) that auto-solos its layer; `s` toggles solo / full mix for A/B; leaving the lesson or view unsolos; Drums with kit Off doesn't solo. Each instrument panel shows:
+    - the waveform and spectrum of what you hear (2048-point FFT with the engine's own `Fft`, smoothed);
+    - share-of-the-mix meters for every layer, with this one highlighted;
+    - live mechanics (drone chord / cutoff / duck, the glitch step ring, bass root / FM / low-pass, the drum chop / section, echo / reverb line levels);
+    - "On its own" / "How it fits" text with live values.
+  - The header shows a "SOLO …" badge, plus "(recording full mix)" when recording. 2 new Insights.
+- **Assigned Agent:** Claude
+- **Card Creation Date:** 2026-10-03 09:23
+- **Card Completion Note:** Complete; awaiting the user's ears.
+  - New tests: `render_split`'s mix is bit-identical to `render()` while cycling through every solo; with no solo, monitor == mix; each solo differs. Golden hash unchanged and WASM matches.
+  - A 25 s play + record **with solos active** is byte-identical to a render.
+  - Across 7 solo switches the monitor's largest sample-to-sample jump (0.573) is no larger than the mix's own sharpest drum transient (0.578): click-free.
+- **Process Comments:** 2026-10-03 09:23 — The solo was designed as a second output rather than a mix change, so the determinism guarantees (golden hash, live = render) hold by construction rather than by care. The tests check this directly. 2026-10-03 09:37 — The user asked to remove the Learn view's 25 s auto-advance, so a lesson now stays on screen until the user changes it (the `AUTO_ADVANCE` timer and the countdown were removed). Verified: a lesson stayed put for 32 s in a muted pseudo-terminal run.
 
 #### 0010-PLAN-013 — Context-aware Insights, Learn view (4), explicit "Off" kit
 

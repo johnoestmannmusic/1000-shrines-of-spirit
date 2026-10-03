@@ -101,9 +101,13 @@ pub struct Ui {
     /// Drum hits: flash per voice (K S g h O R) and the last seen count.
     pub drum_flash: [f64; 6],
     last_drum_hits: u64,
-    /// The Learn view: chosen lesson, and when it was last chosen or advanced.
+    /// The Learn view's chosen lesson (it stays put until the user changes it).
     pub lesson: usize,
-    pub lesson_since: f64,
+    /// Instrument lessons solo their layer unless `s` switched back to the mix.
+    pub solo_listen: bool,
+    /// Spectrum of what you are hearing (for the instrument lessons).
+    pub heard_spectrum: Vec<f64>,
+    fft: Option<shrine0010::fft::Fft>,
     /// (drum level, drone duck gain) per block, for the "making room" lesson.
     pub duck_history: VecDeque<(f64, f64)>,
     /// The slow cycles, rebuilt here so the Learn view can draw the future
@@ -160,7 +164,9 @@ impl Ui {
             last_drum_hits: 0,
             sections: VecDeque::new(),
             lesson: 0,
-            lesson_since: 0.0,
+            solo_listen: true,
+            heard_spectrum: Vec::new(),
+            fft: None,
             duck_history: VecDeque::new(),
             mods,
             last_mutation: [None; 2],
@@ -206,6 +212,46 @@ impl Ui {
         for p in ready {
             self.absorb(p);
         }
+
+        // Instrument lessons solo their layer (only what you hear; recordings get the mix).
+        let solo = self.wanted_solo();
+        let code = solo.and_then(|s| crate::audio::SOLOS.iter().position(|x| *x == s)).map_or(0, |i| i as u8 + 1);
+        shared.solo.store(code, Ordering::Relaxed);
+        if solo.is_some() || learn::is_instrument(self.lesson) && self.view == View::Learn {
+            self.update_spectrum();
+        }
+    }
+
+    /// The layer the Learn view wants to hear on its own right now.
+    pub fn wanted_solo(&self) -> Option<shrine0010::Solo> {
+        if self.view != View::Learn || !self.solo_listen || self.quitting {
+            return None;
+        }
+        learn::solo_for(self.lesson).filter(|s| *s != shrine0010::Solo::Drums || self.desc.drums_on)
+    }
+
+    /// A 2048-point spectrum of the most recent audio you heard.
+    fn update_spectrum(&mut self) {
+        const N: usize = 2048;
+        if self.scope.len() < N {
+            return;
+        }
+        let fft = self.fft.get_or_insert_with(|| shrine0010::fft::Fft::new(N));
+        let mut re: Vec<f64> = self.scope.iter().rev().take(N).rev().map(|(l, r)| 0.5 * (*l as f64 + *r as f64)).collect();
+        for (i, x) in re.iter_mut().enumerate() {
+            *x *= 0.5 - 0.5 * (i as f64 / N as f64 * std::f64::consts::TAU).cos();
+        }
+        let mut im = vec![0.0; N];
+        fft.transform(&mut re, &mut im, false);
+        let fresh: Vec<f64> = (0..N / 2).map(|k| (re[k] * re[k] + im[k] * im[k]).sqrt()).collect();
+        // Smooth over frames so the bars read calmly.
+        if self.heard_spectrum.len() != fresh.len() {
+            self.heard_spectrum = fresh;
+        } else {
+            for (s, f) in self.heard_spectrum.iter_mut().zip(fresh) {
+                *s = s.max(f) * 0.85 + f * 0.15;
+            }
+        }
     }
 
     /// Moves animations forward by `dt` seconds.
@@ -238,11 +284,6 @@ impl Ui {
         }
         for f in self.drum_flash.iter_mut() {
             *f *= (-dt * 9.0).exp();
-        }
-        // The Learn view moves on by itself after a while without a keypress.
-        if self.view == View::Learn && self.t - self.lesson_since > learn::AUTO_ADVANCE {
-            self.lesson = (self.lesson + 1) % learn::LESSONS.len();
-            self.lesson_since = self.t;
         }
         if !self.paused {
             self.frame_age += dt;
@@ -452,7 +493,6 @@ impl Ui {
                     View::Rhythm => View::Learn,
                     View::Learn => View::Pipeline,
                 };
-                self.lesson_since = self.t;
             }
             KeyCode::BackTab => {
                 self.view = match self.view {
@@ -461,19 +501,18 @@ impl Ui {
                     View::Rhythm => View::Engine,
                     View::Learn => View::Rhythm,
                 };
-                self.lesson_since = self.t;
             }
             KeyCode::Char('4') => {
                 self.view = View::Learn;
-                self.lesson_since = self.t;
+            }
+            KeyCode::Char('s') if self.view == View::Learn && learn::is_instrument(self.lesson) => {
+                self.solo_listen = !self.solo_listen;
             }
             KeyCode::Up | KeyCode::Char('[') if self.view == View::Learn => {
                 self.lesson = (self.lesson + learn::LESSONS.len() - 1) % learn::LESSONS.len();
-                self.lesson_since = self.t;
             }
             KeyCode::Down | KeyCode::Char(']') if self.view == View::Learn => {
                 self.lesson = (self.lesson + 1) % learn::LESSONS.len();
-                self.lesson_since = self.t;
             }
             KeyCode::Char('1') => self.view = View::Pipeline,
             KeyCode::Char('2') => self.view = View::Engine,
@@ -620,8 +659,18 @@ pub fn print_frame(seeds: Seeds, settings: Settings, seconds: f64, width: u16, h
     for line in setup::preview(width, height) {
         println!("{line}");
     }
-    for (view, lesson) in [(View::Pipeline, 0), (View::Engine, 0), (View::Rhythm, 0), (View::Learn, 0), (View::Learn, 4), (View::Learn, 6)] {
+    for (view, lesson) in [
+        (View::Pipeline, 0),
+        (View::Engine, 0),
+        (View::Rhythm, 0),
+        (View::Learn, 0),
+        (View::Learn, 8),
+        (View::Learn, 9),
+        (View::Learn, 12),
+        (View::Learn, 13),
+    ] {
         ui.lesson = lesson;
+        ui.update_spectrum();
         ui.view = view;
         let mut terminal = ratatui::Terminal::new(TestBackend::new(width, height)).map_err(|e| e.to_string())?;
         // Draw twice: the first draw measures the wires the particles travel along.

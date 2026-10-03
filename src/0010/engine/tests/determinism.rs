@@ -133,6 +133,48 @@ fn every_kit_family_sounds_different() {
     }
 }
 
+/// Soloing changes only the monitor: the mix stays bit-identical to
+/// `render()` while the solo cycles through every layer.
+#[test]
+fn solo_never_touches_the_mix() {
+    use shrine0010::Solo;
+    let frames = 30 * SAMPLE_RATE as usize;
+    let reference = render(DEFAULT_SEEDS, frames, 4096);
+    let mut track = Track::new(DEFAULT_SEEDS, DEFAULT_SETTINGS);
+    let mut mix = vec![0f32; frames * 2];
+    let mut mon = vec![0f32; frames * 2];
+    let solos = [None, Some(Solo::Drone), Some(Solo::Glitch1), Some(Solo::Glitch2), Some(Solo::Bass), Some(Solo::Drums), Some(Solo::Space)];
+    for (i, (m, o)) in mix.chunks_mut(8192).zip(mon.chunks_mut(8192)).enumerate() {
+        track.set_solo(solos[(i / 20) % solos.len()]);
+        track.render_split(m, o);
+    }
+    assert!(mix == reference, "soloing changed the mix");
+}
+
+/// With no solo the monitor is exactly the mix; each solo sounds different.
+#[test]
+fn monitor_is_the_mix_unless_soloed() {
+    use shrine0010::Solo;
+    let frames = 25 * SAMPLE_RATE as usize;
+    let run = |solo: Option<Solo>| {
+        let mut t = Track::new(DEFAULT_SEEDS, DEFAULT_SETTINGS);
+        t.set_solo(solo);
+        let (mut m, mut o) = (vec![0f32; frames * 2], vec![0f32; frames * 2]);
+        t.render_split(&mut m, &mut o);
+        (m, o)
+    };
+    let (mix, mon) = run(None);
+    assert!(mix == mon);
+    let mut seen = vec![hash(&mix)];
+    for s in [Solo::Drone, Solo::Glitch1, Solo::Glitch2, Solo::Bass, Solo::Drums, Solo::Space] {
+        let (m, o) = run(Some(s));
+        assert!(m == mix, "{s:?} changed the mix");
+        let h = hash(&o);
+        assert!(!seen.contains(&h), "{s:?} sounds like the mix or another solo");
+        seen.push(h);
+    }
+}
+
 /// Two hours of playback: no NaN, no runaway feedback, never clipping.
 /// Slow; run with `cargo test --release -- --ignored`.
 #[test]

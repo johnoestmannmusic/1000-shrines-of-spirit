@@ -151,6 +151,48 @@ pub fn layer2(h: &Harmony) -> LayerConfig {
     }
 }
 
+/// A layer to hear on its own. Soloing changes only the *monitor* output
+/// (`render_split`); the mix, and so every recording, is never touched.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Solo {
+    Drone,
+    Glitch1,
+    Glitch2,
+    Bass,
+    Drums,
+    /// The echo and reverb returns only: the room without the instruments.
+    Space,
+}
+
+/// Monitor-only state: its own echo and reverb (so a soloed layer keeps its
+/// space), its own master stage, and a ramp for click-free switching.
+struct Monitor {
+    target: Option<Solo>,
+    current: Option<Solo>,
+    amount: f64,
+    echo: PingPong,
+    reverb: Reverb,
+    dc: [DcBlock; 2],
+    out: (f64, f64),
+}
+
+/// About 20 ms to fade between the mix and a solo.
+const SOLO_RAMP: f64 = 1.0 / (0.02 * SAMPLE_RATE as f64);
+
+impl Monitor {
+    fn new() -> Self {
+        Monitor {
+            target: None,
+            current: None,
+            amount: 0.0,
+            echo: PingPong::new(3 * SIXTEENTH as usize, ECHO_FEEDBACK),
+            reverb: Reverb::new(),
+            dc: Default::default(),
+            out: (0.0, 0.0),
+        }
+    }
+}
+
 /// Attack/release envelope follower.
 struct Follower {
     env: f64,
@@ -174,6 +216,7 @@ impl Follower {
 
 pub struct Track {
     seeds: Seeds,
+    monitor: Monitor,
     presence: Follower,
     punch: Follower,
     shelf: [OnePole; 2],
@@ -211,6 +254,7 @@ impl Track {
             Harmony::new(settings.scale, settings.chords.clamp(1, 4) as usize, settings.pace, key, &mut first, &mut rest);
         Track {
             seeds,
+            monitor: Monitor::new(),
             presence: Follower::new(PRESENCE_ATTACK, PRESENCE_RELEASE),
             punch: Follower::new(PUNCH_ATTACK, PUNCH_RELEASE),
             shelf: [OnePole::new(SHELF_HZ, sr), OnePole::new(SHELF_HZ, sr)],
@@ -243,6 +287,29 @@ impl Track {
             let (l, r) = self.tick();
             frame[0] = l as f32;
             frame[1] = r as f32;
+        }
+    }
+
+    /// Choose a layer to hear on its own (or `None` for the full mix). Only
+    /// the monitor output of `render_split` changes.
+    pub fn set_solo(&mut self, solo: Option<Solo>) {
+        self.monitor.target = solo;
+    }
+
+    /// The layer currently soloed on the monitor, and how far faded in (0..1).
+    pub fn solo(&self) -> (Option<Solo>, f64) {
+        (self.monitor.current, self.monitor.amount)
+    }
+
+    /// Like `render`, but also fills `monitor` with what to *listen* to: the
+    /// mix, or the soloed layer. `mix` is bit-identical to `render`'s output.
+    pub fn render_split(&mut self, mix: &mut [f32], monitor: &mut [f32]) {
+        for (m, o) in mix.chunks_exact_mut(2).zip(monitor.chunks_exact_mut(2)) {
+            let (l, r) = self.tick();
+            m[0] = l as f32;
+            m[1] = r as f32;
+            o[0] = self.monitor.out.0 as f32;
+            o[1] = self.monitor.out.1 as f32;
         }
     }
 
@@ -330,6 +397,59 @@ impl Track {
         mt.drums = mt.drums.max(d.abs());
         mt.out_l = mt.out_l.max(l.abs());
         mt.out_r = mt.out_r.max(r.abs());
+
+        // The monitor: computed from the same signals, after the mix, never feeding back.
+        let mon = &mut self.monitor;
+        if mon.current.is_none() && mon.target.is_none() {
+            mon.out = (l, r);
+        } else {
+            if mon.current != mon.target {
+                // Fade back to the mix, then switch layer (with fresh echo/reverb).
+                mon.amount -= SOLO_RAMP;
+                if mon.amount <= 0.0 {
+                    mon.amount = 0.0;
+                    mon.current = mon.target;
+                    mon.echo = PingPong::new(3 * SIXTEENTH as usize, ECHO_FEEDBACK);
+                    mon.reverb = Reverb::new();
+                    mon.dc = Default::default();
+                }
+            } else {
+                mon.amount = (mon.amount + SOLO_RAMP).min(1.0);
+            }
+            let fade = if clock < fade_len { let x = clock as f64 / fade_len as f64; x * x } else { 1.0 };
+            let (sl, sr) = match mon.current {
+                None => (0.0, 0.0),
+                Some(Solo::Space) => (el * ECHO_DRY * others + rl * REVERB_WET, er * ECHO_DRY * others + rr * REVERB_WET),
+                Some(solo) => {
+                    // The layer's dry signal, its echo (glitches only) and its own reverb.
+                    let (dry, echo_in, send) = match solo {
+                        Solo::Drone => ((dl * DRONE_DRY, dr * DRONE_DRY), (0.0, 0.0), (dl * DRONE_SEND, dr * DRONE_SEND)),
+                        Solo::Bass => ((b * BASS_DRY, b * BASS_DRY), (0.0, 0.0), (b * BASS_SEND, b * BASS_SEND)),
+                        Solo::Drums => ((d * DRUMS_DRY, d * DRUMS_DRY), (0.0, 0.0), (d * DRUMS_SEND, d * DRUMS_SEND)),
+                        Solo::Glitch1 => (
+                            (g1.0 * GLITCH1_DRY * others, g1.1 * GLITCH1_DRY * others),
+                            (g1.0 * GLITCH1_ECHO, g1.1 * GLITCH1_ECHO),
+                            (g1.0 * GLITCH1_SEND, g1.1 * GLITCH1_SEND),
+                        ),
+                        _ => (
+                            (g2.0 * GLITCH2_DRY * others, g2.1 * GLITCH2_DRY * others),
+                            (g2.0 * GLITCH2_ECHO, g2.1 * GLITCH2_ECHO),
+                            (g2.0 * GLITCH2_SEND, g2.1 * GLITCH2_SEND),
+                        ),
+                    };
+                    let (mel, mer) = mon.echo.process(echo_in.0, echo_in.1);
+                    let (wl, wr) = mon.reverb.process(send.0 + mel * ECHO_SEND, send.1 + mer * ECHO_SEND);
+                    (
+                        dry.0 + mel * ECHO_DRY * others + wl * REVERB_WET,
+                        dry.1 + mer * ECHO_DRY * others + wr * REVERB_WET,
+                    )
+                }
+            };
+            let sl = math::tanh(mon.dc[0].process(sl * fade) * MASTER_GAIN);
+            let sr = math::tanh(mon.dc[1].process(sr * fade) * MASTER_GAIN);
+            let a = mon.amount;
+            mon.out = (l + (sl - l) * a, r + (sr - r) * a);
+        }
         (l, r)
     }
 }

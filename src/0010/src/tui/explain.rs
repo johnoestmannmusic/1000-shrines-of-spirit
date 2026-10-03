@@ -57,6 +57,8 @@ pub const EXPLAINERS: &[(Panel, When, &str)] = &[
     // The piece as a whole.
     (General, When::Always, "0010 is not a recording. It is a program that composes and synthesises the music live, one sample at a time, forever."),
     (Flow, When::Always, "Press Tab to switch views: 1 pipeline (the sound travelling through each chain), 2 engine (the drone, glitches and effects opened up), 3 rhythm & harmony (chords and drums), 4 learn (how to make this yourself)."),
+    (Flow, When::Always, "In Learn, the Instruments lessons solo one layer at a time while explaining it. Press s to switch between the layer alone and the full mix, to hear how it fits."),
+    (General, When::Always, "Soloing only changes what you hear. The engine still makes the full mix underneath, so a recording always gets the whole piece, byte for byte the same as a render."),
     (Flow, When::Always, "View 4, Learn, walks through how this piece is made, lesson by lesson, with this version's real settings, so you could rebuild it in your own studio. Use the up and down arrows there to choose a lesson."),
     (General, When::Always, "This version's recipe is {recipe}. Paste it into --recipe to hear exactly this again."),
     (General, When::Always, "Every sample is computed from five seeds, four choices (scale, chord count, chord pace, drum kit) and a counter. The same inputs give the exact same music on any computer, now or in 20 years."),
