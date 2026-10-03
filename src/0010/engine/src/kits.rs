@@ -42,7 +42,7 @@ pub enum Kit {
 pub enum DrumSpace {
     /// Mono, dead centre (how every recipe without a space letter sounds).
     Centred,
-    /// Each hit panned a little: kick centred, snares ±20%, hats ±40%.
+    /// Each hit panned a little: kick centred, snares 45–65% out, hats 50–75%.
     Wide,
     /// Wide, plus a ping-pong tape echo on the snare-type hits.
     Tape,
@@ -75,7 +75,7 @@ impl DrumSpace {
     pub fn blurb(self) -> &'static str {
         match self {
             DrumSpace::Centred => "mono, every hit dead centre",
-            DrumSpace::Wide => "kick centred, snares ±20%, hats ±40%",
+            DrumSpace::Wide => "kick centred, snares 45–65% out, hats 50–75%",
             DrumSpace::Tape => "wide, plus a wobbly ping-pong tape echo on the snares",
         }
     }

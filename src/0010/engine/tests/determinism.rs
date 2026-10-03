@@ -33,7 +33,7 @@ const SECONDS: usize = 30;
 
 /// The sound of the canonical track. If this changes, the music changed:
 /// only update it deliberately, as a new version of the piece.
-const GOLDEN_HASH: u64 = 0x29871a38a647260d;
+const GOLDEN_HASH: u64 = 0x3231a5d529d9a713;
 
 /// The golden hash from before "drum space" existed. Recipes without a space
 /// letter parse as Centred and must still sound exactly as they did.

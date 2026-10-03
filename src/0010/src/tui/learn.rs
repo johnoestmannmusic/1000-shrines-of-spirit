@@ -831,8 +831,8 @@ fn instrument_text(ui: &Ui) -> (String, Vec<String>) {
 fn space_tip(space: DrumSpace) -> &'static str {
     match space {
         DrumSpace::Centred => "Every hit sits dead centre (Drum space: Centred). Try Wide at setup to spread snares and hats.",
-        DrumSpace::Wide => "Each hit gets its own pan, fixed in the break: the kick centred, snares within ±20%, hats within ±40%.",
-        DrumSpace::Tape => "Hits are panned (kick centred, snares ±20%, hats ±40%) and the snares feed a ping-pong tape echo: 268 ms, a slow wobble, darker and thinner each repeat.",
+        DrumSpace::Wide => "Each hit gets its own pan, fixed in the break: the kick centred, snares 45–65% to one side, hats 50–75%.",
+        DrumSpace::Tape => "Hits are panned (kick centred, snares 45–65%, hats 50–75%) and the snares feed a ping-pong tape echo, half-width: 268 ms, a slow wobble, darker and thinner each repeat.",
     }
 }
 

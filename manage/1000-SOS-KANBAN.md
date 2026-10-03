@@ -38,6 +38,17 @@ _None currently assigned._
 
 ### Completed
 
+#### 0010-PLAN-015 — Drum space: per-hit panning and tape echo
+
+- **Card Title:** Drum space: per-hit panning and tape echo
+- **Description:** The user found Pulse code clicks too centred. A setup option **Drum space** (after Drum kit; skipped for Off), default **Wide**; recipe letter C / W / T after the kit code (recipes without it load as Centred, bit-identical to before).
+  - **Centred:** mono, as before.
+  - **Wide:** pan rolled per hit from seed 5 when the break is built: kick centred, snares 45–65% to a random side, hats 50–75%. Panning only attenuates the far side (no gain boost into the punch bus / sampler); spread snares sit at 0.8 (`SPREAD_SNARE_LEVEL`). Room cross-feed 0.15.
+  - **Wide + tape echo:** Wide plus `TapeEcho` (delay.rs) on a snare-only stem: ping-pong at 3/16 (268 ms), wow/flutter from the clock, tanh + LP 2.5k + HP 150 in the loop, feedback 0.5, half-width output (`TAPE_WIDTH = 0.5`).
+  - `--space centred|wide|tape` on both programs, `?space=` on the web page; pipeline / rhythm / Learn / Insights text (`When::Panned`, `When::TapeEcho`).
+  - Tests: new golden hash `0x3231a5d529d9a713` (WASM matches), centred hash unchanged, drum bus mono when Centred. Previews: `src/0010/previews/space-{centred,wide,tape}-PCM.wav`.
+- **Status:** Done (approved by ear, 2026-10-03)
+
 #### 0010-PLAN-014 — Learn: per-instrument lessons with live solo (monitor-only)
 
 - **Card Title:** Learn: per-instrument lessons with live solo (monitor-only)

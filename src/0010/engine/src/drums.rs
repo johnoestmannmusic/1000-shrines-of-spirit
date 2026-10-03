@@ -32,6 +32,8 @@ pub const SLICES: usize = 32;
 const DECLICK: u64 = 24;
 /// Intro: the first phrases stay ambient.
 const SILENT_PHRASES: u64 = 2;
+/// Snare-type hits are this much quieter when the drums are spread (Wide, Wide + tape echo).
+const SPREAD_SNARE_LEVEL: f64 = 0.8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Voice {
@@ -254,24 +256,27 @@ impl Drums {
                     kits::cymbal(&p, *v, *vel, max_len, &mut rng)
                 }
             };
-            // Where this hit sits: kick centred; snare-type hits 10–20% to a random side,
-            // cymbals 20–40% (never dead centre, so the clicks always use the space).
-            let spread = match voice {
-                Voice::Kick => 0.0,
-                Voice::Snare | Voice::Ghost => 0.2,
-                _ => 0.4,
+            // Where this hit sits: kick centred; snare-type hits 45–65% to a random side,
+            // cymbals 50–75% (never near centre, so the clicks always use the space).
+            let (lo, hi) = match voice {
+                Voice::Kick => (0.0, 0.0),
+                Voice::Snare | Voice::Ghost => (0.45, 0.65),
+                _ => (0.5, 0.75),
             };
-            let pan = if space == DrumSpace::Centred || spread == 0.0 {
+            let pan = if space == DrumSpace::Centred || hi == 0.0 {
                 0.0
             } else {
                 let side = if pan_rng.chance(0.5) { -1.0 } else { 1.0 };
-                side * pan_rng.range(0.5, 1.0) * spread
+                side * pan_rng.range(lo, hi)
             };
+            // Panning only turns the far side down, so a panned hit never drives the bus
+            // harder than a centred one; snares also sit a little lower when spread.
             let (gl, gr) = if pan == 0.0 {
                 (1.0, 1.0)
             } else {
                 let (a, b) = crate::math::pan_gains(pan);
-                (a * core::f64::consts::SQRT_2, b * core::f64::consts::SQRT_2)
+                let level = if matches!(voice, Voice::Snare | Voice::Ghost) { SPREAD_SNARE_LEVEL } else { 1.0 };
+                (level * a / a.max(b), level * b / a.max(b))
             };
             add_scaled(&mut buf, *pos, &sound, gl);
             add_scaled(&mut buf_r, *pos, &sound, gr);
@@ -304,7 +309,7 @@ impl Drums {
 
         // A small room; wide spaces cross-feed it a little between the channels.
         let taps = [(529usize, 0.16), (811, 0.11), (1103, 0.08)];
-        let cross = if space == DrumSpace::Centred { 0.0 } else { 0.35 };
+        let cross = if space == DrumSpace::Centred { 0.0 } else { 0.15 };
         let (dry_l, dry_r) = (buf.clone(), buf_r.clone());
         let mut room_lp = [OnePole::new(4000.0, SR), OnePole::new(4000.0, SR)];
         for i in 0..len {

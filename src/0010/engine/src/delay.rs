@@ -46,6 +46,9 @@ impl PingPong {
     }
 }
 
+/// Stereo width of the tape echo's ping-pong (1 = hard left/right, 0 = mono).
+const TAPE_WIDTH: f64 = 0.5;
+
 /// A ping-pong tape echo for the drums' snare-type hits: the delay time
 /// wobbles (wow and flutter), and every repeat is saturated, darkened and
 /// thinned in the feedback loop, like a tape loop.
@@ -117,6 +120,8 @@ impl TapeEcho {
         self.left[self.pos] = sanitize(input + fb_r);
         self.right[self.pos] = sanitize(fb_l);
         self.pos = (self.pos + 1) % self.left.len();
-        (out_l, out_r)
+        // Narrow the bounces to about halfway out, so they don't jump hard left/right.
+        let (a, b) = ((1.0 + TAPE_WIDTH) * 0.5, (1.0 - TAPE_WIDTH) * 0.5);
+        (out_l * a + out_r * b, out_r * a + out_l * b)
     }
 }
