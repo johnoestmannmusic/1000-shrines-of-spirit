@@ -222,6 +222,10 @@ fn arrangement(ui: &Ui, buf: &mut Buffer, r: Rect) {
         let v = &ui.desc.drum_voices;
         put(buf, r, 0, 8, &format!("{} · {} at {:.0} BPM, played at 168", v.kit, ui.desc.break_pattern, v.source_bpm), fg(DIM));
     }
+    if r.height > 9 {
+        let space = ui.desc.settings.space;
+        put(buf, r, 0, 9, &format!("space: {} ({})", space.name().to_lowercase(), space.blurb()), fg(DIM));
+    }
 }
 
 fn chopper(ui: &Ui, buf: &mut Buffer, r: Rect) {

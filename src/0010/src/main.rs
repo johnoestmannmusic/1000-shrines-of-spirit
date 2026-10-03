@@ -3,7 +3,7 @@
 //!
 //! Run with no arguments to be asked everything. For scripting:
 //!
-//!     shrine-0010 [--mode play|render|both] [--label TEXT] [--recipe R] [--scale S] [--chords 1-4] [--pace half|jungle] [--kit K]
+//!     shrine-0010 [--mode play|render|both] [--label TEXT] [--recipe R] [--scale S] [--chords 1-4] [--pace half|jungle] [--kit K] [--space centred|wide|tape]
 //!                 [--seconds N] [--out FILE] [--seed1 N] … [--seed5 N]
 //!
 //! (`--mode` defaults to `play`.) The sound comes entirely from the
@@ -30,7 +30,7 @@ pub(crate) enum Mode {
 fn usage(msg: &str) -> ! {
     eprintln!("{msg}");
     eprintln!(
-        "usage: shrine-0010 [--mode play|render|both] [--label TEXT] [--recipe R] [--scale S] [--chords 1-4] [--pace half|jungle] [--kit K] [--seconds N] [--out FILE] [--seed1 N] … [--seed5 N]"
+        "usage: shrine-0010 [--mode play|render|both] [--label TEXT] [--recipe R] [--scale S] [--chords 1-4] [--pace half|jungle] [--kit K] [--space centred|wide|tape] [--seconds N] [--out FILE] [--seed1 N] … [--seed5 N]"
     );
     eprintln!("       shrine-0010            (asks for everything)");
     exit(2);
@@ -165,6 +165,7 @@ fn from_flags(args: Vec<String>) -> (Mode, Seeds, Settings, String, f64, String)
             "--scale" => settings.scale = cli::parse_scale(&value).unwrap_or_else(|| usage(&format!("bad scale: {value}"))),
             "--chords" => settings.chords = cli::parse_chords(&value).unwrap_or_else(|| usage(&format!("bad chords: {value} (1-4)"))),
             "--kit" => settings.kit = cli::parse_kit(&value).unwrap_or_else(|| usage(&format!("bad kit: {value}"))),
+            "--space" => settings.space = cli::parse_space(&value).unwrap_or_else(|| usage(&format!("bad drum space: {value}"))),
             "--pace" => settings.pace = cli::parse_pace(&value).unwrap_or_else(|| usage(&format!("bad pace: {value} (half or jungle)"))),
             _ => usage(&format!("unknown option: {flag}")),
         }

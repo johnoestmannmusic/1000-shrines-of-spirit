@@ -5,7 +5,7 @@
 use crate::math::cos_turns;
 use crate::rng::Rng;
 use crate::harmony::{bar_weights, Pace, Scale, SCALES};
-use crate::kits::{Kit, KITS};
+use crate::kits::{DrumSpace, Kit, KITS, SPACES};
 use crate::{Seeds, Settings, Track, DEFAULT_SEEDS, DEFAULT_SETTINGS, SAMPLE_RATE};
 use std::fs::File;
 use std::io::{self, BufRead, BufWriter, Seek, SeekFrom, Write};
@@ -98,15 +98,16 @@ pub fn parse_scale(s: &str) -> Option<Scale> {
 pub const TRACK: &str = "0010";
 
 /// A recipe: everything needed to regenerate a version of the track,
-/// e.g. `0010-LYD-3H-ACO-1000.9.1009.2026.168` (track, scale, chord count +
-/// pace (H half-time / J jungle), drum kit, seeds 1-5).
+/// e.g. `0010-LYD-3H-SUB-W-1000.9.1009.2026.168` (track, scale, chord count +
+/// pace (H half-time / J jungle), drum kit, drum space (C/W/T), seeds 1-5).
 pub fn recipe(seeds: Seeds, settings: Settings) -> String {
     format!(
-        "{TRACK}-{}-{}{}-{}-{}.{}.{}.{}.{}",
+        "{TRACK}-{}-{}{}-{}-{}-{}.{}.{}.{}.{}",
         settings.scale.code(),
         settings.chords,
         if settings.pace == Pace::Jungle { "J" } else { "H" },
         settings.kit.code(),
+        settings.space.code(),
         seeds.s1,
         seeds.s2,
         seeds.s3,
@@ -140,6 +141,14 @@ pub fn parse_recipe(code: &str) -> Option<(Seeds, Settings)> {
         }
         None => None,
     };
+    // The drum space letter; recipes from before it existed had mono drums.
+    let space = match DrumSpace::from_code(next) {
+        Some(s) => {
+            next = parts.next()?;
+            s
+        }
+        None => DrumSpace::Centred,
+    };
     let seeds: Vec<u64> = next.split('.').map(|s| s.parse().ok()).collect::<Option<_>>()?;
     if parts.next().is_some() || seeds.len() != 5 {
         return None;
@@ -147,7 +156,18 @@ pub fn parse_recipe(code: &str) -> Option<(Seeds, Settings)> {
     let seeds = Seeds { s1: seeds[0], s2: seeds[1], s3: seeds[2], s4: seeds[3], s5: seeds[4] };
     // Older recipes: seed 5 picked the kit, and 0 meant no drums.
     let kit = kit.unwrap_or_else(|| if seeds.s5 == 0 { Kit::Off } else { crate::kits::legacy_kit_for(seeds.s5) });
-    Some((seeds, Settings { scale, chords, pace, kit }))
+    Some((seeds, Settings { scale, chords, pace, kit, space }))
+}
+
+/// A drum space by number (1-3), letter or name.
+pub fn parse_space(s: &str) -> Option<DrumSpace> {
+    let s = s.trim().to_ascii_lowercase();
+    match s.as_str() {
+        "1" | "c" | "centred" | "centered" | "mono" => Some(DrumSpace::Centred),
+        "2" | "w" | "wide" => Some(DrumSpace::Wide),
+        "3" | "t" | "tape" | "wide+tape" | "echo" => Some(DrumSpace::Tape),
+        _ => None,
+    }
 }
 
 /// A kit by number (1-11), code (e.g. FMM) or (the start of) its name.
@@ -195,8 +215,17 @@ pub fn ask_settings(input: &mut impl BufRead) -> Settings {
         println!("  {}) {:<16} {}", i + 1, k.name(), k.blurb());
     }
     let kit = ask_until(input, "Drum kit (seed 5 shapes it)", "1", "Enter 1-11, a code or a kit name (11 = Off).", parse_kit);
+    let space = if kit == Kit::Off {
+        DrumSpace::Centred
+    } else {
+        println!("Drum space:");
+        for (i, s) in SPACES.iter().enumerate() {
+            println!("  {}) {:<17} {}", i + 1, s.name(), s.blurb());
+        }
+        ask_until(input, "Drum space", "2", "Enter 1, 2 or 3.", parse_space)
+    };
     println!();
-    Settings { scale, chords, pace, kit }
+    Settings { scale, chords, pace, kit, space }
 }
 
 pub fn ask_seeds(input: &mut impl BufRead) -> Seeds {
@@ -301,7 +330,11 @@ pub fn wav_info(title: &str, software: &str, seeds: Seeds, settings: Settings) -
     let code = recipe(seeds, settings);
     let key = crate::harmony::key_name(crate::harmony::key_for(seeds.s1));
     let pace = if settings.pace == Pace::Jungle { "jungle" } else { "half-time" };
-    let drums = if settings.kit == Kit::Off { "off".to_string() } else { format!("{} kit", settings.kit.name()) };
+    let drums = if settings.kit == Kit::Off {
+        "off".to_string()
+    } else {
+        format!("{} kit, {}", settings.kit.name(), settings.space.name().to_lowercase())
+    };
     WavInfo {
         title: title.to_string(),
         software: software.to_string(),
@@ -473,10 +506,16 @@ mod tests {
 
     #[test]
     fn recipes_round_trip() {
-        assert_eq!(recipe(DEFAULT_SEEDS, DEFAULT_SETTINGS), "0010-LYD-3H-SUB-1000.9.1009.2026.168");
+        assert_eq!(recipe(DEFAULT_SEEDS, DEFAULT_SETTINGS), "0010-LYD-3H-SUB-W-1000.9.1009.2026.168");
+        // Recipes from before drum space existed had mono drums.
+        assert_eq!(parse_recipe("0010-LYD-3H-SUB-1.2.3.4.5").unwrap().1.space, DrumSpace::Centred);
+        assert_eq!(parse_recipe("0010-LYD-3H-PCM-T-1.2.3.4.5").unwrap().1.space, DrumSpace::Tape);
         // Older recipes without a kit code still read, with the kit seed 5 used to pick.
         let (seeds, settings) = parse_recipe("0010-LYD-3H-1000.9.1009.2026.168").unwrap();
-        assert_eq!((seeds, settings), (DEFAULT_SEEDS, Settings { kit: Kit::Acoustic, ..DEFAULT_SETTINGS }));
+        assert_eq!(
+            (seeds, settings),
+            (DEFAULT_SEEDS, Settings { kit: Kit::Acoustic, space: DrumSpace::Centred, ..DEFAULT_SETTINGS })
+        );
         // …and seed 5 = 0 meant "no drums".
         assert_eq!(parse_recipe("0010-LYD-3H-1.2.3.4.0").unwrap().1.kit, Kit::Off);
         // New recipes say OFF explicitly, and seed 5 = 0 is an ordinary seed.
@@ -488,13 +527,14 @@ mod tests {
                 chords: (i % 4) as u8 + 1,
                 pace: if i % 2 == 0 { Pace::Jungle } else { Pace::HalfTime },
                 kit: KITS[i % KITS.len()],
+                space: SPACES[i % SPACES.len()],
             };
             let seeds = Seeds { s1: i as u64, s2: u64::MAX, s3: 0, s4: 42, s5: 7 };
             let code = recipe(seeds, settings);
             assert_eq!(parse_recipe(&code), Some((seeds, settings)), "{code}");
             assert_eq!(parse_recipe(&code.to_ascii_lowercase()), Some((seeds, settings)));
         }
-        for bad in ["", "0009-LYD-3H-1.2.3.4.5", "0010-XXX-3H-1.2.3.4.5", "0010-LYD-5H-1.2.3.4.5", "0010-LYD-3Q-1.2.3.4.5", "0010-LYD-3H-1.2.3.4", "0010-LYD-3H-1.2.3.4.x", "0010-LYD-3H-XYZ-1.2.3.4.5"] {
+        for bad in ["", "0009-LYD-3H-1.2.3.4.5", "0010-XXX-3H-1.2.3.4.5", "0010-LYD-5H-1.2.3.4.5", "0010-LYD-3Q-1.2.3.4.5", "0010-LYD-3H-1.2.3.4", "0010-LYD-3H-1.2.3.4.x", "0010-LYD-3H-XYZ-1.2.3.4.5", "0010-LYD-3H-SUB-Q-1.2.3.4.5"] {
             assert_eq!(parse_recipe(bad), None, "{bad}");
         }
     }

@@ -4,7 +4,7 @@
 //! Run with no arguments to be asked for the seeds, file name and length.
 //! For scripting, pass any of these flags instead (no questions asked):
 //!
-//!     render-0010 [--recipe R] [--seconds N] [--out FILE] [--scale S] [--chords 1-4] [--pace half|jungle] [--kit K] [--seed1 N] … [--seed5 N]
+//!     render-0010 [--recipe R] [--seconds N] [--out FILE] [--scale S] [--chords 1-4] [--pace half|jungle] [--kit K] [--space centred|wide|tape] [--seed1 N] … [--seed5 N]
 //!
 //! The piece itself is endless; the length decides how much of it to capture,
 //! and the end of the file fades out.
@@ -17,7 +17,7 @@ use std::process::exit;
 fn usage(msg: &str) -> ! {
     eprintln!("{msg}");
     eprintln!(
-        "usage: render-0010 [--recipe R] [--seconds N] [--out FILE] [--scale S] [--chords 1-4] [--pace half|jungle] [--kit K] [--seed1 N] … [--seed5 N]"
+        "usage: render-0010 [--recipe R] [--seconds N] [--out FILE] [--scale S] [--chords 1-4] [--pace half|jungle] [--kit K] [--space centred|wide|tape] [--seed1 N] … [--seed5 N]"
     );
     eprintln!("       render-0010            (asks for everything)");
     exit(2);
@@ -50,6 +50,7 @@ fn from_flags(args: Vec<String>) -> (Seeds, Settings, String, f64) {
             }
             "--scale" => settings.scale = cli::parse_scale(&value).unwrap_or_else(|| usage(&format!("bad scale: {value}"))),
             "--chords" => settings.chords = cli::parse_chords(&value).unwrap_or_else(|| usage(&format!("bad chords: {value} (1-4)"))),
+            "--space" => settings.space = cli::parse_space(&value).unwrap_or_else(|| usage(&format!("bad space: {value} (centred, wide or tape)"))),
             "--kit" => settings.kit = cli::parse_kit(&value).unwrap_or_else(|| usage(&format!("bad kit: {value}"))),
             "--pace" => settings.pace = cli::parse_pace(&value).unwrap_or_else(|| usage(&format!("bad pace: {value} (half or jungle)"))),
             _ => usage(&format!("unknown option: {flag}")),

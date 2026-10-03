@@ -37,6 +37,54 @@ pub enum Kit {
     Off,
 }
 
+/// Where the drums sit in the stereo field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DrumSpace {
+    /// Mono, dead centre (how every recipe without a space letter sounds).
+    Centred,
+    /// Each hit panned a little: kick centred, snares ±20%, hats ±40%.
+    Wide,
+    /// Wide, plus a ping-pong tape echo on the snare-type hits.
+    Tape,
+}
+
+pub const SPACES: [DrumSpace; 3] = [DrumSpace::Centred, DrumSpace::Wide, DrumSpace::Tape];
+
+impl DrumSpace {
+    /// One letter in recipes.
+    pub fn code(self) -> &'static str {
+        match self {
+            DrumSpace::Centred => "C",
+            DrumSpace::Wide => "W",
+            DrumSpace::Tape => "T",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<DrumSpace> {
+        SPACES.iter().copied().find(|s| s.code().eq_ignore_ascii_case(code))
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            DrumSpace::Centred => "Centred",
+            DrumSpace::Wide => "Wide",
+            DrumSpace::Tape => "Wide + tape echo",
+        }
+    }
+
+    pub fn blurb(self) -> &'static str {
+        match self {
+            DrumSpace::Centred => "mono, every hit dead centre",
+            DrumSpace::Wide => "kick centred, snares ±20%, hats ±40%",
+            DrumSpace::Tape => "wide, plus a wobbly ping-pong tape echo on the snares",
+        }
+    }
+
+    pub fn index(self) -> usize {
+        SPACES.iter().position(|s| *s == self).unwrap_or(0)
+    }
+}
+
 /// In setup order: the light, minimal kits first.
 pub const KITS: [Kit; 11] = [
     Kit::SubClicks,
@@ -426,26 +474,31 @@ fn shape(v: &mut [f64], boost: f64, ms: f64, drive: f64, asym: f64) {
 
 /// Feed-forward compressor over the whole break (3 ms attack, 80 ms release,
 /// 4:1 above −12 dB of the peak), then an asymmetric soft clip, blended with
-/// the dry break by `amount` (light kits keep only a touch).
-pub fn punch_bus(buf: &mut [f64], amount: f64) {
-    let dry_peak = buf.iter().fold(1e-9f64, |a, x| a.max(x.abs()));
-    let dry: Vec<f64> = buf.iter().map(|x| x / dry_peak).collect();
-    let peak = buf.iter().fold(1e-9f64, |a, x| a.max(x.abs()));
-    let thr = peak * 0.25; // −12 dB
+/// the dry break by `amount` (light kits keep only a touch). Stereo-linked:
+/// one envelope and one gain for both channels, so the image never shifts
+/// (with identical channels this is exactly the mono computation).
+pub fn punch_bus(left: &mut [f64], right: &mut [f64], amount: f64) {
+    let joint = |l: &[f64], r: &[f64]| l.iter().zip(r).fold(1e-9f64, |a, (x, y)| a.max(x.abs()).max(y.abs()));
+    let dry_peak = joint(left, right);
+    let dry_l: Vec<f64> = left.iter().map(|x| x / dry_peak).collect();
+    let dry_r: Vec<f64> = right.iter().map(|x| x / dry_peak).collect();
+    let thr = dry_peak * 0.25; // −12 dB
     let att = 1.0 - exp(-1.0 / (0.003 * SR));
     let rel = 1.0 - exp(-1.0 / (0.08 * SR));
     let mut env = 0.0f64;
-    for x in buf.iter_mut() {
-        let a = x.abs();
+    for (l, r) in left.iter_mut().zip(right.iter_mut()) {
+        let a = l.abs().max(r.abs());
         env += (if a > env { att } else { rel }) * (a - env);
         if env > thr {
             // 4:1: gain = (thr · (env/thr)^(1/4)) / env, with x^(1/4) = √√x.
             let over = env / thr;
-            *x *= thr * over.sqrt().sqrt() / env;
+            let g = thr * over.sqrt().sqrt() / env;
+            *l *= g;
+            *r *= g;
         }
     }
-    let peak = buf.iter().fold(1e-9f64, |a, x| a.max(x.abs()));
-    for (x, d) in buf.iter_mut().zip(dry) {
+    let peak = joint(left, right);
+    for (x, d) in left.iter_mut().zip(dry_l).chain(right.iter_mut().zip(dry_r)) {
         let v = *x / peak * 1.4;
         let wet = tanh(v + 0.06) - tanh(0.06);
         *x = d + (wet - d) * amount;

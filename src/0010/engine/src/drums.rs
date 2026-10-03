@@ -16,7 +16,7 @@
 
 use crate::filter::{OnePole, Svf};
 use crate::harmony::Harmony;
-use crate::kits::{self, KitParams};
+use crate::kits::{self, DrumSpace, KitParams};
 use crate::math::{sanitize, tanh};
 use crate::modulate::Mods;
 use crate::rng::Rng;
@@ -122,6 +122,17 @@ const PATTERNS: [(&str, &[usize], &[usize], &[usize]); 3] = [
 
 const SR: f64 = SAMPLE_RATE as f64;
 
+fn add_scaled(buf: &mut [f64], at: usize, sound: &[f64], gain: f64) {
+    if gain == 1.0 {
+        return add(buf, at, sound);
+    }
+    for (i, s) in sound.iter().enumerate() {
+        if let Some(b) = buf.get_mut(at + i) {
+            *b += s * gain;
+        }
+    }
+}
+
 fn add(buf: &mut [f64], at: usize, sound: &[f64]) {
     for (i, s) in sound.iter().enumerate() {
         if let Some(b) = buf.get_mut(at + i) {
@@ -138,13 +149,16 @@ pub struct Drums {
     /// A sixteenth at the break's source tempo, and the playback rate to 168 BPM.
     src16: usize,
     rate: f64,
-    /// The sampled break.
+    /// The sampled break (stereo), and the snare-type hits alone (mono) for the tape echo.
     brk: Vec<f64>,
+    brk_r: Vec<f64>,
+    perc: Vec<f64>,
+    space: DrumSpace,
     /// (source position, voice) of every hit in the break.
     hits: Vec<(usize, Voice)>,
     pattern: &'static str,
     plans: [Option<Plan>; 2],
-    highpass: Svf,
+    highpass: [Svf; 2],
     hp_mix: f64,
     // Display-only.
     last_hits: Vec<Voice>,
@@ -153,7 +167,7 @@ pub struct Drums {
 }
 
 impl Drums {
-    pub fn new(seed: u64, kit: crate::kits::Kit, harmony: &Harmony) -> Self {
+    pub fn new(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony) -> Self {
         let params = KitParams::new(seed, kit, harmony);
         let src16 = (60.0 / params.source_bpm / 4.0 * SR).round() as usize;
         let mut d = Drums {
@@ -163,10 +177,13 @@ impl Drums {
             src16,
             params,
             brk: Vec::new(),
+            brk_r: Vec::new(),
+            perc: Vec::new(),
+            space,
             hits: Vec::new(),
             pattern: "off",
             plans: [None, None],
-            highpass: Svf::new(5000.0, 0.7, SR),
+            highpass: [Svf::new(5000.0, 0.7, SR), Svf::new(5000.0, 0.7, SR)],
             hp_mix: 0.0,
             last_hits: Vec::new(),
             hit_count: 0,
@@ -189,7 +206,11 @@ impl Drums {
         self.pattern = name;
         let p = self.params.clone();
         let src16 = self.src16;
-        let mut buf = vec![0.0; self.break_len() + SR as usize];
+        let len = self.break_len() + SR as usize;
+        let (mut buf, mut buf_r, mut perc) = (vec![0.0; len], vec![0.0; len], vec![0.0; len]);
+        // Panning has its own random stream, so it never shifts the break itself.
+        let mut pan_rng = Rng::stream(self.seed, 0x9A4);
+        let space = self.space;
         let swing = (src16 as f64 * 0.05) as usize;
         let mut hits: Vec<(usize, Voice, f64)> = Vec::new();
         let at = |step: usize, rng: &mut Rng| {
@@ -233,42 +254,90 @@ impl Drums {
                     kits::cymbal(&p, *v, *vel, max_len, &mut rng)
                 }
             };
-            add(&mut buf, *pos, &sound);
+            // Where this hit sits: kick centred; snare-type hits 10–20% to a random side,
+            // cymbals 20–40% (never dead centre, so the clicks always use the space).
+            let spread = match voice {
+                Voice::Kick => 0.0,
+                Voice::Snare | Voice::Ghost => 0.2,
+                _ => 0.4,
+            };
+            let pan = if space == DrumSpace::Centred || spread == 0.0 {
+                0.0
+            } else {
+                let side = if pan_rng.chance(0.5) { -1.0 } else { 1.0 };
+                side * pan_rng.range(0.5, 1.0) * spread
+            };
+            let (gl, gr) = if pan == 0.0 {
+                (1.0, 1.0)
+            } else {
+                let (a, b) = crate::math::pan_gains(pan);
+                (a * core::f64::consts::SQRT_2, b * core::f64::consts::SQRT_2)
+            };
+            add_scaled(&mut buf, *pos, &sound, gl);
+            add_scaled(&mut buf_r, *pos, &sound, gr);
+            if space == DrumSpace::Tape && matches!(voice, Voice::Snare | Voice::Ghost) {
+                add(&mut perc, *pos, &sound);
+            }
         }
         self.hits = hits.iter().map(|(p, v, _)| (*p, *v)).collect();
 
         // Punch: compress and soft-clip the whole break, as if bussed through hardware.
-        kits::punch_bus(&mut buf, p.punch);
+        kits::punch_bus(&mut buf, &mut buf_r, p.punch);
 
-        // The sampler: saturation, sample-and-hold, bit depth, a lowpass, a small room.
-        let peak = buf.iter().fold(1e-9f64, |a, x| a.max(x.abs()));
-        let mut lp = OnePole::new(p.lp_hz, SR);
+        // The sampler: saturation, sample-and-hold, bit depth, a lowpass.
+        let joint = |l: &[f64], r: &[f64]| l.iter().zip(r).fold(1e-9f64, |a, (x, y)| a.max(x.abs()).max(y.abs()));
         let levels = (1u64 << (p.bits - 1)) as f64;
-        let mut held = 0.0;
-        for (i, x) in buf.iter_mut().enumerate() {
-            let v = tanh(1.4 * *x / peak) / tanh(1.4);
-            if i % p.hold == 0 {
-                held = (v * levels).round() / levels;
+        let sample = |b: &mut [f64], peak: f64| {
+            let mut lp = OnePole::new(p.lp_hz, SR);
+            let mut held = 0.0;
+            for (i, x) in b.iter_mut().enumerate() {
+                let v = tanh(1.4 * *x / peak) / tanh(1.4);
+                if i % p.hold == 0 {
+                    held = (v * levels).round() / levels;
+                }
+                *x = lp.process(held);
             }
-            *x = lp.process(held);
-        }
+        };
+        let peak = joint(&buf, &buf_r);
+        sample(&mut buf, peak);
+        sample(&mut buf_r, peak);
+
+        // A small room; wide spaces cross-feed it a little between the channels.
         let taps = [(529usize, 0.16), (811, 0.11), (1103, 0.08)];
-        let dry = buf.clone();
-        let mut room_lp = OnePole::new(4000.0, SR);
-        for i in 0..buf.len() {
-            let mut wet = 0.0;
+        let cross = if space == DrumSpace::Centred { 0.0 } else { 0.35 };
+        let (dry_l, dry_r) = (buf.clone(), buf_r.clone());
+        let mut room_lp = [OnePole::new(4000.0, SR), OnePole::new(4000.0, SR)];
+        for i in 0..len {
+            let (mut wl, mut wr) = (0.0, 0.0);
             for (d, g) in taps {
                 if i >= d {
-                    wet += dry[i - d] * g;
+                    if cross == 0.0 {
+                        wl += dry_l[i - d] * g;
+                        wr += dry_r[i - d] * g;
+                    } else {
+                        wl += (dry_l[i - d] * (1.0 - cross) + dry_r[i - d] * cross) * g;
+                        wr += (dry_r[i - d] * (1.0 - cross) + dry_l[i - d] * cross) * g;
+                    }
                 }
             }
-            buf[i] += room_lp.process(wet);
+            buf[i] += room_lp[0].process(wl);
+            buf_r[i] += room_lp[1].process(wr);
         }
-        let peak = buf.iter().fold(1e-9f64, |a, x| a.max(x.abs()));
-        for x in buf.iter_mut() {
+        let peak = joint(&buf, &buf_r);
+        for x in buf.iter_mut().chain(buf_r.iter_mut()) {
             *x = sanitize(*x * 0.9 / peak);
         }
+        if space == DrumSpace::Tape {
+            let peak = perc.iter().fold(1e-9f64, |a, x| a.max(x.abs()));
+            sample(&mut perc, peak);
+            let peak = perc.iter().fold(1e-9f64, |a, x| a.max(x.abs()));
+            for x in perc.iter_mut() {
+                *x = sanitize(*x * 0.9 / peak);
+            }
+        }
         self.brk = buf;
+        self.brk_r = buf_r;
+        self.perc = perc;
     }
 
     /// The arrangement section for phrase `p` (pure).
@@ -351,15 +420,16 @@ impl Drums {
         Plan { bar, section, fill, steps, join }
     }
 
-    fn sample_at(&self, pos: f64) -> f64 {
+    fn sample_at(&self, pos: f64) -> (f64, f64, f64) {
         let i = pos.floor();
         let f = pos - i;
         let i = i as usize;
-        match (self.brk.get(i), self.brk.get(i + 1)) {
-            (Some(a), Some(b)) => a + (b - a) * f,
+        let read = |b: &[f64]| match (b.get(i), b.get(i + 1)) {
+            (Some(a), Some(c)) => a + (c - a) * f,
             (Some(a), None) => *a,
             _ => 0.0,
-        }
+        };
+        (read(&self.brk), read(&self.brk_r), if self.perc.is_empty() { 0.0 } else { read(&self.perc) })
     }
 
     fn current(&mut self, bar: u64, mods: &Mods) -> Plan {
@@ -386,9 +456,10 @@ impl Drums {
         }
     }
 
-    pub fn next(&mut self, clock: u64, mods: &Mods) -> f64 {
+    /// (left, right, snare-type hits for the tape echo)
+    pub fn next(&mut self, clock: u64, mods: &Mods) -> (f64, f64, f64) {
         if !self.enabled {
-            return 0.0;
+            return (0.0, 0.0, 0.0);
         }
         let bar = clock / BAR;
         let in_bar = clock % BAR;
@@ -440,7 +511,7 @@ impl Drums {
             Op::PitchDown => (base + tt * rate * 0.75, t, SIXTEENTH),
             Op::Half => (base + (tt + (i % 2) as f64 * SIXTEENTH as f64) * rate * 0.5, t, SIXTEENTH),
         };
-        let mut x = if section == Section::Out { 0.0 } else { self.sample_at(pos) };
+        let (mut x, mut xr, mut xp) = if section == Section::Out { (0.0, 0.0, 0.0) } else { self.sample_at(pos) };
 
         // Fade only where the sequence actually jumps.
         let joined_in = joined && st.op != Op::Roll;
@@ -448,13 +519,18 @@ impl Drums {
         let to_end = local_len - local;
         let fade_out = if next_joins && st.op != Op::Roll { 1.0 } else { (to_end as f64 / DECLICK as f64).min(1.0) };
         x *= fade_in * fade_out;
+        xr *= fade_in * fade_out;
+        xp *= fade_in * fade_out;
 
-        // Hats-only sections: glide a high-pass in, so only the cymbals remain.
+        // Hats-only sections: glide a high-pass in, so only the cymbals remain
+        // (and the snare-only tape send fades out with it).
         let target = if section == Section::HatsOnly { 1.0 } else { 0.0 };
         self.hp_mix += (target - self.hp_mix) * 0.0005;
-        let low = self.highpass.process(x).low;
+        let low = self.highpass[0].process(x).low;
         let high = x - low;
-        x + (high - x) * self.hp_mix
+        let low_r = self.highpass[1].process(xr).low;
+        let high_r = xr - low_r;
+        (x + (high - x) * self.hp_mix, xr + (high_r - xr) * self.hp_mix, xp * (1.0 - self.hp_mix))
     }
 }
 
@@ -462,6 +538,10 @@ impl Drums {
 impl Drums {
     pub fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    pub fn space(&self) -> DrumSpace {
+        self.space
     }
 
     pub fn pattern_name(&self) -> &'static str {
@@ -492,7 +572,8 @@ impl Drums {
         }
         let n = self.break_len();
         let chunk = n.div_ceil(points);
-        self.brk[..n].chunks(chunk).map(|c| c.iter().fold(0.0f64, |a, x| a.max(x.abs())) as f32).collect()
+        let both: Vec<f64> = self.brk[..n].iter().zip(&self.brk_r[..n]).map(|(l, r)| l.abs().max(r.abs())).collect();
+        both.chunks(chunk).map(|c| c.iter().fold(0.0f64, |a, x| a.max(x.abs())) as f32).collect()
     }
 
     /// The main voice in each of the 32 slices (for labelling the chop grid).

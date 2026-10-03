@@ -37,7 +37,7 @@ pub mod cli;
 mod wasm;
 
 use bass::Bass;
-use delay::PingPong;
+use delay::{PingPong, TapeEcho};
 use drone::Drone;
 use drums::Drums;
 use harmony::{Harmony, Pace, Scale};
@@ -73,10 +73,18 @@ pub struct Settings {
     pub pace: Pace,
     /// The drum kit family (seed 5 shapes it).
     pub kit: kits::Kit,
+    /// Where the drums sit in the stereo field.
+    pub space: kits::DrumSpace,
 }
 
 pub const DEFAULT_SETTINGS: Settings =
-    Settings { scale: Scale::Lydian, chords: 3, pace: Pace::HalfTime, kit: kits::Kit::SubClicks };
+    Settings {
+        scale: Scale::Lydian,
+        chords: 3,
+        pace: Pace::HalfTime,
+        kit: kits::Kit::SubClicks,
+        space: kits::DrumSpace::Wide,
+    };
 
 // Sixteenth note ≈ 84 BPM, divisible by 1-4 for ratchets.
 const SIXTEENTH: u64 = 8568;
@@ -97,6 +105,12 @@ const ECHO_SEND: f64 = 0.5;
 const ECHO_FEEDBACK: f64 = 0.55;
 const DRUMS_DRY: f64 = 0.85;
 const DRUMS_SEND: f64 = 0.1;
+/// The drums' tape echo (Wide + tape echo only): send of the snare-type hits,
+/// its return in the mix, and a little of it into the reverb.
+const TAPE_SEND: f64 = 0.55;
+const TAPE_WET: f64 = 0.6;
+const TAPE_REVERB: f64 = 0.15;
+const TAPE_FEEDBACK: f64 = 0.5;
 
 // Making room for the drums: while they play, the drone dips and darkens.
 /// Follower times (seconds) for "drums are playing" and for individual hits.
@@ -216,6 +230,7 @@ impl Follower {
 
 pub struct Track {
     seeds: Seeds,
+    tape: TapeEcho,
     monitor: Monitor,
     presence: Follower,
     punch: Follower,
@@ -254,6 +269,7 @@ impl Track {
             Harmony::new(settings.scale, settings.chords.clamp(1, 4) as usize, settings.pace, key, &mut first, &mut rest);
         Track {
             seeds,
+            tape: TapeEcho::new(3 * drums::SIXTEENTH as usize, TAPE_FEEDBACK),
             monitor: Monitor::new(),
             presence: Follower::new(PRESENCE_ATTACK, PRESENCE_RELEASE),
             punch: Follower::new(PUNCH_ATTACK, PUNCH_RELEASE),
@@ -261,7 +277,7 @@ impl Track {
             duck_gain: 1.0,
             settings,
             harmony: harmony.clone(),
-            drums: Drums::new(seeds.s5, settings.kit, &harmony),
+            drums: Drums::new(seeds.s5, settings.kit, settings.space, &harmony),
             clock: 0,
             mods: Mods::new(seeds.s1),
             glitch1: Layer::new(layer1(&harmony), seeds.s2, 0x61),
@@ -334,9 +350,16 @@ impl Track {
         self.history.push(dl, dr);
 
         // 5 (computed early): jungle drums, and how present they are right now.
-        let d = self.drums.next(clock, &self.mods);
-        let presence = (self.presence.process(d.abs()) / PRESENCE_REF).min(1.0);
-        let punch = (self.punch.process(d.abs()) / PUNCH_REF).min(1.0);
+        let (d, d_r, d_perc) = self.drums.next(clock, &self.mods);
+        let d_abs = d.abs().max(d_r.abs());
+        let presence = (self.presence.process(d_abs) / PRESENCE_REF).min(1.0);
+        let punch = (self.punch.process(d_abs) / PUNCH_REF).min(1.0);
+        // The tape echo only runs in "Wide + tape echo".
+        let (tl, tr) = if self.settings.space == kits::DrumSpace::Tape {
+            self.tape.process(clock, d_perc * TAPE_SEND)
+        } else {
+            (0.0, 0.0)
+        };
         // Make room: the drone dips, pumps with each hit, and loses some top end.
         // (With no drums, presence and punch stay exactly 0 and nothing changes.)
         let duck = (1.0 - DUCK_DEPTH * presence) * (1.0 - PUMP_DEPTH * punch);
@@ -364,16 +387,20 @@ impl Track {
 
         // Shared long reverb.
         let (rl, rr) = self.reverb.process(
-            dl * DRONE_SEND + b * BASS_SEND + g1.0 * GLITCH1_SEND + g2.0 * GLITCH2_SEND + el * ECHO_SEND + d * DRUMS_SEND,
-            dr * DRONE_SEND + b * BASS_SEND + g1.1 * GLITCH1_SEND + g2.1 * GLITCH2_SEND + er * ECHO_SEND + d * DRUMS_SEND,
+            dl * DRONE_SEND + b * BASS_SEND + g1.0 * GLITCH1_SEND + g2.0 * GLITCH2_SEND + el * ECHO_SEND + d * DRUMS_SEND
+                + tl * TAPE_REVERB,
+            dr * DRONE_SEND + b * BASS_SEND + g1.1 * GLITCH1_SEND + g2.1 * GLITCH2_SEND + er * ECHO_SEND + d_r * DRUMS_SEND
+                + tr * TAPE_REVERB,
         );
 
         let mut l = dl * DRONE_DRY + b * BASS_DRY + (g1.0 * GLITCH1_DRY + g2.0 * GLITCH2_DRY + el * ECHO_DRY) * others
             + d * DRUMS_DRY
-            + rl * REVERB_WET;
+            + rl * REVERB_WET
+            + tl * TAPE_WET;
         let mut r = dr * DRONE_DRY + b * BASS_DRY + (g1.1 * GLITCH1_DRY + g2.1 * GLITCH2_DRY + er * ECHO_DRY) * others
-            + d * DRUMS_DRY
-            + rr * REVERB_WET;
+            + d_r * DRUMS_DRY
+            + rr * REVERB_WET
+            + tr * TAPE_WET;
 
         let fade_len = FADE_IN_SECONDS * SAMPLE_RATE as u64;
         if clock < fade_len {
@@ -394,7 +421,8 @@ impl Track {
         mt.echo_l = mt.echo_l.max(el.abs());
         mt.echo_r = mt.echo_r.max(er.abs());
         mt.reverb = mt.reverb.max(rl.abs()).max(rr.abs());
-        mt.drums = mt.drums.max(d.abs());
+        mt.drums = mt.drums.max(d_abs);
+        mt.tape = mt.tape.max(tl.abs()).max(tr.abs());
         mt.out_l = mt.out_l.max(l.abs());
         mt.out_r = mt.out_r.max(r.abs());
 
@@ -419,13 +447,20 @@ impl Track {
             let fade = if clock < fade_len { let x = clock as f64 / fade_len as f64; x * x } else { 1.0 };
             let (sl, sr) = match mon.current {
                 None => (0.0, 0.0),
-                Some(Solo::Space) => (el * ECHO_DRY * others + rl * REVERB_WET, er * ECHO_DRY * others + rr * REVERB_WET),
+                Some(Solo::Space) => (
+                    el * ECHO_DRY * others + rl * REVERB_WET + tl * TAPE_WET,
+                    er * ECHO_DRY * others + rr * REVERB_WET + tr * TAPE_WET,
+                ),
                 Some(solo) => {
                     // The layer's dry signal, its echo (glitches only) and its own reverb.
                     let (dry, echo_in, send) = match solo {
                         Solo::Drone => ((dl * DRONE_DRY, dr * DRONE_DRY), (0.0, 0.0), (dl * DRONE_SEND, dr * DRONE_SEND)),
                         Solo::Bass => ((b * BASS_DRY, b * BASS_DRY), (0.0, 0.0), (b * BASS_SEND, b * BASS_SEND)),
-                        Solo::Drums => ((d * DRUMS_DRY, d * DRUMS_DRY), (0.0, 0.0), (d * DRUMS_SEND, d * DRUMS_SEND)),
+                        Solo::Drums => (
+                            (d * DRUMS_DRY + tl * TAPE_WET, d_r * DRUMS_DRY + tr * TAPE_WET),
+                            (0.0, 0.0),
+                            (d * DRUMS_SEND + tl * TAPE_REVERB, d_r * DRUMS_SEND + tr * TAPE_REVERB),
+                        ),
                         Solo::Glitch1 => (
                             (g1.0 * GLITCH1_DRY * others, g1.1 * GLITCH1_DRY * others),
                             (g1.0 * GLITCH1_ECHO, g1.1 * GLITCH1_ECHO),

@@ -33,7 +33,37 @@ const SECONDS: usize = 30;
 
 /// The sound of the canonical track. If this changes, the music changed:
 /// only update it deliberately, as a new version of the piece.
-const GOLDEN_HASH: u64 = 0x2c58bac59719fe83;
+const GOLDEN_HASH: u64 = 0x29871a38a647260d;
+
+/// The golden hash from before "drum space" existed. Recipes without a space
+/// letter parse as Centred and must still sound exactly as they did.
+const CENTRED_GOLDEN_HASH: u64 = 0x2c58bac59719fe83;
+
+#[test]
+fn centred_drums_sound_exactly_as_before() {
+    let centred = Settings { space: shrine0010::kits::DrumSpace::Centred, ..DEFAULT_SETTINGS };
+    let h = hash(&render_with(DEFAULT_SEEDS, centred, SECONDS * SAMPLE_RATE as usize, 4096));
+    assert_eq!(h, CENTRED_GOLDEN_HASH, "Centred drums changed (got {h:#018x})");
+}
+
+/// Centred drums are mono; Wide drums are not (measured on the drum bus itself).
+#[test]
+fn drum_space_spreads_the_drums() {
+    use shrine0010::drums::Drums;
+    use shrine0010::harmony::Harmony;
+    use shrine0010::kits::{DrumSpace, Kit};
+    use shrine0010::modulate::Mods;
+    use shrine0010::rng::Rng;
+    let (mut a, mut b) = (Rng::stream(1000, 0xD0), Rng::stream(1000, 0xD7));
+    let h = Harmony::new(Scale::Lydian, 3, Pace::HalfTime, 2, &mut a, &mut b);
+    let mods = Mods::new(1000);
+    let side_energy = |space: DrumSpace| {
+        let mut d = Drums::new(168, Kit::PulseCode, space, &h);
+        (0..40 * SAMPLE_RATE as u64).map(|c| { let (l, r, _) = d.next(c, &mods); (l - r).powi(2) }).sum::<f64>()
+    };
+    assert_eq!(side_energy(DrumSpace::Centred), 0.0, "centred drums should be mono");
+    assert!(side_energy(DrumSpace::Wide) > 1e-3, "wide drums should differ left to right");
+}
 
 #[test]
 fn golden_hash() {
@@ -79,6 +109,8 @@ fn each_setting_changes_the_output() {
         Settings { chords: 1, ..DEFAULT_SETTINGS },
         Settings { pace: Pace::Jungle, ..DEFAULT_SETTINGS },
         Settings { kit: shrine0010::kits::Kit::FmMetal, ..DEFAULT_SETTINGS },
+        Settings { space: shrine0010::kits::DrumSpace::Centred, ..DEFAULT_SETTINGS },
+        Settings { space: shrine0010::kits::DrumSpace::Tape, ..DEFAULT_SETTINGS },
     ];
     for v in variants {
         assert_ne!(hash(&render_with(DEFAULT_SEEDS, v, frames, 4096)), base, "{v:?} sounds the same as the default");

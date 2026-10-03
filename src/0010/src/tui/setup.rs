@@ -124,6 +124,7 @@ enum Step {
     Chords,
     Pace,
     Kit,
+    Space,
     Seed(usize),
     File,
     Overwrite,
@@ -161,6 +162,7 @@ fn list_id(step: Step) -> Option<usize> {
         Step::Chords => Some(2),
         Step::Pace => Some(3),
         Step::Kit => Some(4),
+        Step::Space => Some(5),
         _ => None,
     }
 }
@@ -184,6 +186,7 @@ fn options(step: Step) -> Vec<(String, String)> {
         Step::Chords => own(&CHORD_CHOICES),
         Step::Pace => own(&PACE_CHOICES),
         Step::Kit => shrine0010::kits::KITS.iter().map(|k| (k.name().to_string(), k.blurb().to_string())).collect(),
+        Step::Space => shrine0010::kits::SPACES.iter().map(|k| (k.name().to_string(), k.blurb().to_string())).collect(),
         _ => Vec::new(),
     }
 }
@@ -195,8 +198,8 @@ struct Setup {
     exit: bool,
     step: Step,
     back: Vec<Step>,
-    /// Selected entry of each list question (mode, scale, chords, pace, kit).
-    sel: [usize; 5],
+    /// Selected entry of each list question (mode, scale, chords, pace, kit, space).
+    sel: [usize; 6],
     input: String,
     error: Option<String>,
     mode: Mode,
@@ -222,6 +225,7 @@ impl Setup {
                 set.chords as usize - 1,
                 if set.pace == Pace::Jungle { 1 } else { 0 },
                 set.kit.index(),
+                set.space.index(),
             ],
             input: String::new(),
             error: None,
@@ -240,6 +244,7 @@ impl Setup {
             chords: self.sel[2] as u8 + 1,
             pace: if self.sel[3] == 1 { Pace::Jungle } else { Pace::HalfTime },
             kit: shrine0010::kits::KITS[self.sel[4]],
+            space: shrine0010::kits::SPACES[self.sel[5]],
         }
     }
 
@@ -252,7 +257,7 @@ impl Setup {
         let l = &self.last;
         let d = [l.seeds.s1, l.seeds.s2, l.seeds.s3, l.seeds.s4, l.seeds.s5];
         match step {
-            Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit => "1".into(),
+            Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space => "1".into(),
             Step::Label => l.label.clone(),
             Step::Seed(i) => d[i].to_string(),
             Step::File => l.path.clone(),
@@ -277,6 +282,7 @@ impl Setup {
                 "Drum kit".into(),
                 "The next seed shapes this kit's sounds and its break. Choose Off for no drums.".into(),
             ),
+            Step::Space => ("Drum space".into(), "Where the drum hits sit between the speakers.".into()),
             Step::Label => (
                 "Title shown in the player".into(),
                 "Up to 4 characters. It appears in the header and the explainer ticker.".into(),
@@ -313,7 +319,8 @@ impl Setup {
             Step::Kit if shrine0010::kits::KITS[self.sel[4]] == shrine0010::kits::Kit::Off => {
                 (!play_only).then_some(Step::File)
             }
-            Step::Kit => Some(Step::Seed(4)),
+            Step::Kit => Some(Step::Space),
+            Step::Space => Some(Step::Seed(4)),
             Step::Seed(i) if i < 4 => Some(Step::Seed(i + 1)),
             Step::Seed(_) => (!play_only).then_some(Step::File),
             Step::File => Some(if Path::new(&self.path).exists() { Step::Overwrite } else { Step::Length }),
@@ -335,7 +342,7 @@ impl Setup {
                 self.mode = parse_mode(&(self.sel[0] + 1).to_string()).unwrap_or(Mode::Play);
                 true
             }
-            Step::Scale | Step::Chords | Step::Pace | Step::Kit => true,
+            Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space => true,
             Step::Label => match parse_label(&answer) {
                 Some(l) => {
                     self.label = l;
@@ -423,6 +430,7 @@ impl Setup {
                 Step::Chords => ("Chords".into(), format!("{} · {}", CHORD_CHOICES[self.sel[2]].0, CHORD_CHOICES[self.sel[2]].1)),
                 Step::Pace => ("Pace".into(), PACE_CHOICES[self.sel[3]].0.to_string()),
                 Step::Kit => ("Kit".into(), shrine0010::kits::KITS[self.sel[4]].name().to_string()),
+                Step::Space => ("Space".into(), shrine0010::kits::SPACES[self.sel[5]].name().to_string()),
                 Step::Label => ("Title".into(), self.label.clone()),
                 Step::Seed(i) => (format!("Seed {}", i + 1), self.seeds[*i].to_string()),
                 Step::File => ("File".into(), self.path.clone()),
@@ -572,7 +580,7 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
                 // Any new answer replaces the last round's message.
                 s.notice = None;
             }
-            (Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Overwrite, _) => {}
+            (Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Overwrite, _) => {}
             (_, KeyCode::Backspace) => {
                 s.input.pop();
             }

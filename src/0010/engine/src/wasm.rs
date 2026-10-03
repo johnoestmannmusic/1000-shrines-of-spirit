@@ -2,9 +2,9 @@
 //! generation), so the .wasm stays loadable with nothing but the standard
 //! WebAssembly API.
 //!
-//!   const p = sos_new(s1hi, s1lo, … s5hi, s5lo, scale, chords, pace, kit);
+//!   const p = sos_new(s1hi, s1lo, … s5hi, s5lo, scale, chords, pace, kit, space);
 //!   (scale: index into `harmony::SCALES`; chords: 1-4; pace: 0 half-time, 1 jungle;
-//!    kit: index into `kits::KITS`)
+//!    kit: index into `kits::KITS`; space: 0 centred, 1 wide, 2 wide + tape echo)
 //!   const ptr = sos_render(p, frames);  // → `frames` interleaved stereo f32s
 //!
 //! The returned pointer is valid until the next call; re-create any
@@ -39,6 +39,7 @@ pub extern "C" fn sos_new(
     chords: u32,
     pace: u32,
     kit: u32,
+    space: u32,
 ) -> *mut Player {
     let seeds = Seeds {
         s1: join(s1hi, s1lo),
@@ -52,6 +53,7 @@ pub extern "C" fn sos_new(
         chords: chords.clamp(1, 4) as u8,
         pace: if pace == 1 { Pace::Jungle } else { Pace::HalfTime },
         kit: crate::kits::KITS[kit as usize % crate::kits::KITS.len()],
+        space: crate::kits::SPACES[space as usize % crate::kits::SPACES.len()],
     };
     Box::into_raw(Box::new(Player { track: Track::new(seeds, settings), buf: Vec::new() }))
 }

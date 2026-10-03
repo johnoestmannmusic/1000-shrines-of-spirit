@@ -17,6 +17,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType};
 use ratatui::Frame;
 use shrine0010::glitch::Kind;
+use shrine0010::kits::DrumSpace;
 use std::cell::RefCell;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -513,7 +514,12 @@ fn box_text(ui: &Ui, n: Node) -> BoxText {
             title: "DRUM BUS".into(),
             lines: [
                 if l.drums > 0.0 { format!("{:.1} dB", 20.0 * l.drums.log10()) } else { "-".into() },
-                "small reverb send".into(),
+                match d.settings.space {
+                    DrumSpace::Centred => "centred · reverb send",
+                    DrumSpace::Wide => "wide · reverb send",
+                    DrumSpace::Tape => "wide · tape echo",
+                }
+                .into(),
             ],
             color: DRUMS,
             level: lv(l.drums),

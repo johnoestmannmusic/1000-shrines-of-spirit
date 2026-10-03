@@ -135,7 +135,7 @@ impl Ui {
         let (s1, s2) = (desc.layers[0].0, desc.layers[1].0);
         let pipe = pipeline::Pipeline::new(desc.drums_on);
         let mods = shrine0010::modulate::Mods::new(desc.seeds.s1);
-        let kit = desc.settings.kit;
+        let (kit, space) = (desc.settings.kit, desc.settings.space);
         let n = desc.harmony.chords.len();
         let vars = explain::Vars {
             kit: kit.name().to_string(),
@@ -180,7 +180,7 @@ impl Ui {
             device,
             device_rate,
             underruns: 0,
-            ticker: ticker::Ticker::new(kit, vars),
+            ticker: ticker::Ticker::new(kit, space, vars),
         }
     }
 

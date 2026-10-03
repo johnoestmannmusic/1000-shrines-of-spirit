@@ -10,8 +10,8 @@ const { instance } = await WebAssembly.instantiate(readFileSync(path), {});
 const { memory, sos_new, sos_render } = instance.exports;
 
 const SEEDS = [1000n, 9n, 1009n, 2026n, 168n]; // DEFAULT_SEEDS in engine/src/lib.rs
-// DEFAULT_SETTINGS: scale 0 (Lydian), 3 chords, pace 0 (half-time), kit 0 (Sub & clicks).
-const args = [...SEEDS.flatMap((s) => [Number(s >> 32n), Number(s & 0xffffffffn)]), 0, 3, 0, 0];
+// DEFAULT_SETTINGS: scale 0 (Lydian), 3 chords, pace 0 (half-time), kit 0 (Sub & clicks), space 1 (Wide).
+const args = [...SEEDS.flatMap((s) => [Number(s >> 32n), Number(s & 0xffffffffn)]), 0, 3, 0, 0, 1];
 
 let t0 = performance.now();
 const player = sos_new(...args);

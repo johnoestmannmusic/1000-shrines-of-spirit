@@ -22,6 +22,8 @@ pub struct Meters {
     pub echo_r: f64,
     pub reverb: f64,
     pub drums: f64,
+    /// The drums' tape echo return.
+    pub tape: f64,
     pub out_l: f64,
     pub out_r: f64,
 }

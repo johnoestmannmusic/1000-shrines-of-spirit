@@ -18,6 +18,7 @@ use ratatui::Frame;
 use shrine0010::drone::Algo;
 use shrine0010::drums::{PHRASE_BARS, STEPS};
 use shrine0010::harmony::{key_name, Pace};
+use shrine0010::kits::DrumSpace;
 use shrine0010::{Solo, DRONE_CUTOFF_MIN, DRONE_CUTOFF_OCTAVES, SAMPLE_RATE};
 use std::f64::consts::TAU;
 
@@ -283,6 +284,7 @@ fn text(ui: &Ui) -> (String, Vec<String>) {
                 format!("Resample it ({}-bit) and play it at 168 BPM so it rises in pitch.", v.bits),
                 "Chop it into 16ths. In some bars, reverse, roll or swap a few slices; add a fill on every 4th bar.".to_string(),
                 "Arrange in 4-bar phrases: out, hats only, half-time, full, full with rolls.".to_string(),
+                space_tip(d.settings.space).to_string(),
             ],
         ),
         _ if !drums => (
@@ -804,6 +806,7 @@ fn instrument_text(ui: &Ui) -> (String, Vec<String>) {
                     format!("While it plays, the drone ducks to make room (now {duck_db:+.1} dB)."),
                     "Its 168 BPM is exactly twice the glitch tempo, so drums and glitches lock together.".to_string(),
                     "Whole phrases drop out ('out' sections) so the ambience can breathe between the beats.".to_string(),
+                    space_tip(d.settings.space).to_string(),
                 ],
             )
         }
@@ -821,6 +824,15 @@ fn instrument_text(ui: &Ui) -> (String, Vec<String>) {
                 ],
             )
         }
+    }
+}
+
+/// How the drums use the stereo field, as a recreate-it tip.
+fn space_tip(space: DrumSpace) -> &'static str {
+    match space {
+        DrumSpace::Centred => "Every hit sits dead centre (Drum space: Centred). Try Wide at setup to spread snares and hats.",
+        DrumSpace::Wide => "Each hit gets its own pan, fixed in the break: the kick centred, snares within ±20%, hats within ±40%.",
+        DrumSpace::Tape => "Hits are panned (kick centred, snares ±20%, hats ±40%) and the snares feed a ping-pong tape echo: 268 ms, a slow wobble, darker and thinner each repeat.",
     }
 }
 

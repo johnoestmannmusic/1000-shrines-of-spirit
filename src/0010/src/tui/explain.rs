@@ -5,7 +5,7 @@
 //! with this version's values.
 
 use super::Panel::{self, *};
-use shrine0010::kits::Kit;
+use shrine0010::kits::{DrumSpace, Kit};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum When {
@@ -20,10 +20,14 @@ pub enum When {
     LightKit,
     /// The older, heavier kits.
     HeavyKit,
+    /// Drums panned per hit (Wide or Wide + tape echo).
+    Panned,
+    /// Drums with the tape echo.
+    TapeEcho,
 }
 
 impl When {
-    pub fn applies(self, kit: Kit) -> bool {
+    pub fn applies(self, kit: Kit, space: DrumSpace) -> bool {
         let drums = kit != Kit::Off;
         match self {
             When::Always => true,
@@ -32,6 +36,8 @@ impl When {
             When::NoDrums => !drums,
             When::LightKit => kit.is_light(),
             When::HeavyKit => drums && !kit.is_light(),
+            When::Panned => drums && space != DrumSpace::Centred,
+            When::TapeEcho => drums && space == DrumSpace::Tape,
         }
     }
 }
@@ -162,6 +168,9 @@ pub const EXPLAINERS: &[(Panel, When, &str)] = &[
     (General, When::Always, "Everything runs at a fixed 48,000 samples per second, in 64-bit floating point, from a single integer sample clock."),
     (General, When::Always, "These visuals only read from the engine and never touch it. The golden-hash test proves the sound is identical with or without them."),
     (General, When::Always, "Random numbers come from SplitMix64, a tiny integer-only generator whose output is fully defined by its arithmetic, on every machine."),
+    (Drums, When::Panned, "Every drum hit has its own place in the stereo field, rolled once from seed 5 when the break is built: the kick stays centred, snares and clicks wander up to 20% off centre, hats up to 40%."),
+    (Drums, When::Panned, "Panning is baked into the break before it is sampled, so a chopped or reversed slice carries its hit's position with it."),
+    (Drums, When::TapeEcho, "The snares feed a ping-pong tape echo at three 16ths of the drum tempo (268 ms). Its delay time wobbles slowly like worn tape, and each repeat is saturated and filtered, so the echoes grow darker and thinner."),
     (General, When::Always, "This list is shuffled each time you play: every insight appears once before any repeats, so even short sessions show a different selection."),
 ];
 
@@ -174,7 +183,7 @@ mod tests {
     fn insights_only_describe_the_playing_kit() {
         for kit in KITS {
             for (_, when, text) in EXPLAINERS {
-                if !when.applies(kit) {
+                if !when.applies(kit, DrumSpace::Tape) {
                     continue;
                 }
                 for other in KITS.iter().filter(|k| **k != kit && **k != Kit::Off) {
@@ -182,7 +191,7 @@ mod tests {
                     assert!(!text.starts_with(&tag), "{tag} shown while playing {}", kit.name());
                 }
                 if kit == Kit::Off {
-                    assert!(!matches!(when, When::Drums | When::Kit(_) | When::LightKit | When::HeavyKit), "{text}");
+                    assert!(!matches!(when, When::Drums | When::Kit(_) | When::LightKit | When::HeavyKit | When::Panned | When::TapeEcho), "{text}");
                 }
             }
         }
