@@ -4,7 +4,8 @@
 //! At start-up each chord of the progression gets its own loop, a few
 //! seconds long, synthesised once by one of the classic timbres (a formant
 //! choir, DX-style glass, a D-50 "Fantasia" bell pad, a Wavestation-style
-//! wave sequence, or tuned breath). Everything that moves inside the loop
+//! wave sequence, or one of the noise textures: Breath, Whisper, Wind,
+//! Shimmer, Stream, Aurora and Haze). Everything that moves inside the loop
 //! (the vowel, the wave steps, the swells, the strikes) is timed to repeat
 //! exactly once per loop. The loop point is then hidden the way a sampler
 //! does it: the last moments are crossfaded into the first, so playback can
@@ -19,7 +20,8 @@ use crate::fm::{Algo, Fm3, Op};
 use crate::harmony::Harmony;
 use crate::math::{cos_turns, decay_coef, exp, midi_hz, sin_turns};
 use crate::rng::Rng;
-use crate::SAMPLE_RATE;
+use crate::texture;
+use crate::{LoopDesign, SAMPLE_RATE};
 
 const SR: f64 = SAMPLE_RATE as f64;
 
@@ -30,11 +32,29 @@ pub enum LoopTimbre {
     Fantasia,
     WaveSeq,
     Breath,
+    Whisper,
+    Wind,
+    Shimmer,
+    Stream,
+    Aurora,
+    Haze,
     Off,
 }
 
-pub const LOOP_TIMBRES: [LoopTimbre; 6] =
-    [LoopTimbre::Choir, LoopTimbre::Glass, LoopTimbre::Fantasia, LoopTimbre::WaveSeq, LoopTimbre::Breath, LoopTimbre::Off];
+pub const LOOP_TIMBRES: [LoopTimbre; 12] = [
+    LoopTimbre::Choir,
+    LoopTimbre::Glass,
+    LoopTimbre::Fantasia,
+    LoopTimbre::WaveSeq,
+    LoopTimbre::Breath,
+    LoopTimbre::Whisper,
+    LoopTimbre::Wind,
+    LoopTimbre::Shimmer,
+    LoopTimbre::Stream,
+    LoopTimbre::Aurora,
+    LoopTimbre::Haze,
+    LoopTimbre::Off,
+];
 
 impl LoopTimbre {
     pub fn name(self) -> &'static str {
@@ -44,6 +64,12 @@ impl LoopTimbre {
             LoopTimbre::Fantasia => "Fantasia",
             LoopTimbre::WaveSeq => "Wave sequence",
             LoopTimbre::Breath => "Breath",
+            LoopTimbre::Whisper => "Whisper",
+            LoopTimbre::Wind => "Wind",
+            LoopTimbre::Shimmer => "Shimmer",
+            LoopTimbre::Stream => "Stream",
+            LoopTimbre::Aurora => "Aurora",
+            LoopTimbre::Haze => "Haze",
             LoopTimbre::Off => "Off",
         }
     }
@@ -56,6 +82,12 @@ impl LoopTimbre {
             LoopTimbre::Fantasia => "D-50 style: a bright bell over a warm, swelling pad",
             LoopTimbre::WaveSeq => "Wavestation style: the waveform changes every beat",
             LoopTimbre::Breath => "noise tuned to the chord: airy, whispered",
+            LoopTimbre::Whisper => "noise shaped by gliding vowel formants: a wordless breath",
+            LoopTimbre::Wind => "noise through a slowly opening low-pass: gusts and calm",
+            LoopTimbre::Shimmer => "high, drifting resonances: air sparkling in the light",
+            LoopTimbre::Stream => "narrow bands fluttering quickly: water over stones",
+            LoopTimbre::Aurora => "resonant bands sweeping up and back: a curtain of light",
+            LoopTimbre::Haze => "a low, slowly breathing noise bed with almost no pitch",
             LoopTimbre::Off => "no loop layer",
         }
     }
@@ -68,6 +100,12 @@ impl LoopTimbre {
             LoopTimbre::Fantasia => "FAN",
             LoopTimbre::WaveSeq => "WAV",
             LoopTimbre::Breath => "AIR",
+            LoopTimbre::Whisper => "WHI",
+            LoopTimbre::Wind => "WND",
+            LoopTimbre::Shimmer => "SHM",
+            LoopTimbre::Stream => "STR",
+            LoopTimbre::Aurora => "AUR",
+            LoopTimbre::Haze => "HAZ",
             LoopTimbre::Off => "OFF",
         }
     }
@@ -163,7 +201,8 @@ fn pick_notes(rng: &mut Rng, chord: &[f64], count: usize) -> Vec<f64> {
 
 fn perform(timbre: LoopTimbre, rng: &mut Rng, chord: &[f64], beats: u64, beat: u64) -> Performance {
     let count = match timbre {
-        LoopTimbre::Fantasia => 4,
+        LoopTimbre::Fantasia | LoopTimbre::Shimmer | LoopTimbre::Aurora => 4,
+        LoopTimbre::Haze => 1,
         _ => 3,
     };
     let notes = pick_notes(rng, chord, count);
@@ -221,6 +260,13 @@ fn perform(timbre: LoopTimbre, rng: &mut Rng, chord: &[f64], beats: u64, beat: u
         Vec::new()
     };
     Performance { notes, strikes, waves, offset: rng.unit() }
+}
+
+/// An event layer's per-chord settings: a few chord tones for the Knock grains
+/// to strike, and a phase offset. The grid itself is the design.
+fn perform_events(rng: &mut Rng, chord: &[f64]) -> Performance {
+    let notes = pick_notes(rng, chord, 3);
+    Performance { notes, strikes: Vec::new(), waves: Vec::new(), offset: rng.unit() }
 }
 
 /// Band-limited sawtooth (polyBLEP), phase in turns, `dt` = increment per sample.
@@ -418,6 +464,138 @@ fn render_channel(timbre: LoopTimbre, perf: &Performance, rng: &mut Rng, len: us
                 *o = y;
             }
         }
+        LoopTimbre::Whisper => {
+            // Noise blown through the same three vocal formants as Choir,
+            // but the formants glide through the vowel cycle on their own: a
+            // wordless, breathy "shh" rather than a sung pitch.
+            let mut noise = Rng::new(rng.next_u64());
+            let mut formants = [Svf::default(), Svf::default(), Svf::default()];
+            let mut air = Svf::new(3_200.0, 0.9, SR);
+            for (i, o) in out.iter_mut().enumerate() {
+                if i % CONTROL == 0 {
+                    let f = vowel_at(turns(i));
+                    for k in 0..3 {
+                        formants[k].set(f[k], FORMANT_Q[k], SR);
+                    }
+                }
+                let x = noise.bipolar();
+                let mut y = 0.0;
+                for k in 0..3 {
+                    y += FORMANT_GAIN[k] * formants[k].process(x).band / FORMANT_Q[k];
+                }
+                y += 0.18 * air.process(x).band;
+                *o = y * (0.7 + 0.3 * sin_turns(turns(i)));
+            }
+        }
+        LoopTimbre::Wind => {
+            // One wide low-pass gusting open and shut, plus a soft resonance on
+            // the lowest chord note so the wind still belongs to the harmony.
+            let mut noise = Rng::new(rng.next_u64());
+            let mut lp = Svf::default();
+            let mut res = Svf::new(perf.notes.first().map_or(220.0, |n| midi_hz(*n)), 3.2, SR);
+            for (i, o) in out.iter_mut().enumerate() {
+                let p = turns(i);
+                if i % CONTROL == 0 {
+                    // Two gusts of unequal length per loop, so calm and squall alternate.
+                    let gust = 0.5 + 0.5 * sin_turns(p) * sin_turns(2.0 * p + 0.25);
+                    lp.set(250.0 + 1_550.0 * gust, 0.8, SR);
+                }
+                let x = noise.bipolar();
+                let air = 0.55 + 0.45 * (0.5 + 0.5 * sin_turns(p));
+                *o = (lp.process(x).low + 0.6 * res.process(x).band) * air;
+            }
+        }
+        LoopTimbre::Shimmer => {
+            // Narrow high resonances on chord notes two octaves up, each lit by
+            // its own slow tremolo: air catching the light.
+            let mut noise = Rng::new(rng.next_u64());
+            let mut bands: Vec<(Svf, f64, u64)> = perf
+                .notes
+                .iter()
+                .map(|n| {
+                    let hz = midi_hz(*n + 24.0 + rng.range(-5.0, 5.0) / 100.0);
+                    (Svf::new(hz, 18.0, SR), rng.unit(), rng.int(1, 3))
+                })
+                .collect();
+            let mut air = Svf::new(5_200.0, 0.7, SR);
+            for (i, o) in out.iter_mut().enumerate() {
+                let x = noise.bipolar();
+                let mut y = 0.25 * air.process(x).band;
+                for (f, phase, rate) in bands.iter_mut() {
+                    let trem = 0.5 + 0.5 * sin_turns(turns(i) * *rate as f64 + *phase);
+                    y += trem * f.process(x).band / 18.0;
+                }
+                *o = y;
+            }
+        }
+        LoopTimbre::Stream => {
+            // Very narrow bands at the chord notes, each fluttering at its own
+            // fast but whole-number rate: water running over stones.
+            let mut noise = Rng::new(rng.next_u64());
+            let mut bands: Vec<(Svf, f64, u64)> = perf
+                .notes
+                .iter()
+                .map(|n| {
+                    let hz = midi_hz(*n + rng.range(-6.0, 6.0) / 100.0);
+                    (Svf::new(hz, 24.0, SR), rng.unit(), rng.int(6, 11))
+                })
+                .collect();
+            let mut mid = Svf::new(1_500.0, 1.2, SR);
+            for (i, o) in out.iter_mut().enumerate() {
+                let x = noise.bipolar();
+                let mut y = 0.12 * mid.process(x).band;
+                for (f, phase, rate) in bands.iter_mut() {
+                    let flutter = 0.5 + 0.5 * sin_turns(turns(i) * *rate as f64 + *phase);
+                    y += flutter * f.process(x).band / 24.0;
+                }
+                *o = y;
+            }
+        }
+        LoopTimbre::Aurora => {
+            // Four resonant bands that sweep a whole octave up and back down
+            // across the loop, each at its own phase: a curtain of light that
+            // opens and closes, still anchored to the chord.
+            let mut noise = Rng::new(rng.next_u64());
+            let mut bands: Vec<(Svf, f64, f64)> = perf
+                .notes
+                .iter()
+                .enumerate()
+                .map(|(k, n)| (Svf::default(), *n + rng.range(-4.0, 4.0) / 100.0, k as f64 / perf.notes.len().max(1) as f64))
+                .collect();
+            let mut air = Svf::new(4_000.0, 0.7, SR);
+            for (i, o) in out.iter_mut().enumerate() {
+                let p = turns(i);
+                if i % CONTROL == 0 {
+                    for (f, base, at) in bands.iter_mut() {
+                        let sweep = 0.5 - 0.5 * cos_turns(p + *at);
+                        f.set(midi_hz(*base + 12.0 * sweep), 20.0, SR);
+                    }
+                }
+                let x = noise.bipolar();
+                let mut y = 0.22 * air.process(x).band;
+                for (f, _, at) in bands.iter_mut() {
+                    let sweep = 0.5 - 0.5 * cos_turns(p + *at);
+                    y += (0.35 + 0.65 * sweep) * f.process(x).band / 20.0;
+                }
+                *o = y;
+            }
+        }
+        LoopTimbre::Haze => {
+            // A steep low-pass breathing open and shut over one low resonance:
+            // a near-pitchless bed, the quietest of the noise family.
+            let mut noise = Rng::new(rng.next_u64());
+            let mut lp = Svf::default();
+            let mut res = Svf::new(perf.notes.first().map_or(110.0, |n| midi_hz(*n)), 1.4, SR);
+            for (i, o) in out.iter_mut().enumerate() {
+                let p = turns(i);
+                let breath = 0.5 - 0.5 * cos_turns(p);
+                if i % CONTROL == 0 {
+                    lp.set(200.0 + 600.0 * breath, 0.7, SR);
+                }
+                let x = noise.bipolar();
+                *o = (1.4 * lp.process(x).low + 0.8 * res.process(x).band) * (0.5 + 0.5 * breath);
+            }
+        }
         LoopTimbre::Off => {}
     }
     out
@@ -438,9 +616,13 @@ fn close_loop(s: &[f64], len: usize) -> Vec<f64> {
         .collect()
 }
 
+/// Each event layer is scaled to this RMS like the sustained ones, but the
+/// scale is capped so a nearly-empty grid can't blow one click up to full level.
+const EVENT_MAX_SCALE: f64 = 6.0;
+
 /// One atmosphere loop layer: a loop per chord, crossfaded as the chords change.
 pub struct AtmosLoop {
-    timbre: LoopTimbre,
+    design: LoopDesign,
     beats: u64,
     len: usize,
     /// Per chord: (left, right), `len` samples each.
@@ -454,32 +636,52 @@ impl AtmosLoop {
     /// `stream` keeps each layer's randomness separate; `target_s` is its
     /// rough length; `avoid` is the other loop's beat count, if any.
     pub fn new(
-        timbre: LoopTimbre,
+        design: LoopDesign,
         seed: u64,
         stream: u64,
         harmony: &Harmony,
         beat: u64,
         target_s: u64,
         avoid: Option<u64>,
+        transpose: i8,
     ) -> Self {
         let beats = loop_beats(beat, target_s, avoid);
         let len = (beats * beat) as usize;
         let mut rng = Rng::stream(seed, stream);
         let mut loops = Vec::new();
         let mut performances = Vec::new();
-        if timbre != LoopTimbre::Off {
+        if design.is_on() {
             for chord in &harmony.chords {
-                let perf = perform(timbre, &mut rng, &chord.notes, beats, beat);
+                let mut perf = match design {
+                    LoopDesign::Sustained(t) => perform(t, &mut rng, &chord.notes, beats, beat),
+                    LoopDesign::Events(_) => perform_events(&mut rng, &chord.notes),
+                };
+                if transpose != 0 {
+                    for n in &mut perf.notes {
+                        *n += transpose as f64;
+                    }
+                }
                 let total = 2 * len + XFADE;
-                let l = close_loop(&render_channel(timbre, &perf, &mut rng, len, beat as usize, total), len);
-                let r = close_loop(&render_channel(timbre, &perf, &mut rng, len, beat as usize, total), len);
+                let (l, r) = match design {
+                    LoopDesign::Sustained(t) => (
+                        close_loop(&render_channel(t, &perf, &mut rng, len, beat as usize, total), len),
+                        close_loop(&render_channel(t, &perf, &mut rng, len, beat as usize, total), len),
+                    ),
+                    LoopDesign::Events(g) => (
+                        close_loop(&texture::render_channel(g, &perf.notes, &mut rng, len, total), len),
+                        close_loop(&texture::render_channel(g, &perf.notes, &mut rng, len, total), len),
+                    ),
+                };
                 let power: f64 = l.iter().chain(&r).map(|x| x * x).sum::<f64>() / (2 * len) as f64;
-                let scale = if power > 0.0 { LOOP_RMS / power.sqrt() } else { 0.0 };
+                let mut scale = if power > 0.0 { LOOP_RMS / power.sqrt() } else { 0.0 };
+                if matches!(design, LoopDesign::Events(_)) {
+                    scale = scale.min(EVENT_MAX_SCALE);
+                }
                 loops.push((l.iter().map(|x| (x * scale) as f32).collect(), r.iter().map(|x| (x * scale) as f32).collect()));
                 performances.push(perf);
             }
         }
-        AtmosLoop { timbre, beats, len, loops, performances, mix: (0, 0, 1.0, 0.0) }
+        AtmosLoop { design, beats, len, loops, performances, mix: (0, 0, 1.0, 0.0) }
     }
 
     pub fn is_on(&self) -> bool {
@@ -511,8 +713,8 @@ impl AtmosLoop {
 
 /// Read-only views for visualisation.
 impl AtmosLoop {
-    pub fn timbre(&self) -> LoopTimbre {
-        self.timbre
+    pub fn design(&self) -> LoopDesign {
+        self.design
     }
 
     /// (beats, length in samples).
@@ -551,17 +753,52 @@ mod tests {
     }
 
     #[test]
+    fn every_timbre_sounds_distinct() {
+        let (mut a, mut b) = (Rng::stream(1000, 0xD0), Rng::stream(1000, 0xD7));
+        let t = crate::tempo::Tempo::new(168);
+        let h = Harmony::new(crate::harmony::Scale::Lydian, 2, crate::harmony::Pace::HalfTime, t.beat(), 2, &mut a, &mut b);
+        let mut seen: Vec<(String, u64)> = Vec::new();
+        let mut designs: Vec<(String, LoopDesign)> = LOOP_TIMBRES
+            .into_iter()
+            .filter(|t| *t != LoopTimbre::Off)
+            .map(|t| (t.name().to_string(), LoopDesign::Sustained(t)))
+            .collect();
+        for (name, g) in [("Fire", texture::Grid::fire()), ("Water", texture::Grid::water()), ("Stones", texture::Grid::stones()), ("Wood", texture::Grid::wood())] {
+            designs.push((name.to_string(), LoopDesign::Events(g)));
+        }
+        for (name, design) in designs {
+            let lp = AtmosLoop::new(design, 11, 0xA1, &h, t.beat(), 6, None, 0);
+            let (l, _) = &lp.loops[0];
+            let hash = l.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, x| {
+                x.to_bits().to_le_bytes().into_iter().fold(h, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
+            });
+            if let Some((other, _)) = seen.iter().find(|(_, o)| *o == hash) {
+                panic!("{name} sounds identical to {other}");
+            }
+            seen.push((name, hash));
+        }
+    }
+
+    #[test]
     fn the_loop_point_is_seamless() {
         let (mut a, mut b) = (Rng::stream(1000, 0xD0), Rng::stream(1000, 0xD7));
         let t = crate::tempo::Tempo::new(168);
         let h = Harmony::new(crate::harmony::Scale::Lydian, 2, crate::harmony::Pace::HalfTime, t.beat(), 2, &mut a, &mut b);
-        for timbre in LOOP_TIMBRES.into_iter().filter(|t| *t != LoopTimbre::Off) {
-            let lp = AtmosLoop::new(timbre, 11, 0xA1, &h, t.beat(), 6, None);
+        let mut designs: Vec<(String, LoopDesign)> = LOOP_TIMBRES
+            .into_iter()
+            .filter(|t| *t != LoopTimbre::Off)
+            .map(|t| (t.name().to_string(), LoopDesign::Sustained(t)))
+            .collect();
+        for (name, g) in [("Fire", texture::Grid::fire()), ("Water", texture::Grid::water()), ("Stones", texture::Grid::stones()), ("Wood", texture::Grid::wood())] {
+            designs.push((name.to_string(), LoopDesign::Events(g)));
+        }
+        for (name, design) in designs {
+            let lp = AtmosLoop::new(design, 11, 0xA1, &h, t.beat(), 6, None, 0);
             let (l, _) = &lp.loops[0];
             let step = |i: usize, j: usize| (l[i] - l[j]).abs();
             // The jump across the loop point is no bigger than ordinary sample-to-sample motion.
             let typical = (1..l.len()).map(|i| step(i, i - 1)).fold(0.0f32, f32::max);
-            assert!(step(0, l.len() - 1) <= typical, "{timbre:?}");
+            assert!(step(0, l.len() - 1) <= typical, "{name}");
         }
     }
 }

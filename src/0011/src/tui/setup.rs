@@ -14,7 +14,8 @@ use shrine0011::cli::{self, format_length, FADE_OUT_SECONDS};
 use shrine0011::atmos::{LoopTimbre, LOOP_TIMBRES};
 use shrine0011::harmony::{Pace, SCALES};
 use shrine0011::tempo::{Tempo, MAX_BPM, MIN_BPM};
-use shrine0011::{Seeds, Settings, DEFAULT_SEEDS, SAMPLE_RATE};
+use shrine0011::texture::{Grid, EVENT_NAMES, ROWS, STEPS};
+use shrine0011::{KeyChoice, LoopDesign, Seeds, Settings, DEFAULT_SEEDS, SAMPLE_RATE};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -58,7 +59,7 @@ fn screen(f: &mut Frame, t: f64, box_title: &str, box_height: u16, footer: &str)
     let area = f.area();
     f.render_widget(Clear, area);
     let buf = f.buffer_mut();
-    let big = area.width >= TITLE_W + 4;
+    let big = area.width >= TITLE_W + 4 && area.height >= 22;
     let title_h = if big { 5 } else { 1 };
     let used = title_h + 1 + 1 + 2 + box_height;
     let top = area.height.saturating_sub(used) / 3;
@@ -102,11 +103,14 @@ fn screen(f: &mut Frame, t: f64, box_title: &str, box_height: u16, footer: &str)
     put(buf, area, vx + VERSION.len() as u16, vy, &format!(" · {SUBTITLE}"), fg(DIM));
 
     let bw = BOX_W.min(area.width.saturating_sub(2));
+    // Never let the box run off the bottom: keep room for the title and version.
+    let room = area.height.saturating_sub(title_h + 3).max(3);
+    let bh = box_height.min(room);
     let rect = Rect::new(
         area.x + (area.width - bw) / 2,
-        area.y + (vy + 2).min(area.height.saturating_sub(box_height)),
+        area.y + (vy + 2).min(area.height.saturating_sub(bh)),
         bw,
-        box_height.min(area.height),
+        bh,
     );
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -126,10 +130,14 @@ enum Step {
     Scale,
     Chords,
     Pace,
+    Key,
     Kit,
     Space,
     Loop1,
     Loop2,
+    DroneCycle,
+    DroneHold,
+    Transpose,
     Seed(usize),
     File,
     Overwrite,
@@ -170,7 +178,54 @@ fn list_id(step: Step) -> Option<usize> {
         Step::Space => Some(5),
         Step::Loop1 => Some(6),
         Step::Loop2 => Some(7),
+        Step::Key => Some(8),
         _ => None,
+    }
+}
+
+/// The atmosphere-loop choices: None first (the entry numbered 0), then every
+/// timbre in `LOOP_TIMBRES`, so the "no atmosphere" choice is up front.
+/// The sustained timbres in list order (Off excluded).
+fn loop_timbres() -> Vec<LoopTimbre> {
+    LOOP_TIMBRES.iter().copied().filter(|t| *t != LoopTimbre::Off).collect()
+}
+
+/// The atmosphere list entries: 0 = None, 1 = Event grid, 2.. = sustained timbres.
+const LOOP_GRID: usize = 1;
+
+fn loop_entry_count() -> usize {
+    2 + loop_timbres().len()
+}
+
+fn loop_entry_name(i: usize) -> String {
+    match i {
+        0 => LoopTimbre::Off.name().to_string(),
+        1 => "Event grid".to_string(),
+        n => loop_timbres().get(n - 2).map_or("Off".into(), |t| t.name().to_string()),
+    }
+}
+
+fn loop_entry_blurb(i: usize) -> String {
+    match i {
+        0 => LoopTimbre::Off.blurb().to_string(),
+        1 => "fire, water, stones, wood: press Enter to edit the 4 x 16 grid".to_string(),
+        n => loop_timbres().get(n - 2).map_or(String::new(), |t| t.blurb().to_string()),
+    }
+}
+
+fn entry_to_design(i: usize, grid: Grid) -> LoopDesign {
+    match i {
+        0 => LoopDesign::OFF,
+        1 => LoopDesign::Events(grid),
+        n => LoopDesign::Sustained(loop_timbres()[n - 2]),
+    }
+}
+
+fn design_to_entry(d: LoopDesign) -> usize {
+    match d {
+        LoopDesign::Sustained(LoopTimbre::Off) => 0,
+        LoopDesign::Events(_) => LOOP_GRID,
+        LoopDesign::Sustained(t) => 2 + loop_timbres().iter().position(|x| *x == t).unwrap_or(0),
     }
 }
 
@@ -207,7 +262,14 @@ fn options(step: Step, bpm: u16) -> Vec<(String, String)> {
         Step::Pace => pace_choices(bpm),
         Step::Kit => shrine0011::kits::KITS.iter().map(|k| (k.name().to_string(), k.blurb().to_string())).collect(),
         Step::Space => shrine0011::kits::SPACES.iter().map(|k| (k.name().to_string(), k.blurb().to_string())).collect(),
-        Step::Loop1 | Step::Loop2 => LOOP_TIMBRES.iter().map(|t| (t.name().to_string(), t.blurb().to_string())).collect(),
+        Step::Loop1 | Step::Loop2 => (0..loop_entry_count()).map(|i| (loop_entry_name(i), loop_entry_blurb(i))).collect(),
+        Step::Key => {
+            let mut v = vec![("Seed picks".to_string(), "seed 1 chooses the tonic, as in every earlier recipe".to_string())];
+            for pc in 0..12u8 {
+                v.push((shrine0011::harmony::key_name(pc).to_string(), "fix the tonic here".to_string()));
+            }
+            v
+        }
         _ => Vec::new(),
     }
 }
@@ -219,8 +281,8 @@ struct Setup {
     exit: bool,
     step: Step,
     back: Vec<Step>,
-    /// Selected entry of each list question (mode, scale, chords, pace, kit, space, loop 1, loop 2).
-    sel: [usize; 8],
+    /// Selected entry of each list question (mode, scale, chords, pace, kit, space, loop 1, loop 2, key).
+    sel: [usize; 9],
     input: String,
     error: Option<String>,
     mode: Mode,
@@ -229,6 +291,18 @@ struct Setup {
     seeds: [u64; 6],
     path: String,
     seconds: f64,
+    drone_cycle: u16,
+    drone_hold: u16,
+    loop_transpose: i8,
+    /// The event grid being edited for each layer.
+    grids: [Grid; 2],
+    grid_cursor: (usize, usize),
+    /// Which layer's grid is open in the editor (None = the list is shown).
+    grid_edit: Option<usize>,
+    /// Live audition while the atmosphere questions are open (None if no device).
+    audition: Option<crate::audition::Audition>,
+    /// The design currently handed to the audition, so it only rebuilds on change.
+    last_design: Option<LoopDesign>,
 }
 
 impl Setup {
@@ -248,8 +322,12 @@ impl Setup {
                 if set.pace == Pace::Jungle { 1 } else { 0 },
                 set.kit.index(),
                 set.space.index(),
-                set.loops[0].index(),
-                set.loops[1].index(),
+                design_to_entry(set.loops[0]),
+                design_to_entry(set.loops[1]),
+                match set.key {
+                    KeyChoice::Seed => 0,
+                    KeyChoice::Note(n) => n as usize + 1,
+                },
             ],
             input: String::new(),
             error: None,
@@ -259,7 +337,49 @@ impl Setup {
             seeds: [d.s1, d.s2, d.s3, d.s4, d.s5, d.s6],
             path: last.path.clone(),
             seconds: last.seconds,
+            drone_cycle: set.drone.cycle_s,
+            drone_hold: set.drone.hold_s,
+            loop_transpose: set.loop_transpose,
+            grids: [
+                match set.loops[0] {
+                    LoopDesign::Events(g) => g,
+                    _ => Grid::fire(),
+                },
+                match set.loops[1] {
+                    LoopDesign::Events(g) => g,
+                    _ => Grid::fire(),
+                },
+            ],
+            grid_cursor: (0, 0),
+            grid_edit: None,
+            audition: None,
+            last_design: None,
             last,
+        }
+    }
+
+    /// Keep the live audition in step with the atmosphere question on screen.
+    fn sync_audition(&mut self) {
+        let layer = match self.step {
+            Step::Loop1 => Some(0),
+            Step::Loop2 => Some(1),
+            _ => None,
+        };
+        let Some(layer) = layer else {
+            self.audition = None;
+            self.last_design = None;
+            return;
+        };
+        let design = entry_to_design(self.sel[6 + layer], self.grids[layer]);
+        if self.audition.is_none() {
+            self.audition = crate::audition::Audition::start(self.seeds(), self.settings()).ok();
+            self.last_design = None;
+        }
+        if self.last_design != Some(design) {
+            if let Some(a) = &self.audition {
+                a.set_design(design);
+            }
+            self.last_design = Some(design);
         }
     }
 
@@ -271,7 +391,10 @@ impl Setup {
             kit: shrine0011::kits::KITS[self.sel[4]],
             space: shrine0011::kits::SPACES[self.sel[5]],
             bpm: self.bpm,
-            loops: [LOOP_TIMBRES[self.sel[6]], LOOP_TIMBRES[self.sel[7]]],
+            loops: [entry_to_design(self.sel[6], self.grids[0]), entry_to_design(self.sel[7], self.grids[1])],
+            loop_transpose: self.loop_transpose,
+            key: if self.sel[8] == 0 { KeyChoice::Seed } else { KeyChoice::Note((self.sel[8] - 1) as u8) },
+            drone: shrine0011::DroneArc { cycle_s: self.drone_cycle, hold_s: self.drone_hold },
         }
     }
 
@@ -284,7 +407,10 @@ impl Setup {
         let l = &self.last;
         let d = [l.seeds.s1, l.seeds.s2, l.seeds.s3, l.seeds.s4, l.seeds.s5, l.seeds.s6];
         match step {
-            Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 => "1".into(),
+            Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Key => "1".into(),
+            Step::DroneCycle => l.settings.drone.cycle_s.to_string(),
+            Step::DroneHold => (self.drone_cycle / 3).max(1).to_string(),
+            Step::Transpose => self.last.settings.loop_transpose.to_string(),
             Step::Label => l.label.clone(),
             Step::Bpm => l.settings.bpm.to_string(),
             Step::Seed(i) => d[i].to_string(),
@@ -313,6 +439,10 @@ impl Setup {
                     .into(),
             ),
             Step::Scale => ("Scale".into(), "The seed picks the key and builds the chords from this scale.".into()),
+            Step::Key => (
+                "Root note".into(),
+                "Seed picks the tonic from seed 1, as in every earlier recipe; or fix it here. The scale still supplies the intervals.".into(),
+            ),
             Step::Chords => (
                 "How many chords?".into(),
                 "Chords 1 and 2 carry most of the 32-bar cycle; each change is a slow spectral morph.".into(),
@@ -325,11 +455,23 @@ impl Setup {
             Step::Space => ("Drum space".into(), "Where the drum hits sit between the speakers.".into()),
             Step::Loop1 => (
                 "Atmosphere loop 1".into(),
-                "A few seconds of evolving pad, looped like a 90s sample CD. It follows the chords; seed 6 shapes it.".into(),
+                "A few seconds of evolving pad, looped like a 90s sample CD. It follows the chords; seed 6 shapes it. 0 leaves it out.".into(),
             ),
             Step::Loop2 => (
                 "Atmosphere loop 2".into(),
-                "A shorter loop whose length shares no factor with loop 1's, so the two drift in and out of step.".into(),
+                "A shorter loop whose length shares no factor with loop 1's, so the two drift in and out of step. 0 leaves it out.".into(),
+            ),
+            Step::DroneCycle => (
+                "Drone cycle in seconds (0 = always on)".into(),
+                "The frozen drone can swell in and out on a slow repeat: every cycle it fades up, holds, then leaves. 0 keeps it playing all the time.".into(),
+            ),
+            Step::DroneHold => (
+                format!("Seconds the drone stays up each cycle (1-{})", self.drone_cycle),
+                "A raised-cosine swell fades it in and out automatically at each end of the hold.".into(),
+            ),
+            Step::Transpose => (
+                "Atmosphere transpose in semitones (-12 to 12)".into(),
+                "Shift both atmosphere loops relative to the chord. 0 keeps them exactly on the chord tones, matching the chosen root note.".into(),
             ),
             Step::Label => (
                 "Title shown in the player".into(),
@@ -361,7 +503,8 @@ impl Setup {
             Step::Mode => Some(if self.mode == Mode::Render { Step::Bpm } else { Step::Label }),
             Step::Label => Some(Step::Bpm),
             Step::Bpm => Some(Step::Scale),
-            Step::Scale => Some(Step::Chords),
+            Step::Scale => Some(Step::Key),
+            Step::Key => Some(Step::Chords),
             Step::Chords => Some(Step::Pace),
             Step::Pace => Some(Step::Seed(0)),
             Step::Seed(3) => Some(Step::Kit),
@@ -373,11 +516,15 @@ impl Setup {
             Step::Seed(4) => Some(Step::Loop1),
             Step::Loop1 => Some(Step::Loop2),
             // No loops: nothing for seed 6 to shape.
-            Step::Loop2 if LOOP_TIMBRES[self.sel[6]] == LoopTimbre::Off && LOOP_TIMBRES[self.sel[7]] == LoopTimbre::Off => {
-                (!play_only).then_some(Step::File)
+            Step::Loop2 if self.sel[6] == 0 && self.sel[7] == 0 => {
+                Some(Step::DroneCycle)
             }
             Step::Loop2 => Some(Step::Seed(5)),
-            Step::Seed(_) => (!play_only).then_some(Step::File),
+            Step::Seed(_) => Some(Step::DroneCycle),
+            Step::DroneCycle if self.drone_cycle == 0 => Some(Step::Transpose),
+            Step::DroneCycle => Some(Step::DroneHold),
+            Step::DroneHold => Some(Step::Transpose),
+            Step::Transpose => (!play_only).then_some(Step::File),
             Step::File => Some(if Path::new(&self.path).exists() { Step::Overwrite } else { Step::Length }),
             Step::Overwrite => Some(Step::Length),
             Step::Length => None,
@@ -397,7 +544,7 @@ impl Setup {
                 self.mode = parse_mode(&(self.sel[0] + 1).to_string()).unwrap_or(Mode::Play);
                 true
             }
-            Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 => true,
+            Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Key => true,
             Step::Label => match parse_label(&answer) {
                 Some(l) => {
                     self.label = l;
@@ -425,6 +572,39 @@ impl Setup {
                 }
                 None => {
                     self.error = Some("Enter a whole number from 0 to 18446744073709551615, or 0x hex.".into());
+                    false
+                }
+            },
+            Step::DroneCycle => match cli::parse_drone_cycle(&answer) {
+                Some(c) => {
+                    self.drone_cycle = c;
+                    if c == 0 {
+                        self.drone_hold = 0;
+                    }
+                    true
+                }
+                None => {
+                    self.error = Some("Enter 0, or a whole number of seconds up to 3600.".into());
+                    false
+                }
+            },
+            Step::DroneHold => match cli::parse_drone_hold(&answer, self.drone_cycle) {
+                Some(h) => {
+                    self.drone_hold = h;
+                    true
+                }
+                None => {
+                    self.error = Some(format!("Enter a whole number of seconds from 1 to {}.", self.drone_cycle));
+                    false
+                }
+            },
+            Step::Transpose => match cli::parse_transpose(&answer) {
+                Some(t) => {
+                    self.loop_transpose = t;
+                    true
+                }
+                None => {
+                    self.error = Some("Enter a whole number from -12 to 12.".into());
                     false
                 }
             },
@@ -492,13 +672,23 @@ impl Setup {
             let row = match step {
                 Step::Mode => ("Mode".to_string(), MODES[self.sel[0]].0.to_string()),
                 Step::Scale => ("Scale".into(), SCALES[self.sel[1]].name().to_string()),
+                Step::Key => (
+                    "Root note".into(),
+                    if self.sel[8] == 0 { "seed picks".into() } else { shrine0011::harmony::key_name((self.sel[8] - 1) as u8).to_string() },
+                ),
                 Step::Chords => ("Chords".into(), format!("{} · {}", CHORD_CHOICES[self.sel[2]].0, CHORD_CHOICES[self.sel[2]].1)),
                 Step::Pace => ("Pace".into(), PACE_NAMES[self.sel[3]].to_string()),
                 Step::Bpm => ("Tempo".into(), format!("{} BPM · ambient layers at {:.0}", self.bpm, Tempo::new(self.bpm).half_bpm())),
                 Step::Kit => ("Kit".into(), shrine0011::kits::KITS[self.sel[4]].name().to_string()),
                 Step::Space => ("Space".into(), shrine0011::kits::SPACES[self.sel[5]].name().to_string()),
-                Step::Loop1 => ("Loop 1".into(), LOOP_TIMBRES[self.sel[6]].name().to_string()),
-                Step::Loop2 => ("Loop 2".into(), LOOP_TIMBRES[self.sel[7]].name().to_string()),
+            Step::Loop1 => ("Loop 1".into(), loop_entry_name(self.sel[6])),
+            Step::Loop2 => ("Loop 2".into(), loop_entry_name(self.sel[7])),
+                Step::DroneCycle => (
+                    "Drone cycle".into(),
+                    if self.drone_cycle == 0 { "always on".into() } else { format!("{} s", self.drone_cycle) },
+                ),
+                Step::DroneHold => ("Drone up".into(), format!("{} s each cycle", self.drone_hold)),
+                Step::Transpose => ("Atmos transpose".into(), format!("{} semitones", self.loop_transpose)),
                 Step::Label => ("Title".into(), self.label.clone()),
                 Step::Seed(i) => (format!("Seed {}", i + 1), self.seeds[*i].to_string()),
                 Step::File => ("File".into(), self.path.clone()),
@@ -513,13 +703,40 @@ impl Setup {
     fn draw(&self, f: &mut Frame, t: f64) {
         let summary = self.summary();
         let opts = options(self.step, self.bpm);
-        let options = if opts.is_empty() { 1 } else { opts.len() as u16 };
         let text_w = BOX_W.min(f.area().width.saturating_sub(2)).saturating_sub(6) as usize;
         let notice_lines = self.notice.as_ref().map(|n| super::ticker::wrap(&n.text, text_w)).unwrap_or_default();
         let notice_rows = if notice_lines.is_empty() { 0 } else { notice_lines.len() as u16 + 1 };
-        // notice, summary (+ gap), question, options or input, gap, hint, error line, borders
-        let height =
-            notice_rows + summary.len() as u16 + (!summary.is_empty()) as u16 + 1 + options + 1 + 1 + 1 + 2;
+        // The answers so far are condensed into a wrapped breadcrumb instead of
+        // one row each, so the screen stays short enough for a laptop.
+        let summary_text = summary.iter().map(|(k, v)| format!("{k}: {v}")).collect::<Vec<_>>().join("  ·  ");
+        let mut summary_lines: Vec<String> =
+            if summary.is_empty() { Vec::new() } else { super::ticker::wrap(&summary_text, text_w) };
+        let summary_cut = summary_lines.len() > 3;
+        summary_lines.truncate(3);
+        if summary_cut {
+            if let Some(last) = summary_lines.last_mut() {
+                last.push_str(" …");
+            }
+        }
+        let id = list_id(self.step);
+        let editing = self.grid_edit.is_some();
+        // Lists longer than six entries (atmosphere, scale, kit) use a compact
+        // grid of names, with only the highlighted entry described.
+        let grid = !editing && id.is_some() && opts.len() > 6;
+        let cols = if grid { (text_w / 20).clamp(1, 4) } else { 1 };
+        let list_rows = if editing {
+            ROWS as u16
+        } else if opts.is_empty() {
+            1
+        } else if grid {
+            opts.len().div_ceil(cols) as u16
+        } else {
+            opts.len() as u16
+        };
+        let extra = if editing { 2 } else { grid as u16 * 2 };
+        let anim = self.audition.is_some() && matches!(self.step, Step::Loop1 | Step::Loop2);
+        // notice, summary (+ gap), question, options, [description], [preview], gap, hint, error line, borders
+        let height = notice_rows + summary_lines.len() as u16 + (!summary_lines.is_empty()) as u16 + 1 + list_rows + extra + anim as u16 + 1 + 1 + 1 + 2;
         let footer = if self.step == Step::Mode { "Enter accept · Esc exit" } else { "Enter accept · Esc back · Ctrl-C exit" };
         let r = screen(f, t, "SETUP", height, footer);
         let buf = f.buffer_mut();
@@ -533,28 +750,70 @@ impl Setup {
             }
             y += 1;
         }
-        for (k, v) in &summary {
+        for line in &summary_lines {
             put(buf, r, 0, y, "✓", fg(BASS));
-            put(buf, r, 2, y, &format!("{k:<10}"), fg(DIM));
-            put(buf, r, 13, y, v, fg(TEXT));
+            put(buf, r, 2, y, line, fg(TEXT));
             y += 1;
         }
-        if !summary.is_empty() {
+        if !summary_lines.is_empty() {
             y += 1;
         }
-        let (q, hint) = self.question();
+        let (q, hint) = if editing {
+            (
+                "Event grid — space toggles a cell, arrows move".to_string(),
+                "F Fire · W Water · S Stones · O Wood · C clear · Enter accept · Esc back to list".to_string(),
+            )
+        } else {
+            self.question()
+        };
         put(buf, r, 0, y, &q, fg(TEXT).add_modifier(Modifier::BOLD));
         y += 1;
         let cursor = if (t * 2.0) as u64 % 2 == 0 { "▏" } else { " " };
-        if let Some(id) = list_id(self.step) {
-            let name_w = opts.iter().map(|o| o.0.chars().count()).max().unwrap_or(0).max(12);
-            for (i, (name, desc)) in opts.iter().enumerate() {
-                let sel = i == self.sel[id];
-                let marker = if sel { "›" } else { " " };
-                let style = if sel { fg(GLITCH2).add_modifier(Modifier::BOLD) } else { fg(TEXT) };
-                put(buf, r, 0, y, &format!("{marker} {:>2}  {name:<name_w$}", i + 1), style);
-                put(buf, r, 7 + name_w as u16, y, desc, fg(if sel { TEXT } else { DIM }));
+        if let Some(layer) = self.grid_edit {
+            for row in 0..ROWS {
+                put(buf, r, 0, y + row as u16, &format!("{:<8}", EVENT_NAMES[row]), fg(DIM));
+                for step in 0..STEPS {
+                    let on = self.grids[layer].get(row, step);
+                    let is_cursor = self.grid_cursor == (row, step);
+                    let cell = if on { "██" } else { "··" };
+                    let style = if is_cursor {
+                        Style::new().bg(rgb(GLITCH2)).fg(rgb((20, 20, 20)))
+                    } else if on {
+                        fg(GLITCH2)
+                    } else {
+                        fg(FAINT)
+                    };
+                    put(buf, r, 9 + (step * 2) as u16, y + row as u16, cell, style);
+                }
+            }
+            y += ROWS as u16 + 1;
+        } else if let Some(id) = id {
+            let selected = self.sel[id];
+            if grid {
+                let cell = (r.width as usize).saturating_sub(2) / cols;
+                for (i, (name, _)) in opts.iter().enumerate() {
+                    let (row, col) = (i / cols, i % cols);
+                    let n = if matches!(self.step, Step::Loop1 | Step::Loop2) { i } else { i + 1 };
+                    let style = if i == selected { fg(GLITCH2).add_modifier(Modifier::BOLD) } else { fg(TEXT) };
+                    put(buf, r, (col * cell) as u16, y + row as u16, &format!("{n:>2} {name}"), style);
+                }
+                y += list_rows as u16 + 1;
+                if let Some((_, desc)) = opts.get(selected) {
+                    put(buf, r, 2, y, desc, fg(TEXT));
+                }
                 y += 1;
+            } else {
+                let name_w = opts.iter().map(|o| o.0.chars().count()).max().unwrap_or(0).max(12);
+                for (i, (name, desc)) in opts.iter().enumerate() {
+                    let sel = i == selected;
+                    let marker = if sel { "›" } else { " " };
+                    let style = if sel { fg(GLITCH2).add_modifier(Modifier::BOLD) } else { fg(TEXT) };
+                    // The atmosphere questions put None first and number it 0.
+                    let n = if matches!(self.step, Step::Loop1 | Step::Loop2) { i } else { i + 1 };
+                    put(buf, r, 0, y, &format!("{marker} {n:>2}  {name:<name_w$}"), style);
+                    put(buf, r, 7 + name_w as u16, y, desc, fg(if sel { TEXT } else { DIM }));
+                    y += 1;
+                }
             }
         } else {
             let default = self.default_for(self.step);
@@ -577,6 +836,23 @@ impl Setup {
             }
             y += 1;
         }
+        if anim {
+            if let Some(a) = &self.audition {
+                let ov = a.overview();
+                let peak = ov.iter().cloned().fold(1e-9f32, f32::max);
+                let w = r.width.saturating_sub(9) as usize;
+                put(buf, r, 0, y, "preview ", fg(DIM));
+                let bars: Vec<char> = "▁▂▃▄▅▆▇█".chars().collect();
+                for i in 0..w {
+                    let v = ov.get(i * ov.len() / w.max(1)).copied().unwrap_or(0.0) / peak;
+                    let k = ((v.clamp(0.0, 1.0)) * 7.0).round() as usize;
+                    put(buf, r, 8 + i as u16, y, &bars[k.min(7)].to_string(), fg(mix(DIM, GLITCH2, 0.7)));
+                }
+                let p = (a.playhead() * w.saturating_sub(1) as f64).round() as usize;
+                put_char(buf, r, 8 + p as u16, y, '●', fg(WHITE));
+            }
+            y += 1;
+        }
         y += 1;
         put(buf, r, 0, y, &hint, fg(DIM));
         y += 1;
@@ -596,6 +872,7 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
     let start = Instant::now();
     let mut s = Setup::new(notice);
     loop {
+        s.sync_audition();
         let t = start.elapsed().as_secs_f64();
         terminal.draw(|f| s.draw(f, t)).map_err(|e| e.to_string())?;
         if !event::poll(FRAME).map_err(|e| e.to_string())? {
@@ -608,6 +885,34 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
         if quit_key(k.code, k.modifiers) {
             return Ok(None);
         }
+        // The event-grid editor takes over the keys while it is open.
+        if let Some(layer) = s.grid_edit {
+            match k.code {
+                KeyCode::Esc => s.grid_edit = None,
+                KeyCode::Up => s.grid_cursor.0 = (s.grid_cursor.0 + ROWS - 1) % ROWS,
+                KeyCode::Down => s.grid_cursor.0 = (s.grid_cursor.0 + 1) % ROWS,
+                KeyCode::Left => s.grid_cursor.1 = (s.grid_cursor.1 + STEPS - 1) % STEPS,
+                KeyCode::Right => s.grid_cursor.1 = (s.grid_cursor.1 + 1) % STEPS,
+                KeyCode::Char(' ') => {
+                    let (r, c) = s.grid_cursor;
+                    s.grids[layer].toggle(r, c);
+                }
+                KeyCode::Char('f' | 'F') => s.grids[layer] = Grid::fire(),
+                KeyCode::Char('w' | 'W') => s.grids[layer] = Grid::water(),
+                KeyCode::Char('s' | 'S') => s.grids[layer] = Grid::stones(),
+                KeyCode::Char('o' | 'O') => s.grids[layer] = Grid::wood(),
+                KeyCode::Char('c' | 'C') => s.grids[layer] = Grid::EMPTY,
+                KeyCode::Enter => {
+                    s.grid_edit = None;
+                    if s.submit() {
+                        break;
+                    }
+                    s.notice = None;
+                }
+                _ => {}
+            }
+            continue;
+        }
         match (s.step, k.code) {
             (_, KeyCode::Esc) => {
                 if !s.go_back() {
@@ -617,6 +922,13 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
             (step, KeyCode::Up | KeyCode::Down) if list_id(step).is_some() => {
                 let (id, n) = (list_id(step).unwrap(), options(step, s.bpm).len());
                 s.sel[id] = if k.code == KeyCode::Up { (s.sel[id] + n - 1) % n } else { (s.sel[id] + 1) % n };
+            }
+            (step @ (Step::Loop1 | Step::Loop2), KeyCode::Char(c @ '0'..='9')) => {
+                let (id, n) = (list_id(step).unwrap(), options(step, s.bpm).len());
+                let i = c as usize - '0' as usize;
+                if i < n {
+                    s.sel[id] = i;
+                }
             }
             (step, KeyCode::Char(c @ '1'..='9')) if list_id(step).is_some() => {
                 let (id, n) = (list_id(step).unwrap(), options(step, s.bpm).len());
@@ -641,6 +953,14 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
                     break;
                 }
             }
+            (step @ (Step::Loop1 | Step::Loop2), KeyCode::Enter) if s.sel[list_id(step).unwrap()] == LOOP_GRID => {
+                s.grid_edit = Some(if step == Step::Loop1 { 0 } else { 1 });
+                s.grid_cursor = (0, 0);
+            }
+            (step @ (Step::Loop1 | Step::Loop2), KeyCode::Char('g' | 'G')) => {
+                s.grid_edit = Some(if step == Step::Loop1 { 0 } else { 1 });
+                s.grid_cursor = (0, 0);
+            }
             (_, KeyCode::Enter) => {
                 if s.submit() {
                     break;
@@ -648,7 +968,7 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
                 // Any new answer replaces the last round's message.
                 s.notice = None;
             }
-            (Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Overwrite, _) => {}
+            (Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Key | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Overwrite, _) => {}
             (_, KeyCode::Backspace) => {
                 s.input.pop();
             }
@@ -786,4 +1106,49 @@ pub fn preview(width: u16, height: u16) -> Vec<String> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The setup box must fit a laptop terminal: the current question, its
+    /// options and the hint stay on screen at 80x24 and smaller.
+    #[test]
+    fn setup_fits_small_terminals() {
+        use ratatui::backend::TestBackend;
+        for (w, h) in [(80u16, 24u16), (100, 30), (70, 22)] {
+            // A long list (all atmosphere timbres) is the worst case for height.
+            for step in [Step::Mode, Step::Scale, Step::Loop1, Step::Loop2, Step::DroneCycle] {
+                let mut s = Setup::new(None);
+                s.step = step;
+                let mut terminal = ratatui::Terminal::new(TestBackend::new(w, h)).unwrap();
+                terminal.draw(|f| s.draw(f, 1.0)).unwrap();
+                let buf = terminal.backend().buffer();
+                let text: String = (0..h)
+                    .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let (q, _) = s.question();
+                assert!(text.contains(q.trim()), "{w}x{h} {step:?}: lost question {q:?}\n{text}");
+                assert!(text.contains("Enter"), "{w}x{h} {step:?}: lost hint\n{text}");
+                // The event-grid editor must also fit and show its rows/hint.
+                if step == Step::Loop1 {
+                    let mut g = Setup::new(None);
+                    g.step = Step::Loop1;
+                    g.grid_edit = Some(0);
+                    let mut terminal = ratatui::Terminal::new(TestBackend::new(w, h)).unwrap();
+                    terminal.draw(|f| g.draw(f, 1.0)).unwrap();
+                    let buf = terminal.backend().buffer();
+                    let text: String = (0..h)
+                        .map(|y| (0..w).map(|x| buf[(x, y)].symbol()).collect::<String>())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    assert!(text.contains("Event grid"), "{w}x{h}: grid question missing\n{text}");
+                    assert!(text.contains("Crackle") && text.contains("Hiss"), "{w}x{h}: grid rows missing\n{text}");
+                    assert!(text.contains("Fire"), "{w}x{h}: preset hint missing\n{text}");
+                }
+            }
+        }
+    }
 }

@@ -312,21 +312,30 @@ struct Geo {
     paths: Vec<Vec<(u16, u16)>>,
 }
 
-const BOX_H: u16 = 4;
+const BOX_H_TALL: u16 = 4;
+const BOX_H_SHORT: u16 = 3;
 
 fn layout(r: Rect) -> Option<Geo> {
-    if r.width < 90 || r.height < 29 {
+    // Prefer the roomy four-row boxes; drop to three rows (and no vertical gaps)
+    // when the terminal is short, so the diagram still fits a laptop screen.
+    let compact = r.height < 29;
+    let box_h = if compact { BOX_H_SHORT } else { BOX_H_TALL };
+    let (seed_w, out_w) = if r.width >= 100 { (11u16, 13u16) } else { (9u16, 11u16) };
+    let gap = if r.width >= 100 { 3u16 } else { 2u16 };
+    let avail = r.width.checked_sub(seed_w + out_w)?;
+    let bw = ((avail.checked_sub(5 * gap))? / 4).min(24);
+    if bw < 8 {
         return None;
     }
-    let (seed_w, out_w) = (11u16, 13u16);
-    let bw = ((r.width - seed_w - out_w - 5 * 4) / 4).min(24);
-    let gap = (r.width - seed_w - out_w - 4 * bw) / 5;
+    let gy = if compact { 0 } else { ((r.height.min(34) - 6 * BOX_H_TALL) / 5).clamp(1, 2) };
+    if r.height < 6 * box_h + 5 * gy {
+        return None;
+    }
     let cx = [0, seed_w + gap, seed_w + 2 * gap + bw, seed_w + 3 * gap + 2 * bw, seed_w + 4 * gap + 3 * bw];
     let c5 = seed_w + 5 * gap + 4 * bw;
-    let gy = ((r.height.min(34) - 6 * BOX_H) / 5).clamp(1, 2);
-    let y: Vec<u16> = (0..6).map(|i| i * (BOX_H + gy)).collect();
+    let y: Vec<u16> = (0..6).map(|i| i * (box_h + gy)).collect();
     let mid12 = (y[1] + y[2]) / 2;
-    let rect = |x: u16, y: u16, w: u16| Rect::new(r.x + x, r.y + y, w, BOX_H);
+    let rect = |x: u16, y: u16, w: u16| Rect::new(r.x + x, r.y + y, w, box_h);
     let mut boxes = [Rect::default(); 23];
     let mut set = |n: Node, rc: Rect| boxes[idx(n)] = rc;
     set(Seed1, rect(cx[0], y[0], seed_w));
@@ -355,12 +364,13 @@ fn layout(r: Rect) -> Option<Geo> {
 
     // Wires run right from a box's middle, drop or rise on a column two cells
     // before the target (so wires into one box share a bus), then run in.
+    let mid = (box_h - 1) / 2;
     let paths = EDGES
         .iter()
         .map(|(a, b, _)| {
             let (ra, rb) = (boxes[idx(*a)], boxes[idx(*b)]);
-            let (x1, y1) = (ra.x + ra.width, ra.y + BOX_H / 2 - 1);
-            let (x2, y2) = (rb.x.saturating_sub(1), rb.y + BOX_H / 2 - 1);
+            let (x1, y1) = (ra.x + ra.width, ra.y + mid);
+            let (x2, y2) = (rb.x.saturating_sub(1), rb.y + mid);
             let xm = if x2 >= x1 + 2 { x2 - 2 } else { x1 };
             let mut pts = Vec::new();
             for x in x1..=xm {
@@ -515,7 +525,7 @@ fn box_text(ui: &Ui, n: Node) -> BoxText {
                     return format!("{} off", k + 1);
                 }
                 let pass = s.map_or(String::new(), |s| format!(" · pass {}", s.clock / lp.len as u64 + 1));
-                format!("{} {} {}b{pass}", k + 1, lp.timbre.code(), lp.beats)
+                format!("{} {} {}b{pass}", k + 1, lp.design.short(), lp.beats)
             };
             BoxText {
                 title: "LOOPS 1 + 2".into(),
@@ -715,14 +725,18 @@ fn draw_box(buf: &mut Buffer, rc: Rect, bt: &BoxText, flash: f64, explaining: bo
     let border = if explaining { mix(bt.color, WHITE, 0.3) } else { lit(bt.color, 0.25 + 0.6 * glow) };
     let area = Rect::new(rc.x, rc.y, rc.width, rc.height);
     let w = rc.width as usize;
+    let h = rc.height;
     let top = format!("╭{}╮", "─".repeat(w.saturating_sub(2)));
     let mid = format!("│{}│", " ".repeat(w.saturating_sub(2)));
     let bot = format!("╰{}╯", "─".repeat(w.saturating_sub(2)));
     let b = fg(border);
     put(buf, area, 0, 0, &top, b);
-    put(buf, area, 0, 1, &mid, b);
-    put(buf, area, 0, 2, &mid, b);
-    put(buf, area, 0, 3, &bot, b);
+    for row in 1..h.saturating_sub(1) {
+        put(buf, area, 0, row, &mid, b);
+    }
+    if h >= 2 {
+        put(buf, area, 0, h - 1, &bot, b);
+    }
     let title_style = fg(mix(lit(bt.color, 0.6), WHITE, flash * 0.6)).add_modifier(Modifier::BOLD);
     let title = format!(" {} ", bt.title);
     let title_w = title.chars().count() as u16;
@@ -730,12 +744,15 @@ fn draw_box(buf: &mut Buffer, rc: Rect, bt: &BoxText, flash: f64, explaining: bo
     if explaining && title_w + 4 <= rc.width {
         put(buf, area, rc.width.saturating_sub(3), 0, "◆", fg(GLITCH2));
     }
-    let inner = Rect::new(rc.x + 1, rc.y + 1, rc.width.saturating_sub(2), 2);
+    // Text: two lines when the box is four rows tall, one when it is three.
+    let inner = Rect::new(rc.x + 1, rc.y + 1, rc.width.saturating_sub(2), h.saturating_sub(2).max(1));
     put(buf, inner, 1, 0, &bt.lines[0], fg(mix(DIM, TEXT, glow)));
-    put(buf, inner, 1, 1, &bt.lines[1], fg(DIM));
+    if h >= 4 {
+        put(buf, inner, 1, 1, &bt.lines[1], fg(DIM));
+    }
     if !bt.tag.is_empty() {
         let tag = format!(" {} ", bt.tag);
-        put(buf, area, rc.width.saturating_sub(tag.chars().count() as u16 + 1), 3, &tag, fg(lit(bt.color, 0.6)));
+        put(buf, area, rc.width.saturating_sub(tag.chars().count() as u16 + 1), h - 1, &tag, fg(lit(bt.color, 0.6)));
     }
 }
 
@@ -755,12 +772,16 @@ pub fn draw(ui: &Ui, f: &mut Frame, area: Rect, explaining: Panel) {
     f.render_widget(block, area);
     let buf = f.buffer_mut();
 
-    // The chord progression across the top, then the diagram.
-    super::rhythm::chord_strip(ui, buf, Rect::new(r.x + 1, r.y, r.width.saturating_sub(2), 2));
-    let diagram_h = 35.min(r.height.saturating_sub(3));
-    let diagram = Rect::new(r.x + 1, r.y + 3, r.width.saturating_sub(2), diagram_h);
+    // The chord progression across the top when there is room; short terminals
+    // give the whole height to the diagram so it still fits a laptop.
+    let strip = r.height >= 22;
+    if strip {
+        super::rhythm::chord_strip(ui, buf, Rect::new(r.x + 1, r.y, r.width.saturating_sub(2), 2));
+    }
+    let top = if strip { r.y + 3 } else { r.y };
+    let diagram = Rect::new(r.x + 1, top, r.width.saturating_sub(2), r.height.saturating_sub(top - r.y));
     let Some(geo) = layout(diagram) else {
-        put(buf, r, 1, 3, "Make the terminal at least 94 x 41 for the pipeline view, or press [tab].", fg(TEXT));
+        put(buf, r, 1, 1, "Press [tab] for the engine view; this diagram needs a slightly larger terminal.", fg(TEXT));
         return;
     };
     *ui.pipe.lengths.borrow_mut() = geo.paths.iter().map(|p| p.len()).collect();
@@ -859,5 +880,27 @@ pub fn draw(ui: &Ui, f: &mut Frame, area: Rect, explaining: Panel) {
     }
     if ui.events.is_empty() {
         put(buf, below, 0, 4, "Changes in the music will be listed here as they happen.", fg(DIM));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::layout::Rect;
+
+    /// The pipeline must lay out at the smallest terminal the app allows
+    /// (80x22), where the diagram area is about 76x18.
+    #[test]
+    fn layout_fits_small_terminals() {
+        for (w, h) in [(76u16, 18u16), (76, 19), (116, 34), (90, 29)] {
+            let r = Rect::new(0, 0, w, h);
+            let geo = layout(r).unwrap_or_else(|| panic!("no layout at {w}x{h}"));
+            for b in geo.boxes {
+                assert!(b.x + b.width <= w, "{w}x{h}: box {b:?} overflows width");
+                assert!(b.y + b.height <= h, "{w}x{h}: box {b:?} overflows height");
+            }
+        }
+        // Genuinely too small: no room for the columns.
+        assert!(layout(Rect::new(0, 0, 50, 10)).is_none());
     }
 }

@@ -2,7 +2,7 @@
 //! software artifact.
 //!
 //! ```text
-//! seed1 → chord progression (scale, key) → 3-op FM chords → random-phase FFT freeze + morphs → filter ─┐
+//! seed1 → chord progression (scale, key) → 3-op FM chords → random-phase FFT freeze + morphs → filter → drone arc ─┐
 //! seed2 → glitch artifacts 1 → cyclic repeats 1 ─┐                                                    │
 //! seed3 → glitch artifacts 2 → cyclic repeats 2 ─┴→ echo/delay ───────────────────────────────────────┼→ long reverb
 //! seed4 → FM bass + sub-bass (follows chord roots) → low-pass ─────────────────────────────────────────┤
@@ -31,6 +31,7 @@ pub mod reverb;
 pub mod rng;
 pub mod telemetry;
 pub mod tempo;
+pub mod texture;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cli;
@@ -39,6 +40,7 @@ pub mod cli;
 mod wasm;
 
 use atmos::{AtmosLoop, LoopTimbre};
+use texture::Grid;
 use bass::Bass;
 use delay::{PingPong, TapeEcho};
 use drone::Drone;
@@ -70,6 +72,134 @@ pub struct Seeds {
 /// The canonical version of the track.
 pub const DEFAULT_SEEDS: Seeds = Seeds { s1: 1000, s2: 9, s3: 1009, s4: 2026, s5: 168, s6: 11 };
 
+/// How one atmosphere layer is made: one of the sustained timbres, or an
+/// editable event grid of physical-texture grains (fire, water, stones, wood).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoopDesign {
+    Sustained(LoopTimbre),
+    Events(Grid),
+}
+
+impl LoopDesign {
+    /// No atmosphere on this layer.
+    pub const OFF: LoopDesign = LoopDesign::Sustained(LoopTimbre::Off);
+
+    pub fn is_on(&self) -> bool {
+        match self {
+            LoopDesign::Sustained(t) => *t != LoopTimbre::Off,
+            LoopDesign::Events(g) => !g.is_empty(),
+        }
+    }
+
+    /// The sustained timbre, if this is one.
+    pub fn timbre(&self) -> Option<LoopTimbre> {
+        match self {
+            LoopDesign::Sustained(t) => Some(*t),
+            LoopDesign::Events(_) => None,
+        }
+    }
+
+    /// The recipe token: a timbre code, or `E` + 16 hex digits for a grid.
+    pub fn token(&self) -> String {
+        match self {
+            LoopDesign::Sustained(t) => t.code().to_string(),
+            LoopDesign::Events(g) => format!("E{}", g.to_hex()),
+        }
+    }
+
+    pub fn from_token(s: &str) -> Option<LoopDesign> {
+        if let Some(hex) = s.strip_prefix('E').or_else(|| s.strip_prefix('e')) {
+            return Grid::from_hex(hex).map(LoopDesign::Events);
+        }
+        LoopTimbre::from_code(s).map(LoopDesign::Sustained)
+    }
+
+    pub fn name(&self) -> String {
+        match self {
+            LoopDesign::Sustained(t) => t.name().to_string(),
+            LoopDesign::Events(g) if g.is_empty() => "Event grid (empty)".to_string(),
+            LoopDesign::Events(_) => "Event grid".to_string(),
+        }
+    }
+
+    /// A very short label for a box or header.
+    pub fn short(&self) -> &'static str {
+        match self {
+            LoopDesign::Sustained(t) => t.code(),
+            LoopDesign::Events(_) => "EVT",
+        }
+    }
+
+    pub fn blurb(&self) -> String {
+        match self {
+            LoopDesign::Sustained(t) => t.blurb().to_string(),
+            LoopDesign::Events(_) => "fire, water, stones, wood: grains on an editable grid".to_string(),
+        }
+    }
+}
+
+/// Where the tonic comes from: the seed (the default, unchanged), or an
+/// explicit pitch class the player chooses at setup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyChoice {
+    Seed,
+    /// Pitch class 0..11 (0 = C).
+    Note(u8),
+}
+
+/// A repeating entrance/exit arc for the frozen-chord drone: every `cycle_s`
+/// seconds the drone swells up for `hold_s` seconds, holds, then fades back to
+/// silence until the cycle comes round again. `cycle_s == 0` means always on.
+/// Timing is in whole seconds (like the slow form cycles), so changing the BPM
+/// moves the rhythm but leaves this long breathing of the piece alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DroneArc {
+    pub cycle_s: u16,
+    pub hold_s: u16,
+}
+
+impl DroneArc {
+    /// No arc: the drone plays continuously, exactly as it always has.
+    pub const ALWAYS_ON: DroneArc = DroneArc { cycle_s: 0, hold_s: 0 };
+
+    /// Whether the arc gates the drone at all.
+    pub fn is_on(&self) -> bool {
+        self.cycle_s > 0
+    }
+
+    /// (cycle, hold) in samples; the hold is clamped to the cycle.
+    pub fn samples(&self) -> (u64, u64) {
+        let sr = SAMPLE_RATE as u64;
+        let cycle = self.cycle_s as u64 * sr;
+        (cycle, (self.hold_s as u64 * sr).min(cycle))
+    }
+
+    /// Gain 0..1 at `clock`: a raised-cosine swell at each end of the hold,
+    /// flat in between, and silence for the rest of the cycle. Always exactly
+    /// 1.0 when the arc is off, so the default sound is untouched.
+    pub fn gain(&self, clock: u64) -> f64 {
+        let (cycle, hold) = self.samples();
+        if cycle == 0 {
+            return 1.0;
+        }
+        let p = clock % cycle;
+        if p >= hold {
+            return 0.0;
+        }
+        // A quarter of the hold, no shorter than 2 s and no longer than 15 s
+        // (and never more than half the hold, so the plateau survives).
+        let sr = SAMPLE_RATE as u64;
+        let fade = (hold / 4).clamp(2 * sr, 15 * sr).min(hold / 2).max(1);
+        if p < fade {
+            0.5 - 0.5 * math::cos_turns(0.5 * p as f64 / fade as f64)
+        } else if p + fade > hold {
+            0.5 - 0.5 * math::cos_turns(0.5 * (hold - p) as f64 / fade as f64)
+        } else {
+            1.0
+        }
+    }
+}
+
 /// Musical choices made up front (the seeds fill in the details).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Settings {
@@ -83,8 +213,15 @@ pub struct Settings {
     pub space: kits::DrumSpace,
     /// The drum tempo; every ambient layer moves at exactly half of it.
     pub bpm: u16,
-    /// The two atmosphere loop layers' timbres (seed 6 shapes them).
-    pub loops: [LoopTimbre; 2],
+    /// The two atmosphere loop layers (seed 6 shapes the sustained ones).
+    pub loops: [LoopDesign; 2],
+    /// Semitones the atmosphere loops are transposed by (0 = the chord tones
+    /// exactly, so they match the chosen root note).
+    pub loop_transpose: i8,
+    /// Where the tonic comes from (seed 1 picks it by default).
+    pub key: KeyChoice,
+    /// The repeating entrance/exit arc of the frozen-chord drone.
+    pub drone: DroneArc,
 }
 
 pub const DEFAULT_SETTINGS: Settings =
@@ -95,11 +232,14 @@ pub const DEFAULT_SETTINGS: Settings =
         kit: kits::Kit::SubClicks,
         space: kits::DrumSpace::Wide,
         bpm: tempo::DEFAULT_BPM,
-        loops: [LoopTimbre::Choir, LoopTimbre::Glass],
+        loops: [LoopDesign::Sustained(LoopTimbre::Choir), LoopDesign::Sustained(LoopTimbre::Glass)],
+        loop_transpose: 0,
+        key: KeyChoice::Seed,
+        drone: DroneArc::ALWAYS_ON,
     };
 
 /// 0010's sound: the default settings with no atmosphere loops.
-pub const NO_LOOPS: [LoopTimbre; 2] = [LoopTimbre::Off, LoopTimbre::Off];
+pub const NO_LOOPS: [LoopDesign; 2] = [LoopDesign::OFF, LoopDesign::OFF];
 
 /// The ping-pong echo's delay, in glitch sixteenths (3/16).
 const ECHO_SIXTEENTHS: u64 = 3;
@@ -279,6 +419,8 @@ pub struct Track {
     mods: Mods,
     drone: Drone,
     drone_filter: [Svf; 2],
+    /// Drone gain from the repeating entrance/exit arc (1 = always on).
+    drone_window: f64,
     history: History,
     glitch1: Layer,
     glitch2: Layer,
@@ -301,7 +443,10 @@ impl Track {
         // Chord 1's voicing is the first draw from the drone's stream (as in 0009).
         let mut first = Rng::stream(seeds.s1, 0xD0);
         let mut rest = Rng::stream(seeds.s1, 0xD7);
-        let key = harmony::key_for(seeds.s1);
+        let key = match settings.key {
+            KeyChoice::Seed => harmony::key_for(seeds.s1),
+            KeyChoice::Note(n) => n % 12,
+        };
         let tempo = Tempo::new(settings.bpm);
         let settings = Settings { bpm: tempo.bpm, ..settings };
         let chords = settings.chords.clamp(1, 4) as usize;
@@ -323,7 +468,7 @@ impl Track {
             mods: Mods::new(seeds.s1),
             glitch1: Layer::new(layer1(&harmony, tempo), seeds.s2, 0x61),
             glitch2: Layer::new(layer2(&harmony, tempo), seeds.s3, 0x62),
-            loop1: AtmosLoop::new(settings.loops[0], seeds.s6, 0xA1, &harmony, tempo.beat(), LOOP1_SECONDS, None),
+            loop1: AtmosLoop::new(settings.loops[0], seeds.s6, 0xA1, &harmony, tempo.beat(), LOOP1_SECONDS, None, settings.loop_transpose),
             loop2: AtmosLoop::new(
                 settings.loops[1],
                 seeds.s6,
@@ -333,9 +478,11 @@ impl Track {
                 LOOP2_SECONDS,
                 // Loop 1's length, whether or not it plays, so loop 2's never depends on it being on.
                 Some(atmos::loop_beats(tempo.beat(), LOOP1_SECONDS, None)),
+                settings.loop_transpose,
             ),
             drone: Drone::new(seeds.s1, harmony, first, rest),
             drone_filter: [Svf::new(1000.0, 0.7, sr), Svf::new(1000.0, 0.7, sr)],
+            drone_window: 1.0,
             history: History::new(),
             echo: PingPong::new(echo_delay, ECHO_FEEDBACK),
             bass: Bass::new(seeds.s4),
@@ -391,7 +538,8 @@ impl Track {
         let clock = self.clock;
         let m = self.mods.at(clock);
 
-        // 1: frozen drone through the slowly cycling filter.
+        // 1: frozen drone through the slowly cycling filter and the repeating
+        // entrance/exit arc.
         if clock % 32 == 0 {
             let cutoff = DRONE_CUTOFF_MIN * math::exp2(m.drone_open * DRONE_CUTOFF_OCTAVES);
             let q = 0.6 + 2.4 * m.drone_reso;
@@ -400,10 +548,12 @@ impl Track {
             }
             self.drone_cutoff = cutoff;
             self.drone_q = q;
+            self.drone_window = self.settings.drone.gain(clock);
         }
+        let window = self.drone_window;
         let (dl, dr) = self.drone.next();
-        let dl = self.drone_filter[0].process(dl).low;
-        let dr = self.drone_filter[1].process(dr).low;
+        let dl = self.drone_filter[0].process(dl).low * window;
+        let dr = self.drone_filter[1].process(dr).low * window;
         self.history.push(dl, dr);
 
         // 5 (computed early): jungle drums, and how present they are right now.
@@ -451,13 +601,14 @@ impl Track {
             (0.0, 0.0)
         };
 
-        // 4: bass, gliding to each chord's root during the morph bar.
+        // 4: bass, gliding to each chord's root during the morph bar. The bass
+        // leaves with the drone: one arrangement, one envelope.
         if clock % 32 == 0 {
             let p = self.harmony.at(clock);
             let (a, z) = (self.harmony.chords[p.chord].bass, self.harmony.chords[p.next].bass);
             self.bass.set_root(a + (z - a) * p.morph);
         }
-        let b = self.bass.next(clock, &m);
+        let b = self.bass.next(clock, &m) * window;
 
         // Shared long reverb.
         let (rl, rr) = self.reverb.process(

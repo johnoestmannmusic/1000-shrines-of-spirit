@@ -144,22 +144,27 @@ impl Ui {
         let pipe = pipeline::Pipeline::new(desc.drums_on, desc.loops.iter().any(|l| l.on()));
         let mods = shrine0011::modulate::Mods::new(desc.seeds.s1);
         let (kit, space, loops) = (desc.settings.kit, desc.settings.space, desc.settings.loops);
+        let drone = desc.settings.drone;
         let n = desc.harmony.chords.len();
         let vars = explain::Vars {
             kit: kit.name().to_string(),
             key: shrine0011::harmony::key_name(desc.harmony.key).to_string(),
+            key_source: match desc.settings.key {
+                shrine0011::KeyChoice::Seed => format!("seed 1 picks it ({} for this seed)", shrine0011::harmony::key_name(desc.harmony.key)),
+                shrine0011::KeyChoice::Note(_) => format!("fixed at {} by the player", shrine0011::harmony::key_name(desc.harmony.key)),
+            },
             scale: desc.harmony.scale.name().to_string(),
             chords: format!("{n} chord{}", if n == 1 { "" } else { "s" }),
             recipe: shrine0011::cli::recipe(desc.seeds, desc.settings),
             tempo: desc.tempo,
-            loop1: desc.loops[0].timbre.name().to_string(),
-            loop2: desc.loops[1].timbre.name().to_string(),
+            loop1: desc.loops[0].design.name(),
+            loop2: desc.loops[1].design.name(),
             loop1_len: explain::loop_len(&desc.loops[0], desc.sample_rate),
             loop2_len: explain::loop_len(&desc.loops[1], desc.sample_rate),
             loops: {
                 let on: Vec<String> = (0..2)
                     .filter(|&k| desc.loops[k].on())
-                    .map(|k| format!("loop {} {}", k + 1, desc.loops[k].timbre.name()))
+                    .map(|k| format!("loop {} {}", k + 1, desc.loops[k].design.name()))
                     .collect();
                 on.join(" and ")
             },
@@ -174,6 +179,18 @@ impl Ui {
                 let (a, b) = (desc.loops[0].beats, desc.loops[1].beats);
                 format!("{} beats", a * b / gcd(a, b))
             },
+            drone_arc: if drone.is_on() {
+                format!(
+                    "every {} s the drone swells up for {} s and then leaves for {} s",
+                    drone.cycle_s,
+                    drone.hold_s,
+                    drone.cycle_s - drone.hold_s
+                )
+            } else {
+                "the drone plays continuously".to_string()
+            },
+            drone_cycle: drone.cycle_s.to_string(),
+            drone_hold: drone.hold_s.to_string(),
         };
         Ui {
             label,
@@ -211,7 +228,7 @@ impl Ui {
             device,
             device_rate,
             underruns: 0,
-            ticker: ticker::Ticker::new(kit, space, loops, vars),
+            ticker: ticker::Ticker::new(kit, space, loops, drone, vars),
         }
     }
 

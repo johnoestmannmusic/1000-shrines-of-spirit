@@ -12,7 +12,10 @@ class Track0011 extends AudioWorkletProcessor {
       const v = BigInt(s);
       return [Number(v >> 32n), Number(v & 0xffffffffn)];
     });
-    this.player = exports.sos_new(...args, settings.scale, settings.chords, settings.pace, settings.kit, settings.space, settings.bpm, settings.loop1, settings.loop2);
+    this.player = exports.sos_new(...args, settings.scale, settings.chords, settings.pace, settings.kit, settings.space, settings.bpm,
+      settings.loop1.kind, settings.loop1.lo, settings.loop1.hi,
+      settings.loop2.kind, settings.loop2.lo, settings.loop2.hi,
+      settings.droneCycle, settings.droneHold, settings.key, settings.transpose);
     this.port.postMessage("ready");
   }
 

@@ -148,7 +148,7 @@ impl Live {
 }
 
 /// Prefer a stereo f32 configuration that runs at 48 kHz natively.
-fn choose_config(device: &cpal::Device) -> Result<cpal::SupportedStreamConfig, String> {
+pub(crate) fn choose_config(device: &cpal::Device) -> Result<cpal::SupportedStreamConfig, String> {
     let mut best: Option<(u32, cpal::SupportedStreamConfigRange)> = None;
     if let Ok(configs) = device.supported_output_configs() {
         for c in configs {

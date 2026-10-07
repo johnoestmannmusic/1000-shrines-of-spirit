@@ -4,13 +4,14 @@
 //! Run with no arguments to be asked everything. For scripting:
 //!
 //!     shrine-0011 [--mode play|render|both] [--label TEXT] [--recipe R] [--scale S] [--chords 1-4] [--bpm 70-180] [--pace half|jungle] [--kit K] [--space centred|wide|tape]
-//!                 [--seconds N] [--out FILE] [--loop1 T] [--loop2 T] [--seed1 N] … [--seed6 N]
+//!                 [--seconds N] [--out FILE] [--loop1 T] [--loop2 T] [--drone-cycle S] [--drone-hold S] [--key C|C#|…|B|seed] [--transpose N] [--seed1 N] … [--seed6 N]
 //!
 //! (`--mode` defaults to `play`.) The sound comes entirely from the
 //! dependency-free `engine/` crate; this app only adds the sound card and the
 //! terminal.
 
 mod audio;
+mod audition;
 mod state;
 mod tui;
 
@@ -30,7 +31,7 @@ pub(crate) enum Mode {
 fn usage(msg: &str) -> ! {
     eprintln!("{msg}");
     eprintln!(
-        "usage: shrine-0011 [--mode play|render|both] [--label TEXT] [--recipe R] [--scale S] [--chords 1-4] [--bpm 70-180] [--pace half|jungle] [--kit K] [--space centred|wide|tape] [--seconds N] [--out FILE] [--loop1 T] [--loop2 T] [--seed1 N] … [--seed6 N]"
+        "usage: shrine-0011 [--mode play|render|both] [--label TEXT] [--recipe R] [--scale S] [--chords 1-4] [--bpm 70-180] [--pace half|jungle] [--kit K] [--space centred|wide|tape] [--seconds N] [--out FILE] [--loop1 T] [--loop2 T] [--drone-cycle S] [--drone-hold S] [--key C|C#|…|B|seed] [--transpose N] [--seed1 N] … [--seed6 N]"
     );
     eprintln!("       shrine-0011            (asks for everything)");
     exit(2);
@@ -140,6 +141,7 @@ fn from_flags(args: Vec<String>) -> (Mode, Seeds, Settings, String, f64, String)
     let mut seconds = DEFAULT_SECONDS;
     let mut path = String::from(DEFAULT_FILE);
     let mut seeds = DEFAULT_SEEDS;
+    let (mut drone_cycle, mut drone_hold) = (settings.drone.cycle_s, settings.drone.hold_s);
     let mut args = args.into_iter();
     while let Some(flag) = args.next() {
         let value = args.next().unwrap_or_else(|| usage(&format!("missing value for {flag}")));
@@ -159,11 +161,16 @@ fn from_flags(args: Vec<String>) -> (Mode, Seeds, Settings, String, f64, String)
             "--seed4" => seeds.s4 = seed(),
             "--seed5" => seeds.s5 = seed(),
             "--seed6" => seeds.s6 = seed(),
-            "--loop1" => settings.loops[0] = cli::parse_loop(&value).unwrap_or_else(|| usage(&format!("bad loop timbre: {value}"))),
-            "--loop2" => settings.loops[1] = cli::parse_loop(&value).unwrap_or_else(|| usage(&format!("bad loop timbre: {value}"))),
+            "--loop1" => settings.loops[0] = cli::parse_loop_design(&value).unwrap_or_else(|| usage(&format!("bad loop design: {value}"))),
+            "--loop2" => settings.loops[1] = cli::parse_loop_design(&value).unwrap_or_else(|| usage(&format!("bad loop design: {value}"))),
+            "--drone-cycle" => drone_cycle = cli::parse_drone_cycle(&value).unwrap_or_else(|| usage(&format!("bad drone cycle: {value} (0-3600 seconds)"))),
+            "--drone-hold" => drone_hold = value.trim().parse::<u16>().unwrap_or_else(|_| usage(&format!("bad drone hold: {value} (seconds)"))),
+            "--key" => settings.key = cli::parse_key_choice(&value).unwrap_or_else(|| usage(&format!("bad key: {value} (seed, C..B)"))),
+            "--transpose" => settings.loop_transpose = cli::parse_transpose(&value).unwrap_or_else(|| usage(&format!("bad transpose: {value} (-12 to 12)"))),
             "--recipe" | "--code" => {
                 (seeds, settings) =
-                    cli::parse_recipe(&value).unwrap_or_else(|| usage(&format!("bad recipe: {value}")))
+                    cli::parse_recipe(&value).unwrap_or_else(|| usage(&format!("bad recipe: {value}")));
+                (drone_cycle, drone_hold) = (settings.drone.cycle_s, settings.drone.hold_s);
             }
             "--scale" => settings.scale = cli::parse_scale(&value).unwrap_or_else(|| usage(&format!("bad scale: {value}"))),
             "--chords" => settings.chords = cli::parse_chords(&value).unwrap_or_else(|| usage(&format!("bad chords: {value} (1-4)"))),
@@ -174,6 +181,10 @@ fn from_flags(args: Vec<String>) -> (Mode, Seeds, Settings, String, f64, String)
             _ => usage(&format!("unknown option: {flag}")),
         }
     }
+    settings.drone = shrine0011::DroneArc {
+        cycle_s: drone_cycle,
+        hold_s: if drone_cycle == 0 { 0 } else { drone_hold.min(drone_cycle) },
+    };
     (mode, seeds, settings, path, seconds, label)
 }
 

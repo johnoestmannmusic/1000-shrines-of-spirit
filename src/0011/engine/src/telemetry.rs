@@ -66,12 +66,14 @@ pub struct Description {
     pub bass_root: f64,
     /// The atmosphere loop layers (a layer that is Off has no chords).
     pub loops: [LoopInfo; 2],
+    /// The repeating entrance/exit arc of the frozen-chord drone.
+    pub drone_arc: crate::DroneArc,
 }
 
 /// One atmosphere loop layer, as built at start-up.
 #[derive(Clone, Debug)]
 pub struct LoopInfo {
-    pub timbre: crate::atmos::LoopTimbre,
+    pub design: crate::LoopDesign,
     pub beats: u64,
     /// Loop length in samples.
     pub len: usize,
@@ -92,7 +94,7 @@ fn loop_info(l: &crate::atmos::AtmosLoop) -> LoopInfo {
     let (beats, len) = l.length();
     let perfs = l.performances();
     LoopInfo {
-        timbre: l.timbre(),
+        design: l.design(),
         beats,
         len,
         xfade: crate::atmos::XFADE,
@@ -155,6 +157,8 @@ pub struct Snapshot {
     pub solo_amount: f64,
     /// The drone's gain from the drum-aware mix (1 = untouched).
     pub duck_gain: f64,
+    /// The drone's gain from its repeating entrance/exit arc (1 = always on).
+    pub drone_window: f64,
     /// The bass's current (gliding) root, MIDI.
     pub bass_root: f64,
     /// Where the chord progression is.
@@ -232,6 +236,7 @@ impl Track {
             reverb_decay: crate::reverb::DECAY_SECONDS,
             bass_root: crate::bass::ROOT,
             loops: [loop_info(&self.loop1), loop_info(&self.loop2)],
+            drone_arc: self.settings.drone,
         }
     }
 
@@ -262,6 +267,7 @@ impl Track {
             meters: core::mem::take(&mut self.meters),
             bass_root: self.bass.root(),
             duck_gain: self.duck_gain,
+            drone_window: self.drone_window,
             solo: self.solo().0,
             solo_amount: self.solo().1,
             harmony: self.harmony.at(clock.saturating_sub(1)),

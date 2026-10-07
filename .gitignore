@@ -1,1 +1,6 @@
 /manage/
+
+# Not under version control for now (see CONSTRAINTS.md).
+/CONSTRAINTS.md
+/constraints-tests/
+KANBAN.md

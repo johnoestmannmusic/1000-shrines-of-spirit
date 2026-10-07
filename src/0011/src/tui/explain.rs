@@ -11,6 +11,7 @@ use shrine0011::atmos::LoopTimbre;
 use shrine0011::harmony::Pace;
 use shrine0011::kits::{DrumSpace, Kit};
 use shrine0011::tempo::Tempo;
+use shrine0011::{DroneArc, LoopDesign};
 use shrine0011::SAMPLE_RATE;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -38,17 +39,23 @@ pub enum When {
     NoLoops,
     /// When both atmosphere loops play.
     BothLoops,
+    /// When the drone is gated by a repeating entrance/exit arc.
+    DroneArc,
+    /// When at least one atmosphere layer is an editable event grid.
+    EventLoops,
 }
 
 impl When {
-    pub fn applies(self, kit: Kit, space: DrumSpace, loops: [LoopTimbre; 2]) -> bool {
+    pub fn applies(self, kit: Kit, space: DrumSpace, loops: [LoopDesign; 2], drone: DroneArc) -> bool {
         let drums = kit != Kit::Off;
-        let any_loop = loops.iter().any(|t| *t != LoopTimbre::Off);
+        let any_loop = loops.iter().any(|d| d.is_on());
         match self {
             When::Loops => any_loop,
-            When::Loop(t) => loops.contains(&t),
+            When::Loop(t) => loops.iter().any(|d| d.timbre() == Some(t)),
             When::NoLoops => !any_loop,
-            When::BothLoops => loops.iter().all(|t| *t != LoopTimbre::Off),
+            When::BothLoops => loops.iter().all(|d| d.is_on()),
+            When::EventLoops => loops.iter().any(|d| matches!(d, LoopDesign::Events(_))),
+            When::DroneArc => drone.is_on(),
             When::Always => true,
             When::Kit(k) => k == kit,
             When::Drums => drums,
@@ -78,6 +85,12 @@ pub struct Vars {
     /// The loops that play, e.g. "loop 1 Choir \"Aah\" and loop 2 Glass", and their lengths.
     pub loops: String,
     pub loops_len: String,
+    /// Where the root note comes from, for the key insight.
+    pub key_source: String,
+    /// The drone arc, e.g. "every 120 s the drone swells up for 40 s and then leaves for 80 s".
+    pub drone_arc: String,
+    pub drone_cycle: String,
+    pub drone_hold: String,
 }
 
 /// "8 beats, 5.7 s" for a loop layer.
@@ -105,6 +118,10 @@ pub fn fill(text: &str, v: &Vars) -> String {
         .replace("{loops_meet}", &v.loops_meet)
         .replace("{loops_len}", &v.loops_len)
         .replace("{loops}", &v.loops)
+        .replace("{key_source}", &v.key_source)
+        .replace("{drone_arc}", &v.drone_arc)
+        .replace("{drone_cycle}", &v.drone_cycle)
+        .replace("{drone_hold}", &v.drone_hold)
         .replace("{bpm}", &t.bpm.to_string())
         .replace("{half}", &format!("{:.0}", t.half_bpm()))
         .replace("{exact}", &format!("{:.2}", t.exact_bpm()))
@@ -145,6 +162,20 @@ pub const EXPLAINERS: &[(Panel, When, &str)] = &[
     (Loops, When::Loop(LoopTimbre::Fantasia), "Fantasia: a bright FM bell strum over a warm, detuned saw pad, after the Roland D-50's famous 1987 preset, which layered a sampled attack over a synth pad. The idea defined the late-80s and 90s 'new age' pad."),
     (Loops, When::Loop(LoopTimbre::WaveSeq), "Wave sequence: on every beat the loop moves to a new single-cycle waveform, crossfading over the last quarter-beat. Korg's Wavestation (1990) made whole evolving, rhythmic pads this way."),
     (Loops, When::Loop(LoopTimbre::Breath), "Breath: white noise through very narrow band-pass filters tuned to the chord, plus a wide 'air' band. Each note swells in turn, like a breathy pan-flute or wind pad."),
+    (Loops, When::Loop(LoopTimbre::Whisper), "Whisper: white noise is blown through three resonant band-passes tuned to the vowel formants ('ah', 'oh', 'oo', 'eh'), and the formants glide through them once per loop. It is the wordless, breathy pad behind a lot of Enya and Deep Forest records."),
+    (Loops, When::Loop(LoopTimbre::Wind), "Wind: one low-pass gusting between roughly 250 Hz and 1.8 kHz, with a soft resonance on the lowest chord note. Slow filter sweeps like this were the New Age 'wind' pad: cheap to synthesise, endless to listen to."),
+    (Loops, When::Loop(LoopTimbre::Shimmer), "Shimmer: narrow high resonances on the chord two octaves up, each tremolo-ing at its own slow rate, over a wide air band. The Ensoniq and Korg air textures of the early 90s were exactly this: high, glassy glints with no strong pitch."),
+    (Loops, When::Loop(LoopTimbre::Stream), "Stream: very narrow bands on each chord note, each fluttering at its own fast whole-number rate (6 to 11 times per loop) over a 1.5 kHz band. Water over stones — the 'nature' wash of 90s ambient, made from noise instead of a recording."),
+    (Loops, When::Loop(LoopTimbre::Aurora), "Aurora: four resonant bands sweep a whole octave up and back down once per loop, each at its own phase, brightening as they climb. A Wavestation or JD-800 'aurora' pad: a curtain of light that opens and closes over the chord."),
+    (Loops, When::Loop(LoopTimbre::Haze), "Haze: a steep low-pass breathing between 200 and 800 Hz over one wide low resonance on the chord's root. It is almost pitchless — the quiet bed under a 90s ambient mix, like the lowest layer of an Aphex or FSOL soundscape."),
+    (Cycles, When::DroneArc, "This version's drone breathes: {drone_arc}. The gain is a pure function of the sample clock, so the swell is identical every cycle and at every block size."),
+    (Cycles, When::DroneArc, "The drone arc is measured in seconds, not beats, so changing the BPM moves the rhythm but leaves this slow entrance and exit alone — the arrangement trick behind a lot of 90s ambient, where a pad drifts in for a minute and then is gone."),
+    (Cycles, When::DroneArc, "Inside the hold the drone fades up over a raised cosine, sits at full level, then fades back down: no clicks, and no need for the player to press anything. The bass follows the same envelope (it leaves with the drone), while the atmosphere loops keep playing underneath."),
+    (Loops, When::EventLoops, "Physical textures are events, not pads: each marked cell on the 4 x 16 grid fires a short synthesised grain — a band-passed crackle, a struck resonance, a bending creak or a swell of flow. Fire, water, stones and wood are just starting grids; every cell is yours."),
+    (Loops, When::EventLoops, "Nothing here is a sample pack. Crackles are noise through a narrow band-pass, knocks are an impulse into three inharmonic resonances tuned to a chord tone, creaks are noise through a bending filter, and hiss is a slowly moving band. The 'nature' is synthesised from first principles."),
+    (Loops, When::EventLoops, "The grains are wrapped circularly into the loop, so a tail that would run past the end is already present at the start — the same trick a DAW uses when it loops a reverb tail or a foley recording."),
+    (Loops, When::Loops, "Both atmosphere layers play the chord tones, so they move with the chosen root note and scale. A transpose at setup can shift them away from the chord (0 = exactly on it), which is how you get a drone that sits a fifth above or an octave below."),
+    (Harmony, When::Always, "The root note comes from {key_source}. The scale supplies the intervals, so changing the root just moves the whole piece without changing its shape."),
     (General, When::NoLoops, "This version has no atmosphere loops (both Off). Choose a timbre at setup to add a 90s sample-CD pad that follows the chords."),
     // Harmony.
     (Harmony, When::Always, "The scale you choose decides which notes exist; seed 1 decides the key and how the chords are stacked from those notes. This version is in {key} {scale}."),
@@ -260,7 +291,7 @@ mod tests {
     fn insights_only_describe_the_playing_kit() {
         for kit in KITS {
             for (_, when, text) in EXPLAINERS {
-                if !when.applies(kit, DrumSpace::Tape, [LoopTimbre::Choir, LoopTimbre::Off]) {
+                if !when.applies(kit, DrumSpace::Tape, [LoopDesign::Sustained(LoopTimbre::Choir), LoopDesign::OFF], DroneArc::ALWAYS_ON) {
                     continue;
                 }
                 for other in KITS.iter().filter(|k| **k != kit && **k != Kit::Off) {
@@ -279,7 +310,7 @@ mod tests {
         use shrine0011::atmos::LOOP_TIMBRES;
         for t in LOOP_TIMBRES {
             for (_, when, text) in EXPLAINERS {
-                if !when.applies(Kit::Off, DrumSpace::Centred, [t, LoopTimbre::Off]) {
+                if !when.applies(Kit::Off, DrumSpace::Centred, [LoopDesign::Sustained(t), LoopDesign::OFF], DroneArc::ALWAYS_ON) {
                     continue;
                 }
                 for other in LOOP_TIMBRES.iter().filter(|o| **o != t && **o != LoopTimbre::Off) {
@@ -308,6 +339,10 @@ mod tests {
             loops_meet: "40 beats".into(),
             loops: "loop 1 L".into(),
             loops_len: "loop 1 8 beats".into(),
+            key_source: "seed 1".into(),
+            drone_arc: "every 120 s the drone swells up for 40 s".into(),
+            drone_cycle: "120".into(),
+            drone_hold: "40".into(),
         };
         for (_, _, text) in EXPLAINERS {
             assert!(!fill(text, &v).contains('{'), "{text}");

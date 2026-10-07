@@ -8,8 +8,8 @@
 //! from the wall clock: it only affects the display, never the sound.
 
 use super::explain::{fill, Vars, EXPLAINERS};
-use shrine0011::atmos::LoopTimbre;
 use shrine0011::kits::{DrumSpace, Kit};
+use shrine0011::{DroneArc, LoopDesign};
 use super::gfx::*;
 use super::Panel;
 use ratatui::buffer::Buffer;
@@ -72,11 +72,11 @@ fn shuffled(n: usize, seed: &mut u64) -> Vec<usize> {
 }
 
 impl Ticker {
-    pub fn new(kit: Kit, space: DrumSpace, loops: [LoopTimbre; 2], vars: Vars) -> Self {
+    pub fn new(kit: Kit, space: DrumSpace, loops: [LoopDesign; 2], drone: DroneArc, vars: Vars) -> Self {
         let pool: Vec<usize> = EXPLAINERS
             .iter()
             .enumerate()
-            .filter(|(_, (_, when, _))| when.applies(kit, space, loops))
+            .filter(|(_, (_, when, _))| when.applies(kit, space, loops, drone))
             .map(|(i, _)| i)
             .collect();
         let mut shuffle = std::time::SystemTime::now()

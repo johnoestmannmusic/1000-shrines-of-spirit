@@ -257,7 +257,7 @@ pub fn panel(ui: &Ui, f: &mut Frame, p: Panel, area: Rect, explaining: bool) {
         Panel::Ola => ola(ui, s, buf, r),
         Panel::Chord => chord(ui, buf, r),
         Panel::Glitch => glitch(ui, s, buf, r),
-        Panel::Cycles => cycles(s, buf, r),
+        Panel::Cycles => cycles(ui, s, buf, r),
         Panel::Bass => bass(ui, s, buf, r),
         Panel::Echo => echo(ui, buf, r),
         Panel::Reverb => reverb(ui, buf, r),
@@ -283,7 +283,7 @@ fn loops(ui: &Ui, s: &Snapshot, buf: &mut Buffer, r: Rect) {
         }
         let secs = lp.len as f64 / ui.desc.sample_rate as f64;
         let pass = s.clock / lp.len as u64 + 1;
-        let title = format!("LOOP {} · {} · {} beats · {secs:.1} s · pass {pass}", k + 1, lp.timbre.code(), lp.beats);
+        let title = format!("LOOP {} · {} · {} beats · {secs:.1} s · pass {pass}", k + 1, lp.design.short(), lp.beats);
         put(buf, r, 1, y, &title, fg(LOOPS).add_modifier(Modifier::BOLD));
         loop_strip(ui, s, buf, Rect::new(r.x + 1, r.y + y + 1, r.width.saturating_sub(2), h.saturating_sub(1)), k);
     }
@@ -294,6 +294,23 @@ fn loops(ui: &Ui, s: &Snapshot, buf: &mut Buffer, r: Rect) {
 pub(super) fn loop_strip(ui: &Ui, s: &Snapshot, buf: &mut Buffer, r: Rect, layer: usize) {
     let lp = &ui.desc.loops[layer];
     if !lp.on() || r.height < 2 || r.width < 8 {
+        return;
+    }
+    // An event layer draws its grid rather than a waveform.
+    if let shrine0011::LoopDesign::Events(grid) = lp.design {
+        let head = ((s.clock % lp.len as u64) as f64 / lp.len as f64 * 16.0) as usize;
+        for (row, name) in ["Crackle", "Knock", "Creak", "Hiss"].into_iter().enumerate() {
+            put(buf, r, 0, row as u16, &format!("{name:<7}"), fg(DIM));
+            for step in 0..16 {
+                let on = grid.get(row, step);
+                let cell = if on { "██" } else { "··" };
+                let st = if on { fg(LOOPS) } else { fg(FAINT) };
+                put(buf, r, 8 + (step * 2) as u16, row as u16, cell, st);
+            }
+            if row == 0 {
+                put_char(buf, r, 8 + (head * 2) as u16, 0, '│', fg(WHITE));
+            }
+        }
         return;
     }
     let pos = s.harmony;
@@ -655,7 +672,7 @@ fn glitch(ui: &Ui, s: &Snapshot, buf: &mut Buffer, r: Rect) {
 
 // ---------------------------------------------------------------- 5 slow cycles
 
-fn cycles(s: &Snapshot, buf: &mut Buffer, r: Rect) {
+fn cycles(ui: &Ui, s: &Snapshot, buf: &mut Buffer, r: Rect) {
     let mut lfos = s.lfos;
     lfos.sort_by_key(|l| l.0);
     let track = r.width.saturating_sub(11) as usize;
@@ -688,6 +705,26 @@ fn cycles(s: &Snapshot, buf: &mut Buffer, r: Rect) {
         put(buf, r, 0, y, &format!("{name:<12}"), fg(DIM));
         put(buf, r, 12, y, &hbar(bar, *v), fg(*c));
         put(buf, r, 12 + bar as u16, y, &format!(" {v:.2}"), fg(DIM));
+    }
+
+    // The drone's repeating entrance/exit arc, and where it is right now.
+    let arc = ui.desc.drone_arc;
+    let y = 8 + gauges.len() as u16;
+    if y < r.height && bar >= 3 {
+        if arc.is_on() {
+            let (cycle, hold) = arc.samples();
+            put(buf, r, 0, y, &format!("{:<12}", "drone arc"), fg(DIM));
+            let up = ((hold as f64 / cycle as f64) * bar as f64).round() as usize;
+            let track: String = (0..bar).map(|i| if i < up { '▓' } else { '░' }).collect();
+            put(buf, r, 12, y, &track, fg(mix(FAINT, DRONE, 0.8)));
+            let phase = (s.clock % cycle) as f64 / cycle as f64;
+            let pos = (phase * bar.saturating_sub(1) as f64).round() as usize;
+            put_char(buf, r, 12 + pos as u16, y, '●', fg(WHITE));
+            let db = 20.0 * s.drone_window.max(1e-6).log10();
+            put(buf, r, 12 + bar as u16 + 1, y, &format!("{db:+.0}dB"), fg(DIM));
+        } else {
+            put(buf, r, 0, y, &format!("{:<12}always on", "drone arc"), fg(mix(DIM, DRONE, 0.7)));
+        }
     }
 }
 

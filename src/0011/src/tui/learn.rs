@@ -20,7 +20,7 @@ use shrine0011::drone::Algo;
 use shrine0011::drums::{PHRASE_BARS, STEPS};
 use shrine0011::harmony::{key_name, Pace};
 use shrine0011::kits::DrumSpace;
-use shrine0011::{Solo, DRONE_CUTOFF_MIN, DRONE_CUTOFF_OCTAVES, SAMPLE_RATE};
+use shrine0011::{LoopDesign, Solo, DRONE_CUTOFF_MIN, DRONE_CUTOFF_OCTAVES, SAMPLE_RATE};
 use std::f64::consts::TAU;
 
 
@@ -216,6 +216,14 @@ fn text(ui: &Ui) -> (String, Vec<String>) {
                 "Write the form as slow automation lanes rather than sections: one per layer, each a slow LFO of a different, unrelated length.".to_string(),
                 "Let one lane decide how busy the glitches are, another whether the drums play, a third how bright the drone is.".to_string(),
                 format!("Change chords rarely: here {} chord{} over 32 bars at {} pace.", h.chords.len(), if h.chords.len() == 1 { "" } else { "s" }, pace),
+                if d.drone_arc.is_on() {
+                    format!(
+                        "The drone itself breathes here: every {} s it swells up for {} s, then leaves. Gate a sustained pad with a raised-cosine envelope on a slow cycle rather than writing an on/off part.",
+                        d.drone_arc.cycle_s, d.drone_arc.hold_s
+                    )
+                } else {
+                    "The drone stays on continuously here. Gate a sustained pad on a slow cycle (say a minute up, a minute away) if you want it to come and go.".to_string()
+                },
             ],
         ),
         1 => {
@@ -241,6 +249,15 @@ fn text(ui: &Ui) -> (String, Vec<String>) {
                     ),
                     format!("Voice the chord wide, about three octaves: {}.", notes.join(" ")),
                     "Sway the modulation depth slowly (0.1 to 0.3 Hz) so the tone breathes, then record about 8 seconds.".to_string(),
+                    match d.settings.key {
+                        shrine0011::KeyChoice::Seed => format!("The key is {key} because seed 1 picked it. Fix the tonic at setup if you want a specific one; the scale keeps the shape."),
+                        shrine0011::KeyChoice::Note(_) => format!("The tonic is fixed at {key} here: pick the root, then build the scale's intervals from it."),
+                    },
+                    if d.settings.loop_transpose != 0 {
+                        format!("The atmosphere loops are shifted {} semitone(s) off the chord; set the transpose to 0 to put them exactly on it.", d.settings.loop_transpose)
+                    } else {
+                        "The atmosphere loops sit exactly on the chord tones; a transpose at setup can shift them if you want them detached.".to_string()
+                    },
                 ],
             )
         }
@@ -331,7 +348,7 @@ fn text(ui: &Ui) -> (String, Vec<String>) {
                 let meet = a * b / gcd(a, b);
                 format!(
                     " Loop 2 ({}, {b} beats) runs alongside: {a} and {b} share no factor, so the two drift apart and only line up again every {meet} beats ({:.0} s).",
-                    d.loops[1].timbre.name(),
+                    d.loops[1].design.name(),
                     meet as f64 * d.tempo.beat() as f64 / SR
                 )
             } else {
@@ -340,7 +357,7 @@ fn text(ui: &Ui) -> (String, Vec<String>) {
             (
                 format!(
                     "At start-up a {} loop is synthesised once for each of the {} chord{}: {} beats ({secs:.1} s) of sound. It is rendered a second time round so every tail has settled, then the sound just after its end is crossfaded into its first 150 ms. From then on it is only played back, round and round (now pass {pass}), fading into the next chord's loop during each chord's last bar. This chord's loop plays {}.{second}",
-                    lp.timbre.name(),
+                    lp.design.name(),
                     h.chords.len(),
                     if h.chords.len() == 1 { "" } else { "s" },
                     lp.beats,
@@ -348,7 +365,7 @@ fn text(ui: &Ui) -> (String, Vec<String>) {
                 ),
                 vec![
                     format!("Record {secs:.1} s of a held chord: a whole number of beats at your tempo ({} beats at {half:.0} BPM), 3 to 8 seconds long.", lp.beats),
-                    timbre_tip(lp.timbre).to_string(),
+                    design_tip(lp),
                     "In your sampler, set the loop start and end, then turn on loop crossfade (100–200 ms) until the jump disappears.".to_string(),
                     "Keep every movement (filter, vowel, wave) to whole cycles per loop, so each pass sounds the same.".to_string(),
                     "Make one loop per chord, and crossfade to the next during the last bar of each chord, at the same point in the loop.".to_string(),
@@ -898,7 +915,7 @@ fn instrument_text(ui: &Ui) -> (String, Vec<String>) {
             (
                 format!(
                     "{}: {} beats ({:.1} s) looped, now playing {} (pass {}). On its own it is a short, hypnotic cycle; {place}.",
-                    lp.timbre.name(),
+                    lp.design.name(),
                     lp.beats,
                     lp.len as f64 / SR,
                     loop_notes.join(" "),
@@ -949,6 +966,14 @@ fn loop_index(solo: Option<Solo>) -> Option<usize> {
     }
 }
 
+/// How to recreate an event-grid layer.
+fn design_tip(lp: &shrine0011::telemetry::LoopInfo) -> String {
+    match lp.design {
+        LoopDesign::Sustained(t) => timbre_tip(t).to_string(),
+        LoopDesign::Events(_) => "Event grid: lay short grains on a 4 x 16 grid (Crackle, Knock, Creak, Hiss). Each cell synthesises a noise/impulse grain — a band-passed tick, a struck resonance, a bending creak or a swell of flow — and the whole pattern is wrapped circularly into a 3-8 s loop so it repeats seamlessly.".to_string(),
+    }
+}
+
 /// How to make each loop timbre yourself, as a recreate-it tip.
 fn timbre_tip(t: LoopTimbre) -> &'static str {
     match t {
@@ -957,6 +982,12 @@ fn timbre_tip(t: LoopTimbre) -> &'static str {
         LoopTimbre::Fantasia => "Fantasia: a short FM bell (3 : 1) strummed at the top of the loop, over a detuned-saw pad through a slowly swelling low-pass.",
         LoopTimbre::WaveSeq => "Wave sequence: one single-cycle wave per beat (a few harmonics each), crossfaded over the last quarter of every beat, with a soft accent on each step.",
         LoopTimbre::Breath => "Breath: white noise into very narrow band-passes (Q ≈ 28) at each chord tone and its octave, each note swelling in turn.",
+        LoopTimbre::Whisper => "Whisper: white noise through the same three vocal formants as Choir, sweeping a → o → u → e once per loop, plus a wide air band: a wordless breath with no pitch of its own.",
+        LoopTimbre::Wind => "Wind: white noise through one low-pass that gusts between roughly 250 Hz and 1.8 kHz, plus a soft resonance on the chord's lowest note so it still belongs to the harmony.",
+        LoopTimbre::Shimmer => "Shimmer: white noise into narrow high resonances (Q ≈ 18) on the chord two octaves up, each lit by its own slow tremolo, plus a 5 kHz air band. Air catching the light.",
+        LoopTimbre::Stream => "Stream: very narrow bands (Q ≈ 24) on each chord note, each fluttering at its own fast whole-number rate (6-11 per loop), plus a 1.5 kHz band: water over stones.",
+        LoopTimbre::Aurora => "Aurora: four resonant bands (Q ≈ 20) that sweep a whole octave up and back down once per loop, each at its own phase, the brightness rising as they climb.",
+        LoopTimbre::Haze => "Haze: white noise through a steep low-pass breathing between 200 and 800 Hz over one wide low resonance on the root: a near-pitchless bed, the quietest of the noise family.",
         LoopTimbre::Off => "Choose a loop timbre at setup.",
     }
 }
@@ -993,7 +1024,7 @@ fn sample_loops(ui: &Ui, buf: &mut Buffer, r: Rect) {
         let title = format!(
             "loop {} · {} · {} beats · pass {} · {:.1} of {:.1} s · chord {}'s loop{fade}",
             k + 1,
-            lp.timbre.name(),
+            lp.design.name(),
             lp.beats,
             s.clock / len + 1,
             into,
@@ -1165,7 +1196,7 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
             let k = loop_index(solo).unwrap_or(0);
             let lp = &ui.desc.loops[k];
             let pos = s.harmony;
-            mech(buf, 0, &format!("{} · {} beats · pass {}", lp.timbre.name(), lp.beats, s.clock / lp.len as u64 + 1), fg(DIM));
+            mech(buf, 0, &format!("{} · {} beats · pass {}", lp.design.name(), lp.beats, s.clock / lp.len as u64 + 1), fg(DIM));
             let fade = if pos.morph > 0.0 {
                 format!("crossfading to chord {}: {:.0}%", pos.next + 1, pos.morph * 100.0)
             } else {

@@ -87,6 +87,58 @@ fn golden_hash() {
     assert_eq!(h, GOLDEN_HASH, "the rendered audio changed (got {h:#018x})");
 }
 
+/// The repeating drone arc: always-on means exactly 1.0 forever, and an arc
+/// swells in, holds, fades out and stays silent for the rest of each cycle.
+#[test]
+fn drone_arc_envelope_shape() {
+    use shrine0011::DroneArc;
+    assert_eq!(DroneArc::ALWAYS_ON.gain(0), 1.0);
+    assert_eq!(DroneArc::ALWAYS_ON.gain(123_456_789), 1.0);
+    let sr = SAMPLE_RATE as u64;
+    let arc = DroneArc { cycle_s: 100, hold_s: 40 };
+    assert!(arc.gain(0).abs() < 1e-12, "the swell starts from silence");
+    assert!((arc.gain(20 * sr) - 1.0).abs() < 1e-12, "mid-hold should be full");
+    assert_eq!(arc.gain(40 * sr), 0.0, "at the end of the hold the drone is gone");
+    assert_eq!(arc.gain(99 * sr), 0.0);
+    assert!(arc.gain(100 * sr).abs() < 1e-12, "the next cycle starts again");
+    // The swell rises, holds, then the fade-out falls.
+    let mut prev = 0.0;
+    for s in 0..(30 * sr) {
+        let g = arc.gain(s);
+        assert!((0.0..=1.0).contains(&g), "gain out of range: {g}");
+        assert!(g + 1e-12 >= prev, "gain fell during the swell at sample {s}");
+        prev = g;
+    }
+    let mut prev = 1.0;
+    for s in (30 * sr)..(40 * sr) {
+        let g = arc.gain(s);
+        assert!((0.0..=1.0).contains(&g), "gain out of range: {g}");
+        assert!(g <= prev + 1e-12, "gain rose during the fade at sample {s}");
+        prev = g;
+    }
+    // The drone really leaves: much of the cycle is silent.
+    let silent = (0..100 * sr).filter(|&s| arc.gain(s) == 0.0).count();
+    assert!(silent > 50 * sr as usize, "only {silent} silent samples");
+}
+
+/// The canonical track for the Phase 2 features: both layers event grids, a
+/// fixed root note and a negative transpose. If this changes, those features
+/// changed on purpose.
+#[test]
+fn new_features_golden_hash() {
+    use shrine0011::texture::Grid;
+    use shrine0011::{KeyChoice, LoopDesign};
+    let settings = Settings {
+        loops: [LoopDesign::Events(Grid::fire()), LoopDesign::Events(Grid::water())],
+        key: KeyChoice::Note(5),
+        loop_transpose: -3,
+        ..DEFAULT_SETTINGS
+    };
+    let h = hash(&render_with(DEFAULT_SEEDS, settings, SECONDS * SAMPLE_RATE as usize, 4096));
+    println!("new-features golden hash: {h:#018x}");
+    assert_eq!(h, 0xdfd6594597f52145, "the Phase 2 features changed (got {h:#018x})");
+}
+
 /// Any tempo is as deterministic as the default one.
 #[test]
 fn other_tempos_ignore_block_size() {
@@ -140,8 +192,12 @@ fn each_setting_changes_the_output() {
         Settings { space: shrine0011::kits::DrumSpace::Centred, ..DEFAULT_SETTINGS },
         Settings { space: shrine0011::kits::DrumSpace::Tape, ..DEFAULT_SETTINGS },
         Settings { bpm: 160, ..DEFAULT_SETTINGS },
-        Settings { loops: [shrine0011::atmos::LoopTimbre::Glass, shrine0011::atmos::LoopTimbre::Glass], ..DEFAULT_SETTINGS },
-        Settings { loops: [shrine0011::atmos::LoopTimbre::Choir, shrine0011::atmos::LoopTimbre::Off], ..DEFAULT_SETTINGS },
+        Settings { loops: [shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Glass), shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Glass)], ..DEFAULT_SETTINGS },
+        Settings { loops: [shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Choir), shrine0011::LoopDesign::OFF], ..DEFAULT_SETTINGS },
+        Settings { loops: [shrine0011::LoopDesign::Events(shrine0011::texture::Grid::stones()), shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Choir)], ..DEFAULT_SETTINGS },
+        Settings { drone: shrine0011::DroneArc { cycle_s: 120, hold_s: 40 }, ..DEFAULT_SETTINGS },
+        Settings { key: shrine0011::KeyChoice::Note(0), ..DEFAULT_SETTINGS },
+        Settings { loop_transpose: 5, ..DEFAULT_SETTINGS },
         OLD_DEFAULTS,
     ];
     for v in variants {

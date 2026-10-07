@@ -8,7 +8,7 @@ use crate::harmony::{bar_weights, Pace, Scale, SCALES};
 use crate::kits::{DrumSpace, Kit, KITS, SPACES};
 use crate::atmos::{LoopTimbre, LOOP_TIMBRES};
 use crate::tempo::{DEFAULT_BPM, MAX_BPM, MIN_BPM};
-use crate::{Seeds, Settings, Track, DEFAULT_SEEDS, DEFAULT_SETTINGS, SAMPLE_RATE};
+use crate::{LoopDesign, Seeds, Settings, Track, DEFAULT_SEEDS, DEFAULT_SETTINGS, SAMPLE_RATE};
 use std::fs::File;
 use std::io::{self, BufRead, BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;
@@ -104,18 +104,39 @@ const OLDER_TRACK: &str = "0010";
 /// A recipe: everything needed to regenerate a version of the track,
 /// e.g. `0011-LYD-3H-168-SUB-W-CHO.GLS-1000.9.1009.2026.168.11` (track, scale,
 /// chord count + pace (H half-time / J jungle), drum BPM, drum kit, drum space
-/// (C/W/T), the two atmosphere loops' timbres, seeds 1-6).
+/// (C/W/T), the two atmosphere layers, then optional `D{cycle}.{hold}` drone
+/// arc, `K{note}` root note, `T{transpose+12}` atmosphere transpose, then seeds
+/// 1-6). Each atmosphere layer is a timbre code (e.g. CHO), `E` + 16 hex digits
+/// for an event grid, or OFF.
 pub fn recipe(seeds: Seeds, settings: Settings) -> String {
+    // The drone arc is optional: when it is off the recipe is exactly what it
+    // always was, so every older recipe still reads and the canonical default is
+    // unchanged.
+    let drone = if settings.drone.is_on() {
+        format!("-D{}.{}", settings.drone.cycle_s, settings.drone.hold_s)
+    } else {
+        String::new()
+    };
+    let key = match settings.key {
+        crate::KeyChoice::Seed => String::new(),
+        crate::KeyChoice::Note(n) => format!("-K{}", key_code(n)),
+    };
+    // The atmosphere transpose ("T7" = -5 semitones); omitted when 0.
+    let transpose = if settings.loop_transpose != 0 {
+        format!("-T{}", (settings.loop_transpose + 12) as u8)
+    } else {
+        String::new()
+    };
     format!(
-        "{TRACK}-{}-{}{}-{}-{}-{}-{}.{}-{}.{}.{}.{}.{}.{}",
+        "{TRACK}-{}-{}{}-{}-{}-{}-{}.{}{drone}{key}{transpose}-{}.{}.{}.{}.{}.{}",
         settings.scale.code(),
         settings.chords,
         if settings.pace == Pace::Jungle { "J" } else { "H" },
         settings.bpm,
         settings.kit.code(),
         settings.space.code(),
-        settings.loops[0].code(),
-        settings.loops[1].code(),
+        settings.loops[0].token(),
+        settings.loops[1].token(),
         seeds.s1,
         seeds.s2,
         seeds.s3,
@@ -169,12 +190,40 @@ pub fn parse_recipe(code: &str) -> Option<(Seeds, Settings)> {
         None => DrumSpace::Centred,
     };
     // The atmosphere loops ("CHO.GLS"); recipes from before them had none.
-    let loops = match next.split_once('.').and_then(|(a, b)| Some([LoopTimbre::from_code(a)?, LoopTimbre::from_code(b)?])) {
+    let loops = match next.split_once('.').and_then(|(a, b)| Some([LoopDesign::from_token(a)?, LoopDesign::from_token(b)?])) {
         Some(l) => {
             next = parts.next()?;
             l
         }
         None => crate::NO_LOOPS,
+    };
+    // The drone arc ("D120.40"); recipes from before it had none and play the
+    // drone continuously.
+    let drone = if next.starts_with('D') || next.starts_with('d') {
+        let d = parse_drone_arc(next)?;
+        next = parts.next()?;
+        d
+    } else {
+        crate::DroneArc::ALWAYS_ON
+    };
+    // The root note ("KD"); recipes without it let the seed pick the key.
+    let key = if next.starts_with('K') || next.starts_with('k') {
+        let k = parse_key_choice(next)?;
+        next = parts.next()?;
+        k
+    } else {
+        crate::KeyChoice::Seed
+    };
+    // The atmosphere transpose ("T7" = -5 semitones); recipes without it are 0.
+    let loop_transpose = if next.starts_with('T') || next.starts_with('t') {
+        let n: u8 = next[1..].parse().ok()?;
+        if n > 24 {
+            return None;
+        }
+        next = parts.next()?;
+        n as i8 - 12
+    } else {
+        0
     };
     // Seeds 1-6; recipes from before seed 6 have five.
     let seeds: Vec<u64> = next.split('.').map(|s| s.parse().ok()).collect::<Option<_>>()?;
@@ -185,7 +234,49 @@ pub fn parse_recipe(code: &str) -> Option<(Seeds, Settings)> {
     let seeds = Seeds { s1: seeds[0], s2: seeds[1], s3: seeds[2], s4: seeds[3], s5: seeds[4], s6 };
     // Older recipes: seed 5 picked the kit, and 0 meant no drums.
     let kit = kit.unwrap_or_else(|| if seeds.s5 == 0 { Kit::Off } else { crate::kits::legacy_kit_for(seeds.s5) });
-    Some((seeds, Settings { scale, chords, pace, kit, space, bpm, loops }))
+    Some((seeds, Settings { scale, chords, pace, kit, space, bpm, loops, drone, key, loop_transpose }))
+}
+
+/// An atmosphere transpose in semitones, -12 to 12.
+pub fn parse_transpose(s: &str) -> Option<i8> {
+    s.trim().parse::<i8>().ok().filter(|n| (-12..=12).contains(n))
+}
+
+/// The recipe code for a key: sharps as `s` (e.g. `Fs`).
+pub fn key_code(pc: u8) -> &'static str {
+    ["C", "Cs", "D", "Ds", "E", "F", "Fs", "G", "Gs", "A", "As", "B"][pc as usize % 12]
+}
+
+/// A root note: `seed`/`auto`/`0` for the seed-picked key, or a note name
+/// (`C`..`B`, `C#`/`Cs`, with an optional leading `K`).
+pub fn parse_key_choice(s: &str) -> Option<crate::KeyChoice> {
+    let t = s.trim().to_ascii_lowercase();
+    let t = t.strip_prefix('k').unwrap_or(&t);
+    if t.is_empty() || t == "seed" || t == "auto" || t == "0" {
+        return Some(crate::KeyChoice::Seed);
+    }
+    let t = t.replace('#', "s");
+    ["c", "cs", "d", "ds", "e", "f", "fs", "g", "gs", "a", "as", "b"]
+        .iter()
+        .position(|k| *k == t)
+        .map(|i| crate::KeyChoice::Note(i as u8))
+}
+
+/// A drone-arc field: "D{cycle}.{hold}" in seconds. "D0" (or "D0.0") is the
+/// always-on drone; hold is clamped to at most the cycle.
+pub fn parse_drone_arc(s: &str) -> Option<crate::DroneArc> {
+    let s = s.trim();
+    let body = s.strip_prefix('D').or_else(|| s.strip_prefix('d'))?;
+    let (c, h) = body.split_once('.').unwrap_or((body, "0"));
+    let cycle: u16 = c.parse().ok()?;
+    let hold: u16 = h.parse().ok()?;
+    if cycle > 3600 {
+        return None;
+    }
+    if cycle == 0 {
+        return Some(crate::DroneArc::ALWAYS_ON);
+    }
+    (hold <= cycle).then_some(crate::DroneArc { cycle_s: cycle, hold_s: hold })
 }
 
 /// A drum space by number (1-3), letter or name.
@@ -210,16 +301,43 @@ pub fn parse_kit(s: &str) -> Option<Kit> {
     Kit::from_code(s).or_else(|| KITS.iter().copied().find(|k| k.name().to_ascii_lowercase().starts_with(&want)))
 }
 
-/// A loop timbre by number (1-6), code (e.g. CHO) or (the start of) its name.
+/// A loop timbre by number (0 = Off / none, 1..=N into `LOOP_TIMBRES`), code
+/// (e.g. CHO) or (the start of) its name.
 pub fn parse_loop(s: &str) -> Option<LoopTimbre> {
     let s = s.trim();
     if let Ok(n) = s.parse::<usize>() {
+        if n == 0 {
+            return Some(LoopTimbre::Off);
+        }
         return (1..=LOOP_TIMBRES.len()).contains(&n).then(|| LOOP_TIMBRES[n - 1]);
     }
     let want = s.to_ascii_lowercase().replace('"', "");
+    if want == "none" {
+        return Some(LoopTimbre::Off);
+    }
     (!want.is_empty()).then_some(())?;
     LoopTimbre::from_code(s)
         .or_else(|| LOOP_TIMBRES.iter().copied().find(|t| t.name().to_ascii_lowercase().replace('"', "").starts_with(&want)))
+}
+
+/// A loop design: a timbre (see `parse_loop`), an event-grid preset name
+/// (`fire`, `water`, `stones`, `wood`), or `E` + 16 hex digits.
+pub fn parse_loop_design(s: &str) -> Option<LoopDesign> {
+    let t = s.trim();
+    match t.to_ascii_lowercase().as_str() {
+        "fire" => return Some(LoopDesign::Events(crate::texture::Grid::fire())),
+        "water" | "stream" => return Some(LoopDesign::Events(crate::texture::Grid::water())),
+        "stones" | "rocks" => return Some(LoopDesign::Events(crate::texture::Grid::stones())),
+        "wood" => return Some(LoopDesign::Events(crate::texture::Grid::wood())),
+        _ => {}
+    }
+    if t.len() == 16 && t.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return LoopDesign::from_token(&format!("E{t}"));
+    }
+    match LoopDesign::from_token(t) {
+        Some(d @ LoopDesign::Events(_)) => Some(d),
+        _ => parse_loop(t).map(LoopDesign::Sustained),
+    }
 }
 
 /// A drum tempo in BPM, from 70 to 180 (whole numbers).
@@ -285,14 +403,60 @@ pub fn ask_settings(input: &mut impl BufRead) -> Settings {
         ask_until(input, "Drum space", "2", "Enter 1, 2 or 3.", parse_space)
     };
     println!("Atmosphere loop 1 (90s sample-CD pad loops; seed 6 shapes it):");
-    for (i, t) in LOOP_TIMBRES.iter().enumerate() {
-        println!("  {}) {:<16} {}", i + 1, t.name(), t.blurb());
+    println!("   0) {:<16} {}", LoopTimbre::Off.name(), LoopTimbre::Off.blurb());
+    for (i, t) in LOOP_TIMBRES.iter().filter(|t| **t != LoopTimbre::Off).enumerate() {
+        println!("  {:>2}) {:<16} {}", i + 1, t.name(), t.blurb());
     }
-    let loop1 = ask_until(input, "Loop 1 timbre", "1", "Enter 1-6, a code or a timbre name (6 = Off).", parse_loop);
+    println!("   e) {:<16} fire, water, stones, wood: grains on an editable grid", "Event grid");
+    let loop1 = ask_until(input, "Loop 1 design", "1", "Enter 0 (none), a number, a timbre name, or fire/water/stones/wood.", parse_loop_design);
     println!("Atmosphere loop 2: a shorter loop that drifts against loop 1 (same choices).");
-    let loop2 = ask_until(input, "Loop 2 timbre", "2", "Enter 1-6, a code or a timbre name (6 = Off).", parse_loop);
+    let loop2 = ask_until(input, "Loop 2 design", "2", "Enter 0 (none), a number, a timbre name, or fire/water/stones/wood.", parse_loop_design);
     println!();
-    Settings { scale, chords, pace, kit, space, bpm, loops: [loop1, loop2] }
+    println!("Drone arc: the frozen drone can swell in and out on a slow repeat, for soundscape-style arrangements.");
+    let cycle = ask_until(
+        input,
+        "Drone cycle seconds (0 = always on)",
+        "0",
+        "Enter 0, or a whole number of seconds up to 3600.",
+        parse_drone_cycle,
+    );
+    let hold = if cycle == 0 {
+        0
+    } else {
+        ask_until(
+            input,
+            "Seconds the drone stays up each cycle",
+            &(cycle / 3).max(1).to_string(),
+            "Enter a whole number of seconds from 1 to the cycle length.",
+            |s: &str| parse_drone_hold(s, cycle),
+        )
+    };
+    println!();
+    let key = ask_until(
+        input,
+        "Root note (seed picks, or C, C#, D … B)",
+        "seed",
+        "Enter seed, or a note name C to B (sharps as C# or Cs).",
+        parse_key_choice,
+    );
+    let loop_transpose = ask_until(
+        input,
+        "Atmosphere transpose in semitones (-12 to 12)",
+        "0",
+        "Enter a whole number from -12 to 12 (0 = the loops match the chord).",
+        parse_transpose,
+    );
+    Settings { scale, chords, pace, kit, space, bpm, loops: [loop1, loop2], drone: crate::DroneArc { cycle_s: cycle, hold_s: hold }, key, loop_transpose }
+}
+
+/// Drone-arc cycle in seconds: 0 = always on, up to 3600.
+pub fn parse_drone_cycle(s: &str) -> Option<u16> {
+    s.trim().parse::<u16>().ok().filter(|n| *n <= 3600)
+}
+
+/// Drone-arc hold in seconds: 1 up to the cycle length.
+pub fn parse_drone_hold(s: &str, cycle: u16) -> Option<u16> {
+    s.trim().parse::<u16>().ok().filter(|n| (1..=cycle).contains(n))
 }
 
 pub fn ask_seeds(input: &mut impl BufRead) -> Seeds {
@@ -611,15 +775,115 @@ mod tests {
                 kit: KITS[i % KITS.len()],
                 space: SPACES[i % SPACES.len()],
                 bpm: MIN_BPM + 9 * i as u16,
-                loops: [LOOP_TIMBRES[i % LOOP_TIMBRES.len()], LOOP_TIMBRES[(i + 2) % LOOP_TIMBRES.len()]],
+                loops: [
+                    if i % 4 == 0 {
+                        LoopDesign::Events(crate::texture::Grid::wood())
+                    } else {
+                        LoopDesign::Sustained(LOOP_TIMBRES[i % LOOP_TIMBRES.len()])
+                    },
+                    LoopDesign::Sustained(LOOP_TIMBRES[(i + 2) % LOOP_TIMBRES.len()]),
+                ],
+                drone: if i % 3 == 0 {
+                    crate::DroneArc::ALWAYS_ON
+                } else {
+                    crate::DroneArc { cycle_s: 60 + i as u16, hold_s: 20 }
+                },
+                key: if i % 5 == 0 { crate::KeyChoice::Seed } else { crate::KeyChoice::Note((i % 12) as u8) },
+                loop_transpose: (i as i8 % 25) - 12,
             };
             let seeds = Seeds { s1: i as u64, s2: u64::MAX, s3: 0, s4: 42, s5: 7, s6: 3 };
             let code = recipe(seeds, settings);
             assert_eq!(parse_recipe(&code), Some((seeds, settings)), "{code}");
             assert_eq!(parse_recipe(&code.to_ascii_lowercase()), Some((seeds, settings)));
         }
-        for bad in ["", "0009-LYD-3H-1.2.3.4.5", "0011-XXX-3H-1.2.3.4.5", "0011-LYD-5H-1.2.3.4.5", "0011-LYD-3Q-1.2.3.4.5", "0011-LYD-3H-1.2.3.4", "0011-LYD-3H-1.2.3.4.x", "0011-LYD-3H-XYZ-1.2.3.4.5", "0011-LYD-3H-SUB-Q-1.2.3.4.5", "0011-LYD-3H-69-SUB-W-1.2.3.4.5", "0011-LYD-3H-181-SUB-W-1.2.3.4.5", "0011-LYD-3H-SUB-W-CHO.XYZ-1.2.3.4.5", "0011-LYD-3H-SUB-W-1.2.3.4.5.6.7"] {
+        for bad in ["", "0009-LYD-3H-1.2.3.4.5", "0011-XXX-3H-1.2.3.4.5", "0011-LYD-5H-1.2.3.4.5", "0011-LYD-3Q-1.2.3.4.5", "0011-LYD-3H-1.2.3.4", "0011-LYD-3H-1.2.3.4.x", "0011-LYD-3H-XYZ-1.2.3.4.5", "0011-LYD-3H-SUB-Q-1.2.3.4.5", "0011-LYD-3H-69-SUB-W-1.2.3.4.5", "0011-LYD-3H-181-SUB-W-1.2.3.4.5", "0011-LYD-3H-SUB-W-CHO.XYZ-1.2.3.4.5", "0011-LYD-3H-SUB-W-1.2.3.4.5.6.7", "0011-LYD-3H-SUB-W-CHO.GLS-D4000.10-1.2.3.4.5", "0011-LYD-3H-SUB-W-CHO.GLS-D120.200-1.2.3.4.5", "0011-LYD-3H-SUB-W-Exxx-1.2.3.4.5", "0011-LYD-3H-SUB-W-E0123456789abcde-1.2.3.4.5", "0011-LYD-3H-SUB-W-E0123456789abcdeg-1.2.3.4.5"] {
             assert_eq!(parse_recipe(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn loop_zero_is_off() {
+        assert_eq!(parse_loop("0"), Some(LoopTimbre::Off));
+        assert_eq!(parse_loop("none"), Some(LoopTimbre::Off));
+        assert_eq!(parse_loop("Off"), Some(LoopTimbre::Off));
+        // The old numeric positions still index LOOP_TIMBRES (Breath was 5).
+        assert_eq!(parse_loop("5"), Some(LoopTimbre::Breath));
+        assert_eq!(parse_loop(&LOOP_TIMBRES.len().to_string()), Some(LoopTimbre::Off));
+    }
+
+    #[test]
+    fn event_grids_round_trip() {
+        let fire = crate::texture::Grid::fire();
+        let settings = Settings {
+            loops: [LoopDesign::Events(fire), LoopDesign::Sustained(LoopTimbre::Glass)],
+            ..DEFAULT_SETTINGS
+        };
+        let code = recipe(DEFAULT_SEEDS, settings);
+        assert!(code.contains(&format!("-E{}.", fire.to_hex())), "{code}");
+        assert_eq!(parse_recipe(&code), Some((DEFAULT_SEEDS, settings)));
+        assert_eq!(parse_loop_design("fire"), Some(LoopDesign::Events(fire)));
+        assert_eq!(parse_loop_design("water"), Some(LoopDesign::Events(crate::texture::Grid::water())));
+        assert_eq!(parse_loop_design("stones"), Some(LoopDesign::Events(crate::texture::Grid::stones())));
+        assert_eq!(parse_loop_design("wood"), Some(LoopDesign::Events(crate::texture::Grid::wood())));
+        assert_eq!(
+            parse_loop_design(&format!("E{}", crate::texture::Grid::stones().to_hex())),
+            Some(LoopDesign::Events(crate::texture::Grid::stones()))
+        );
+        assert_eq!(parse_loop_design("CHO"), Some(LoopDesign::Sustained(LoopTimbre::Choir)));
+        assert_eq!(parse_loop_design("0"), Some(LoopDesign::Sustained(LoopTimbre::Off)));
+        assert_eq!(parse_loop_design("garbage"), None);
+    }
+
+    #[test]
+    fn drone_arcs_round_trip_and_stay_optional() {
+        // An arc is emitted only when it gates the drone, and reads back exactly.
+        let arc = crate::DroneArc { cycle_s: 120, hold_s: 40 };
+        let settings = Settings { drone: arc, ..DEFAULT_SETTINGS };
+        let code = recipe(DEFAULT_SEEDS, settings);
+        assert!(code.contains("-D120.40-"), "{code}");
+        assert_eq!(parse_recipe(&code), Some((DEFAULT_SEEDS, settings)));
+        // The default recipe is unchanged, and a recipe with no arc is always on.
+        assert_eq!(recipe(DEFAULT_SEEDS, DEFAULT_SETTINGS), "0011-LYD-3H-168-SUB-W-CHO.GLS-1000.9.1009.2026.168.11");
+        assert_eq!(parse_recipe("0011-LYD-3H-168-SUB-W-CHO.GLS-1000.9.1009.2026.168.11").unwrap().1.drone, crate::DroneArc::ALWAYS_ON);
+        // "D0" and "D0.0" both mean always on; hold may equal the cycle.
+        assert_eq!(parse_drone_arc("D0"), Some(crate::DroneArc::ALWAYS_ON));
+        assert_eq!(parse_drone_arc("D0.0"), Some(crate::DroneArc::ALWAYS_ON));
+        assert_eq!(parse_drone_arc("D90.90"), Some(crate::DroneArc { cycle_s: 90, hold_s: 90 }));
+        assert_eq!(parse_drone_arc("D90.120"), None);
+        assert_eq!(parse_drone_arc("D4000.10"), None);
+        assert_eq!(parse_drone_arc("90.10"), None);
+    }
+
+    #[test]
+    fn root_note_round_trips_and_is_optional() {
+        for (choice, code) in [
+            (crate::KeyChoice::Note(0), "KC"),
+            (crate::KeyChoice::Note(6), "KFs"),
+            (crate::KeyChoice::Note(10), "KAs"),
+        ] {
+            let settings = Settings { key: choice, ..DEFAULT_SETTINGS };
+            let full = recipe(DEFAULT_SEEDS, settings);
+            assert!(full.contains(&format!("-{code}-")), "{full}");
+            assert_eq!(parse_recipe(&full), Some((DEFAULT_SEEDS, settings)));
+        }
+        // No K field means the seed still picks the key.
+        assert_eq!(parse_recipe("0011-LYD-3H-168-SUB-W-CHO.GLS-1000.9.1009.2026.168.11").unwrap().1.key, crate::KeyChoice::Seed);
+        assert_eq!(parse_key_choice("seed"), Some(crate::KeyChoice::Seed));
+        assert_eq!(parse_key_choice("C#"), Some(crate::KeyChoice::Note(1)));
+        assert_eq!(parse_key_choice("Cs"), Some(crate::KeyChoice::Note(1)));
+        assert_eq!(parse_key_choice("H"), None);
+    }
+
+    #[test]
+    fn transpose_round_trips() {
+        for t in [-12i8, -5, -1, 0, 1, 7, 12] {
+            let settings = Settings { loop_transpose: t, ..DEFAULT_SETTINGS };
+            let code = recipe(DEFAULT_SEEDS, settings);
+            assert_eq!(parse_recipe(&code), Some((DEFAULT_SEEDS, settings)), "{t}: {code}");
+        }
+        assert_eq!(parse_recipe("0011-LYD-3H-168-SUB-W-CHO.GLS-1000.9.1009.2026.168.11").unwrap().1.loop_transpose, 0);
+        assert_eq!(parse_transpose("-12"), Some(-12));
+        assert_eq!(parse_transpose("13"), None);
+        assert_eq!(parse_transpose("x"), None);
     }
 }
