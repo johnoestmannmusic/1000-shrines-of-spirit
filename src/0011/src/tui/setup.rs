@@ -124,6 +124,7 @@ fn screen(f: &mut Frame, t: f64, box_title: &str, box_height: u16, footer: &str)
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Step {
+    Menu,
     Mode,
     Label,
     Bpm,
@@ -200,6 +201,14 @@ fn list_id(step: Step) -> Option<usize> {
     }
 }
 
+/// One row of the settings menu.
+enum MenuRow {
+    Start,
+    Exit,
+    Header(&'static str),
+    Field { label: String, value: String, step: Step },
+}
+
 /// The atmosphere-loop choices: None first (the entry numbered 0), then every
 /// timbre in `LOOP_TIMBRES`, so the "no atmosphere" choice is up front.
 /// The sustained timbres in list order (Off excluded).
@@ -225,7 +234,7 @@ fn loop_entry_name(i: usize) -> String {
 fn loop_entry_blurb(i: usize) -> String {
     match i {
         0 => LoopTimbre::Off.blurb().to_string(),
-        1 => "fire, water, stones, wood: press Enter to edit the 4 x 16 grid".to_string(),
+        1 => "fire, water, stones, wood: press Enter to edit the 8 x 16 grid".to_string(),
         n => loop_timbres().get(n - 2).map_or(String::new(), |t| t.blurb().to_string()),
     }
 }
@@ -319,6 +328,8 @@ struct Setup {
     grid_cursor: (usize, usize),
     /// Which layer's grid is open in the editor (None = the list is shown).
     grid_edit: Option<usize>,
+    /// Highlighted row of the settings menu.
+    menu_sel: usize,
     /// Live audition while the atmosphere questions are open (None if no device).
     audition: Option<crate::audition::Audition>,
     /// The design currently handed to the audition, so it only rebuilds on change.
@@ -333,7 +344,7 @@ impl Setup {
         Setup {
             notice,
             exit: false,
-            step: Step::Mode,
+            step: Step::Menu,
             back: Vec::new(),
             sel: [
                 0,
@@ -370,6 +381,7 @@ impl Setup {
             drone_tone: set.drone_tone,
             grid_cursor: (0, 0),
             grid_edit: None,
+            menu_sel: 0,
             audition: None,
             last_design: None,
             last,
@@ -401,6 +413,71 @@ impl Setup {
             }
             self.last_design = Some(design);
         }
+    }
+
+    /// Every selectable row of the settings menu, in order.
+    fn menu_rows(&self) -> Vec<MenuRow> {
+        let field = |label: &str, value: String, step: Step| MenuRow::Field { label: label.to_string(), value, step };
+        let arc = |i: usize| {
+            let a = self.loop_arcs[i];
+            if a.cycle_s == 0 { "always on".to_string() } else { format!("{} s cycle, {} s up", a.cycle_s, a.hold_s) }
+        };
+        let mut r = vec![MenuRow::Start, field("Mode", MODES[self.sel[0]].0.to_string(), Step::Mode)];
+        r.push(MenuRow::Header("Music"));
+        r.push(field("Scale", SCALES[self.sel[1]].name().to_string(), Step::Scale));
+        r.push(field(
+            "Root note",
+            if self.sel[10] == 0 { "seed picks".into() } else { shrine0011::harmony::key_name((self.sel[10] - 1) as u8).to_string() },
+            Step::Key,
+        ));
+        r.push(field("Chords", CHORD_CHOICES[self.sel[2]].0.to_string(), Step::Chords));
+        r.push(field("Pace", PACE_NAMES[self.sel[3]].to_string(), Step::Pace));
+        r.push(field("Tempo", format!("{} BPM", self.bpm), Step::Bpm));
+        r.push(MenuRow::Header("Drums"));
+        r.push(field("Kit", shrine0011::kits::KITS[self.sel[4]].name().to_string(), Step::Kit));
+        r.push(field("Space", shrine0011::kits::SPACES[self.sel[5]].name().to_string(), Step::Space));
+        r.push(MenuRow::Header("Atmosphere"));
+        let loop_step = [Step::Loop1, Step::Loop2, Step::Loop3, Step::Loop4];
+        for i in 0..4 {
+            r.push(field(&format!("Layer {}", i + 1), loop_entry_name(self.sel[6 + i]), loop_step[i]));
+        }
+        r.push(field("Transpose", format!("{} semitones", self.loop_transpose), Step::Transpose));
+        for i in 0..4 {
+            r.push(field(&format!("Layer {} arc", i + 1), arc(i), Step::LoopArc(i)));
+        }
+        r.push(MenuRow::Header("Drone & form"));
+        r.push(field(
+            "Drone arc",
+            if self.drone_cycle == 0 { "always on".into() } else { format!("{} s cycle, {} s up", self.drone_cycle, self.drone_hold) },
+            Step::DroneCycle,
+        ));
+        r.push(field("Drone tone", if self.drone_tone == 0 { "off".into() } else { format!("{} Hz low-pass", self.drone_tone) }, Step::DroneTone));
+        r.push(MenuRow::Header("Seeds"));
+        for i in 0..6 {
+            r.push(field(&format!("Seed {}", i + 1), self.seeds[i].to_string(), Step::Seed(i)));
+        }
+        r.push(MenuRow::Header("Output"));
+        r.push(field("Title", self.label.clone(), Step::Label));
+        if self.mode != Mode::Play {
+            r.push(field("File", self.path.clone(), Step::File));
+            r.push(field("Length", format_length(self.seconds), Step::Length));
+        }
+        r.push(MenuRow::Exit);
+        r
+    }
+
+    /// Move the menu highlight by `dir`, skipping section headers.
+    fn menu_step(&self, from: usize, dir: i32) -> usize {
+        let rows = self.menu_rows();
+        let n = rows.len() as i32;
+        let mut i = from as i32;
+        for _ in 0..n {
+            i = (i + dir).rem_euclid(n);
+            if !matches!(rows[i as usize], MenuRow::Header(_)) {
+                return i as usize;
+            }
+        }
+        from
     }
 
     fn settings(&self) -> Settings {
@@ -435,6 +512,7 @@ impl Setup {
         let d = [l.seeds.s1, l.seeds.s2, l.seeds.s3, l.seeds.s4, l.seeds.s5, l.seeds.s6];
         match step {
             Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4 | Step::Key => "1".into(),
+            Step::Menu => String::new(),
             Step::DroneCycle => l.settings.drone.cycle_s.to_string(),
             Step::DroneHold => (self.drone_cycle / 3).max(1).to_string(),
             Step::LoopArc(i) => self.loop_arcs[i].cycle_s.to_string(),
@@ -461,6 +539,7 @@ impl Setup {
         ];
         let list_hint = "↑ ↓ (or a number) to choose, Enter to confirm.".to_string();
         match self.step {
+            Step::Menu => (String::new(), String::new()),
             Step::Mode => ("What would you like to do?".into(), list_hint),
             Step::Bpm => (
                 format!("Tempo (BPM, {MIN_BPM}-{MAX_BPM})"),
@@ -541,58 +620,8 @@ impl Setup {
         }
     }
 
-    fn next_step(&self) -> Option<Step> {
-        let play_only = self.mode == Mode::Play;
-        match self.step {
-            Step::Mode => Some(if self.mode == Mode::Render { Step::Bpm } else { Step::Label }),
-            Step::Label => Some(Step::Bpm),
-            Step::Bpm => Some(Step::Scale),
-            Step::Scale => Some(Step::Key),
-            Step::Key => Some(Step::Chords),
-            Step::Chords => Some(Step::Pace),
-            Step::Pace => Some(Step::Seed(0)),
-            Step::Seed(3) => Some(Step::Kit),
-            // No drums: nothing for seed 5 to shape.
-            Step::Kit if shrine0011::kits::KITS[self.sel[4]] == shrine0011::kits::Kit::Off => Some(Step::Loop1),
-            Step::Kit => Some(Step::Space),
-            Step::Space => Some(Step::Seed(4)),
-            Step::Seed(i) if i < 4 => Some(Step::Seed(i + 1)),
-            Step::Seed(4) => Some(Step::Loop1),
-            Step::Loop1 if self.sel[6] == 0 => Some(Step::Loop2),
-            Step::Loop1 => Some(Step::LoopArc(0)),
-            Step::LoopArc(0) if self.loop_arcs[0].cycle_s == 0 => Some(Step::Loop2),
-            Step::LoopArc(0) => Some(Step::LoopHold(0)),
-            Step::LoopHold(0) => Some(Step::Loop2),
-            Step::Loop2 if self.sel[7] == 0 => Some(Step::Loop3),
-            Step::Loop2 => Some(Step::LoopArc(1)),
-            Step::LoopArc(1) if self.loop_arcs[1].cycle_s == 0 => Some(Step::Loop3),
-            Step::LoopArc(1) => Some(Step::LoopHold(1)),
-            Step::LoopHold(1) => Some(Step::Loop3),
-            Step::Loop3 if self.sel[8] == 0 => Some(Step::Loop4),
-            Step::Loop3 => Some(Step::LoopArc(2)),
-            Step::LoopArc(2) if self.loop_arcs[2].cycle_s == 0 => Some(Step::Loop4),
-            Step::LoopArc(2) => Some(Step::LoopHold(2)),
-            Step::LoopHold(2) => Some(Step::Loop4),
-            Step::Loop4 if self.sel[6] == 0 && self.sel[7] == 0 && self.sel[8] == 0 && self.sel[9] == 0 => Some(Step::DroneCycle),
-            Step::Loop4 if self.sel[9] == 0 => Some(Step::Seed(5)),
-            Step::Loop4 => Some(Step::LoopArc(3)),
-            Step::LoopArc(3) if self.loop_arcs[3].cycle_s == 0 => Some(Step::Seed(5)),
-            Step::LoopArc(3) => Some(Step::LoopHold(3)),
-            Step::LoopHold(3) => Some(Step::Seed(5)),
-            Step::Seed(_) => Some(Step::DroneCycle),
-            Step::DroneCycle if self.drone_cycle == 0 => Some(Step::Transpose),
-            Step::DroneCycle => Some(Step::DroneHold),
-            Step::DroneHold => Some(Step::Transpose),
-            Step::Transpose => Some(Step::DroneTone),
-            Step::DroneTone => (!play_only).then_some(Step::File),
-            Step::LoopArc(_) | Step::LoopHold(_) => Some(Step::DroneCycle),
-            Step::File => Some(if Path::new(&self.path).exists() { Step::Overwrite } else { Step::Length }),
-            Step::Overwrite => Some(Step::Length),
-            Step::Length => None,
-        }
-    }
-
-    /// Accepts the current answer. Returns true when every question is answered.
+    /// Accepts the current answer, then returns to the menu (or on to the next
+    /// half of a two-part field). Returns true only when the whole setup is done.
     fn submit(&mut self) -> bool {
         let raw = self.input.trim().to_string();
         let answer = if raw.is_empty() { self.default_for(self.step) } else { raw };
@@ -605,7 +634,7 @@ impl Setup {
                 self.mode = parse_mode(&(self.sel[0] + 1).to_string()).unwrap_or(Mode::Play);
                 true
             }
-            Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4 | Step::Key => true,
+            Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4 | Step::Key | Step::Menu => true,
             Step::Label => match parse_label(&answer) {
                 Some(l) => {
                     self.label = l;
@@ -710,17 +739,7 @@ impl Setup {
                 self.path = p;
                 true
             }
-            Step::Overwrite => {
-                if answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes") {
-                    true
-                } else {
-                    // Back to choosing a name.
-                    self.input.clear();
-                    self.step = Step::File;
-                    self.back.pop();
-                    return false;
-                }
-            }
+            Step::Overwrite => true,
             Step::Length => match cli::parse_length(&answer) {
                 Some(s) => {
                     self.seconds = s;
@@ -737,26 +756,12 @@ impl Setup {
         }
         self.error = None;
         self.input.clear();
-        match self.next_step() {
-            Some(next) => {
-                self.back.push(self.step);
-                self.step = next;
-                false
-            }
-            None => true,
-        }
-    }
-
-    fn go_back(&mut self) -> bool {
-        match self.back.pop() {
-            Some(prev) => {
-                self.step = prev;
-                self.input.clear();
-                self.error = None;
-                true
-            }
-            None => false,
-        }
+        self.step = match self.step {
+            Step::LoopArc(i) if self.loop_arcs[i].cycle_s > 0 => Step::LoopHold(i),
+            Step::DroneCycle if self.drone_cycle > 0 => Step::DroneHold,
+            _ => Step::Menu,
+        };
+        false
     }
 
     /// The answers given so far, for the summary at the top of the box.
@@ -764,6 +769,7 @@ impl Setup {
         let mut rows = Vec::new();
         for step in &self.back {
             let row = match step {
+                Step::Menu => ("Menu".into(), String::new()),
                 Step::Mode => ("Mode".to_string(), MODES[self.sel[0]].0.to_string()),
                 Step::Scale => ("Scale".into(), SCALES[self.sel[1]].name().to_string()),
                 Step::Key => (
@@ -799,7 +805,39 @@ impl Setup {
         rows
     }
 
+    fn draw_menu(&self, f: &mut Frame, t: f64) {
+        let rows = self.menu_rows();
+        let footer = "↑ ↓ choose · Enter edit · Esc exit · Ctrl-C exit";
+        let r = screen(f, t, "SETUP", rows.len() as u16 + 4, footer);
+        let buf = f.buffer_mut();
+        let vis = r.height.saturating_sub(2) as usize;
+        let sel = self.menu_sel.min(rows.len().saturating_sub(1));
+        let scroll = if vis > 0 && sel >= vis { sel + 1 - vis } else { 0 };
+        let mut y = 0;
+        put(buf, r, 0, y, "Choose a setting, or Start to play/render", fg(TEXT).add_modifier(Modifier::BOLD));
+        y += 1;
+        for (i, row) in rows.iter().enumerate().skip(scroll).take(vis) {
+            let selected = i == sel;
+            let marker = if selected { "›" } else { " " };
+            let st = if selected { fg(GLITCH2).add_modifier(Modifier::BOLD) } else { fg(TEXT) };
+            match row {
+                MenuRow::Header(name) => put(buf, r, 2, y, name, fg(DIM).add_modifier(Modifier::BOLD)),
+                MenuRow::Start => put(buf, r, 0, y, &format!("{marker} ▶ Start"), st),
+                MenuRow::Exit => put(buf, r, 0, y, &format!("{marker} Exit"), st),
+                MenuRow::Field { label, value, .. } => {
+                    put(buf, r, 0, y, &format!("{marker} {label:<16}"), st);
+                    put(buf, r, 18, y, value, fg(if selected { TEXT } else { DIM }));
+                }
+            }
+            y += 1;
+        }
+    }
+
     fn draw(&self, f: &mut Frame, t: f64) {
+        if self.step == Step::Menu {
+            self.draw_menu(f, t);
+            return;
+        }
         let summary = self.summary();
         let opts = options(self.step, self.bpm);
         let text_w = BOX_W.min(f.area().width.saturating_sub(2)).saturating_sub(6) as usize;
@@ -836,7 +874,7 @@ impl Setup {
         let anim = self.audition.is_some() && matches!(self.step, Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4);
         // notice, summary (+ gap), question, options, [description], [preview], gap, hint, error line, borders
         let height = notice_rows + summary_lines.len() as u16 + (!summary_lines.is_empty()) as u16 + 1 + list_rows + extra + anim as u16 + 1 + 1 + 1 + 2;
-        let footer = if self.step == Step::Mode { "Enter accept · Esc exit" } else { "Enter accept · Esc back · Ctrl-C exit" };
+        let footer = "Enter accept · Esc menu · Ctrl-C exit";
         let r = screen(f, t, "SETUP", height, footer);
         let buf = f.buffer_mut();
         let mut y = 0;
@@ -1012,11 +1050,39 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
             }
             continue;
         }
+        if s.step == Step::Menu {
+            match k.code {
+                KeyCode::Esc => return Ok(None),
+                KeyCode::Up => s.menu_sel = s.menu_step(s.menu_sel, -1),
+                KeyCode::Down => s.menu_sel = s.menu_step(s.menu_sel, 1),
+                KeyCode::Enter => {
+                    let rows = s.menu_rows();
+                    match rows.get(s.menu_sel.min(rows.len().saturating_sub(1))) {
+                        Some(MenuRow::Start) => {
+                            if s.mode != Mode::Play && Path::new(&s.path).exists() {
+                                s.step = Step::Overwrite;
+                            } else {
+                                break;
+                            }
+                        }
+                        Some(MenuRow::Exit) => return Ok(None),
+                        Some(MenuRow::Field { step, .. }) => {
+                            s.step = *step;
+                            s.input.clear();
+                            s.error = None;
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
         match (s.step, k.code) {
             (_, KeyCode::Esc) => {
-                if !s.go_back() {
-                    return Ok(None);
-                }
+                s.step = Step::Menu;
+                s.input.clear();
+                s.error = None;
             }
             (step, KeyCode::Up | KeyCode::Down) if list_id(step).is_some() => {
                 let (id, n) = (list_id(step).unwrap(), options(step, s.bpm).len());
@@ -1047,10 +1113,10 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
                 s.error = None;
             }
             (Step::Overwrite, KeyCode::Char(c)) if "yYnN".contains(c) => {
-                s.input = c.to_string();
-                if s.submit() {
+                if c == 'y' || c == 'Y' {
                     break;
                 }
+                s.step = Step::Menu;
             }
             (step @ (Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4), KeyCode::Enter) if s.sel[list_id(step).unwrap()] == LOOP_GRID => {
                 s.grid_edit = loop_layer(step);
@@ -1185,15 +1251,10 @@ pub fn render(terminal: &mut DefaultTerminal, c: &Choices) -> Result<(Notice, bo
 pub fn preview(width: u16, height: u16) -> Vec<String> {
     use ratatui::backend::TestBackend;
     let mut out = Vec::new();
-    let mut s = Setup::new(None);
-    let mut later = Setup::new(Some(Notice::ok("Rendered 10:00 to 0011.wav.")));
-    later.sel[0] = 2;
-    for answer in ["", "SOS9", "", "", "", "", "", "42"] {
-        later.input = answer.to_string();
-        later.submit();
-    }
-    later.input = "0x1F".into();
-    for (setup, t) in [(&mut s, 1.7), (&mut later, 3.71)] {
+    let menu = Setup::new(Some(Notice::ok("Rendered 10:00 to 0011.wav.")));
+    let mut field = Setup::new(None);
+    field.step = Step::Loop1;
+    for (setup, t) in [(&menu, 1.7), (&field, 3.71)] {
         let mut terminal = match ratatui::Terminal::new(TestBackend::new(width, height)) {
             Ok(t) => t,
             Err(_) => return out,
@@ -1218,7 +1279,7 @@ mod tests {
         use ratatui::backend::TestBackend;
         for (w, h) in [(80u16, 24u16), (100, 30), (70, 22)] {
             // A long list (all atmosphere timbres) is the worst case for height.
-            for step in [Step::Mode, Step::Scale, Step::Loop1, Step::Loop2, Step::DroneCycle] {
+            for step in [Step::Menu, Step::Mode, Step::Scale, Step::Loop1, Step::Loop2, Step::DroneCycle] {
                 let mut s = Setup::new(None);
                 s.step = step;
                 let mut terminal = ratatui::Terminal::new(TestBackend::new(w, h)).unwrap();
@@ -1229,6 +1290,10 @@ mod tests {
                     .collect::<Vec<_>>()
                     .join("\n");
                 let (q, _) = s.question();
+                if step == Step::Menu {
+                    assert!(text.contains("Start") && text.contains("Atmosphere"), "{w}x{h}: menu missing rows\n{text}");
+                    continue;
+                }
                 assert!(text.contains(q.trim()), "{w}x{h} {step:?}: lost question {q:?}\n{text}");
                 assert!(text.contains("Enter"), "{w}x{h} {step:?}: lost hint\n{text}");
                 // The event-grid editor must also fit and show its rows/hint.

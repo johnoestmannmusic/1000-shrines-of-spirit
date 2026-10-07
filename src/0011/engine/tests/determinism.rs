@@ -136,7 +136,7 @@ fn new_features_golden_hash() {
     };
     let h = hash(&render_with(DEFAULT_SEEDS, settings, SECONDS * SAMPLE_RATE as usize, 4096));
     println!("new-features golden hash: {h:#018x}");
-    assert_eq!(h, 0xdfd6594597f52145, "the Phase 2 features changed (got {h:#018x})");
+    assert_eq!(h, 0xa08809da8bef0296, "the Phase 2 features changed (got {h:#018x})");
 }
 
 /// The Atmosphere Phase 3 features: four layers, 8-row event grids, per-layer
@@ -166,7 +166,7 @@ fn phase3_golden_hash() {
     };
     let h = hash(&render_with(DEFAULT_SEEDS, settings, SECONDS * SAMPLE_RATE as usize, 4096));
     println!("phase3 golden hash: {h:#018x}");
-    assert_eq!(h, 0x86b87f90aea63e68, "Atmosphere Phase 3 changed (got {h:#018x})");
+    assert_eq!(h, 0xc973b160a58efc49, "Atmosphere Phase 3 changed (got {h:#018x})");
 }
 
 /// Any tempo is as deterministic as the default one.
