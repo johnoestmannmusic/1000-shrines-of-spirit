@@ -272,24 +272,57 @@ pub fn panel(ui: &Ui, f: &mut Frame, p: Panel, area: Rect, explaining: bool) {
 // ---------------------------------------------------------------- 10 atmosphere loops
 
 fn loops(ui: &Ui, s: &Snapshot, buf: &mut Buffer, r: Rect) {
-    if r.height < 6 || r.width < 20 {
+    if r.height == 0 || r.width < 12 {
         return;
     }
-    // Four stacked strips.
-    let base = (r.height / 4).max(1);
-    for k in 0..4usize {
-        let y = k as u16 * base;
-        let h = if k == 3 { r.height.saturating_sub(y) } else { base };
-        let lp = &ui.desc.loops[k];
-        if !lp.on() {
-            put(buf, r, 1, y, &format!("loop {}: off", k + 1), fg(DIM));
-            continue;
+    let levels = [ui.levels.loop1, ui.levels.loop2, ui.levels.loop3, ui.levels.loop4];
+    if r.height < 6 {
+        // One concise row: all four meters side by side, so they fit any height.
+        let per = (r.width as usize / 4).max(3);
+        let code = per >= 8;
+        let bar = per.saturating_sub(if code { 4 } else { 2 }).max(1);
+        for k in 0..4usize {
+            let x = (k * per) as u16;
+            let on = ui.desc.loops[k].on();
+            put(buf, r, x, 0, &format!("{}", k + 1), fg(DIM));
+            let (text, col) = if on { (hbar(bar, level_frac(levels[k], 40.0)), LOOPS) } else { ("·".repeat(bar), FAINT) };
+            put(buf, r, x + 1, 0, &text, fg(col));
+            if code {
+                put(buf, r, x + 1 + bar as u16, 0, ui.desc.loops[k].design.short(), fg(if on { DIM } else { FAINT }));
+            }
         }
-        let secs = lp.len as f64 / ui.desc.sample_rate as f64;
-        let pass = s.clock / lp.len as u64 + 1;
-        let title = format!("LOOP {} · {} · {} beats · {secs:.1} s · pass {pass}", k + 1, lp.design.short(), lp.beats);
-        put(buf, r, 1, y, &title, fg(LOOPS).add_modifier(Modifier::BOLD));
-        loop_strip(ui, s, buf, Rect::new(r.x + 1, r.y + y + 1, r.width.saturating_sub(2), h.saturating_sub(1)), k);
+        return;
+    }
+    // Only give each loop its own title + waveform when the panel is very tall
+    // (>= 5 rows per layer); otherwise one compact meter row each, so a layer is
+    // always a labelled level bar, never a bare title or a clipped waveform.
+    let full = r.height >= 20;
+    let per = (r.height / 4).max(1);
+    for k in 0..4usize {
+        let y = if full { k as u16 * per } else { k as u16 };
+        let lp = &ui.desc.loops[k];
+        let on = lp.on();
+        if full {
+            let h = if k == 3 { r.height.saturating_sub(y) } else { per };
+            if !on {
+                put(buf, r, 1, y, &format!("L{} off", k + 1), fg(DIM));
+                continue;
+            }
+            let secs = lp.len as f64 / ui.desc.sample_rate as f64;
+            let pass = s.clock / lp.len as u64 + 1;
+            let title = format!("LOOP {} · {} · {} beats · {secs:.1} s · pass {pass}", k + 1, lp.design.short(), lp.beats);
+            put(buf, r, 1, y, &title, fg(LOOPS).add_modifier(Modifier::BOLD));
+            loop_strip(ui, s, buf, Rect::new(r.x + 1, r.y + y + 1, r.width.saturating_sub(2), h.saturating_sub(1)), k);
+        } else {
+            // One compact meter row per layer, with the design code.
+            let meter = r.width.saturating_sub(16).max(1) as usize;
+            put(buf, r, 0, y, &format!("L{}", k + 1), fg(if on { LOOPS } else { DIM }).add_modifier(Modifier::BOLD));
+            let (text, col) = if on { (hbar(meter, level_frac(levels[k], 40.0)), LOOPS) } else { ("·".repeat(meter), FAINT) };
+            put(buf, r, 3, y, &text, fg(col));
+            if r.width >= 20 {
+                put(buf, r, 3 + meter as u16, y, &format!(" {}", lp.design.short()), fg(if on { DIM } else { FAINT }));
+            }
+        }
     }
 }
 

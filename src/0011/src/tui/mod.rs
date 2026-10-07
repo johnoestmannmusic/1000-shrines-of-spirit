@@ -178,8 +178,15 @@ impl Ui {
                 on.join("; ")
             },
             loops_meet: {
-                let (a, b) = (desc.loops[0].beats, desc.loops[1].beats);
-                format!("{} beats", a * b / gcd(a, b))
+                // LCM of every active layer's beat count.
+                let mut meet = 1u64;
+                for k in 0..4 {
+                    if desc.loops[k].on() {
+                        let b = desc.loops[k].beats.max(1);
+                        meet = meet / gcd(meet, b) * b;
+                    }
+                }
+                format!("{meet} beats")
             },
             drone_arc: if drone.is_on() {
                 format!(
@@ -281,6 +288,8 @@ impl Ui {
             shrine0011::Solo::Drums => self.desc.drums_on,
             shrine0011::Solo::Loop1 => self.desc.loops[0].on(),
             shrine0011::Solo::Loop2 => self.desc.loops[1].on(),
+            shrine0011::Solo::Loop3 => self.desc.loops[2].on(),
+            shrine0011::Solo::Loop4 => self.desc.loops[3].on(),
             _ => true,
         })
     }
@@ -744,6 +753,8 @@ pub fn print_frame(seeds: Seeds, settings: Settings, seconds: f64, width: u16, h
         (View::Learn, 14),
         (View::Learn, 15),
         (View::Learn, 16),
+        (View::Learn, 17),
+        (View::Learn, 18),
     ] {
         ui.lesson = lesson;
         ui.update_spectrum();

@@ -28,7 +28,7 @@ pub const STOP_FADE_SECONDS: f64 = 1.5;
 const MAX_PENDING: usize = 256;
 
 /// The layers that can be soloed, in `Shared::solo` order.
-pub const SOLOS: [shrine0011::Solo; 8] = [
+pub const SOLOS: [shrine0011::Solo; 10] = [
     shrine0011::Solo::Drone,
     shrine0011::Solo::Glitch1,
     shrine0011::Solo::Glitch2,
@@ -36,6 +36,8 @@ pub const SOLOS: [shrine0011::Solo; 8] = [
     shrine0011::Solo::Drums,
     shrine0011::Solo::Loop1,
     shrine0011::Solo::Loop2,
+    shrine0011::Solo::Loop3,
+    shrine0011::Solo::Loop4,
     shrine0011::Solo::Space,
 ];
 

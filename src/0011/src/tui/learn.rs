@@ -26,7 +26,7 @@ use std::f64::consts::TAU;
 
 /// (title, the panel its Insights are tagged with). The first 9 explain how
 /// the piece is made; the last 8 each solo one instrument (in `audio::SOLOS` order).
-pub const LESSONS: [(&str, Panel); 17] = [
+pub const LESSONS: [(&str, Panel); 19] = [
     ("The score", Panel::Cycles),
     ("The chord", Panel::Chord),
     ("Freezing", Panel::Spectrum),
@@ -43,6 +43,8 @@ pub const LESSONS: [(&str, Panel); 17] = [
     ("Drums", Panel::Drums),
     ("Loop 1", Panel::Loops),
     ("Loop 2", Panel::Loops),
+    ("Loop 3", Panel::Loops),
+    ("Loop 4", Panel::Loops),
     ("Space (echo+reverb)", Panel::Reverb),
 ];
 
@@ -76,12 +78,21 @@ pub fn draw(ui: &Ui, f: &mut Frame, area: Rect, explaining: Panel) {
     let r = block.inner(list);
     f.render_widget(block, list);
     let buf = f.buffer_mut();
-    put(buf, r, 1, 0, "HOW IT'S MADE", fg(DIM).add_modifier(Modifier::BOLD));
-    put(buf, r, 1, FIRST_INSTRUMENT as u16 + 2, "INSTRUMENTS · solo", fg(DIM).add_modifier(Modifier::BOLD));
+    let natural_y = |i: usize| i as u16 + 1 + if is_instrument(i) { 2 } else { 0 };
+    // Scroll so the selected lesson is always on screen (there are more lessons
+    // than rows on a laptop).
+    let scroll = natural_y(ui.lesson).saturating_sub(r.height.saturating_sub(1));
+    let at = |y: u16| y.checked_sub(scroll);
+    if let Some(y) = at(0) {
+        put(buf, r, 1, y, "HOW IT'S MADE", fg(DIM).add_modifier(Modifier::BOLD));
+    }
+    if let Some(y) = at(FIRST_INSTRUMENT as u16 + 2) {
+        put(buf, r, 1, y, "INSTRUMENTS · solo", fg(DIM).add_modifier(Modifier::BOLD));
+    }
     for (i, (title, panel)) in LESSONS.iter().enumerate() {
-        let y = i as u16 + 1 + if is_instrument(i) { 2 } else { 0 };
+        let Some(y) = at(natural_y(i)) else { continue };
         if y >= r.height {
-            break;
+            continue;
         }
         let on = i == ui.lesson;
         let style = if on {
@@ -331,24 +342,31 @@ fn text(ui: &Ui) -> (String, Vec<String>) {
             ],
         ),
         8 if !d.loops.iter().any(|l| l.on()) => (
-            "This version has no atmosphere loops (both Off). Choose a timbre at setup to hear a 90s sample-CD pad built and looped live.".to_string(),
+            "This version has no atmosphere loops (all Off). Choose a timbre at setup to hear a 90s sample-CD pad built and looped live.".to_string(),
             vec!["Short pad loops were the backbone of 90s game and sample-CD ambience: try Choir or Glass.".to_string()],
         ),
         8 => {
-            // Explain the first loop that plays; mention the second if both do.
-            let k = if d.loops[0].on() { 0 } else { 1 };
+            // Explain the first loop that plays, and any others alongside it.
+            let active: Vec<usize> = (0..4).filter(|&k| d.loops[k].on()).collect();
+            let k = active[0];
             let lp = &d.loops[k];
             let secs = lp.len as f64 / SR;
             let s = ui.snap.as_ref();
             let pass = s.map_or(1, |s| s.clock / lp.len as u64 + 1);
             let loop_notes: Vec<String> = lp.notes[pos.chord].iter().map(|n| note_name(*n)).collect();
-            let both = d.loops.iter().all(|l| l.on());
-            let second = if both {
-                let (a, b) = (d.loops[0].beats, d.loops[1].beats);
-                let meet = a * b / gcd(a, b);
+            let others = if active.len() > 1 {
+                let list: Vec<String> = active
+                    .iter()
+                    .filter(|&&j| j != k)
+                    .map(|&j| format!("Loop {} ({}, {} beats)", j + 1, d.loops[j].design.name(), d.loops[j].beats))
+                    .collect();
+                let meet = active.iter().fold(1u64, |m, &j| {
+                    let b = d.loops[j].beats.max(1);
+                    m / gcd(m, b) * b
+                });
                 format!(
-                    " Loop 2 ({}, {b} beats) runs alongside: {a} and {b} share no factor, so the two drift apart and only line up again every {meet} beats ({:.0} s).",
-                    d.loops[1].design.name(),
+                    " The other layers run alongside: {}. Their beat counts are pairwise co-prime, so they drift apart and only all line up again every {meet} beats ({:.0} s).",
+                    list.join(", "),
                     meet as f64 * d.tempo.beat() as f64 / SR
                 )
             } else {
@@ -356,7 +374,7 @@ fn text(ui: &Ui) -> (String, Vec<String>) {
             };
             (
                 format!(
-                    "At start-up a {} loop is synthesised once for each of the {} chord{}: {} beats ({secs:.1} s) of sound. It is rendered a second time round so every tail has settled, then the sound just after its end is crossfaded into its first 150 ms. From then on it is only played back, round and round (now pass {pass}), fading into the next chord's loop during each chord's last bar. This chord's loop plays {}.{second}",
+                    "At start-up a {} loop is synthesised once for each of the {} chord{}: {} beats ({secs:.1} s) of sound. It is rendered a second time round so every tail has settled, then the sound just after its end is crossfaded into its first 150 ms. From then on it is only played back, round and round (now pass {pass}), fading into the next chord's loop during each chord's last bar. This chord's loop plays {}.{others}",
                     lp.design.name(),
                     h.chords.len(),
                     if h.chords.len() == 1 { "" } else { "s" },
@@ -899,18 +917,18 @@ fn instrument_text(ui: &Ui) -> (String, Vec<String>) {
                 ],
             )
         }
-        Some(Solo::Loop1 | Solo::Loop2) if loop_index(solo_for(ui.lesson)).is_some_and(|k| !d.loops[k].on()) => (
+        Some(Solo::Loop1 | Solo::Loop2 | Solo::Loop3 | Solo::Loop4) if loop_index(solo_for(ui.lesson)).is_some_and(|k| !d.loops[k].on()) => (
             format!("This loop is Off in this version (Loop {}: Off).", loop_index(solo_for(ui.lesson)).unwrap_or(0) + 1),
             vec!["Choose a loop timbre at setup to hear one here.".to_string()],
         ),
-        Some(Solo::Loop1 | Solo::Loop2) => {
+        Some(Solo::Loop1 | Solo::Loop2 | Solo::Loop3 | Solo::Loop4) => {
             let k = loop_index(solo_for(ui.lesson)).unwrap_or(0);
             let lp = &d.loops[k];
             let loop_notes: Vec<String> = lp.notes[s.harmony.chord].iter().map(|n| note_name(*n)).collect();
             let place = if k == 0 {
                 "in the mix it sits between the drone below and the glitches above, spread wide"
             } else {
-                "it is shorter than loop 1 and sits nearer the centre, so the two interlock instead of piling up"
+                "it is a shorter layer nearer the centre, so the layers interlock instead of piling up"
             };
             (
                 format!(
@@ -957,11 +975,13 @@ fn gcd(a: u64, b: u64) -> u64 {
     }
 }
 
-/// Which atmosphere loop (0 or 1) a solo is, if it is one.
+/// Which atmosphere loop (0..3) a solo is, if it is one.
 fn loop_index(solo: Option<Solo>) -> Option<usize> {
     match solo {
         Some(Solo::Loop1) => Some(0),
         Some(Solo::Loop2) => Some(1),
+        Some(Solo::Loop3) => Some(2),
+        Some(Solo::Loop4) => Some(3),
         _ => None,
     }
 }
@@ -1007,15 +1027,15 @@ fn sample_loops(ui: &Ui, buf: &mut Buffer, r: Rect) {
     if r.width < 30 || r.height < 8 {
         return;
     }
-    let on: Vec<usize> = (0..2).filter(|&k| ui.desc.loops[k].on()).collect();
+    let on: Vec<usize> = (0..4).filter(|&k| ui.desc.loops[k].on()).collect();
     if on.is_empty() {
-        put(buf, r, 0, 1, "no atmosphere loops in this version (both Off)", fg(DIM));
+        put(buf, r, 0, 1, "no atmosphere loops in this version (all Off)", fg(DIM));
         return;
     }
     let pos = s.harmony;
     let fade = if pos.morph > 0.0 { format!(" · fading into chord {}: {:.0}%", pos.next + 1, pos.morph * 100.0) } else { String::new() };
     // Each loop: a title line, then its strip; both share the rows above the legend.
-    let each = (r.height.saturating_sub(2) / on.len() as u16).min(9);
+    let each = (r.height.saturating_sub(2) / on.len().max(1) as u16).max(1).min(9);
     let mut y = 0;
     for &k in &on {
         let lp = &ui.desc.loops[k];
@@ -1037,11 +1057,13 @@ fn sample_loops(ui: &Ui, buf: &mut Buffer, r: Rect) {
         y += each;
     }
     let mut legend = "░ loop-point crossfade (150 ms)   ┴ beats   │ playhead".to_string();
-    if on.len() == 2 {
-        let (a, b) = (ui.desc.loops[0].beats, ui.desc.loops[1].beats);
-        let meet = a * b / gcd(a, b);
+    if on.len() > 1 {
+        let meet = on.iter().fold(1u64, |m, &k| {
+            let b = ui.desc.loops[k].beats.max(1);
+            m / gcd(m, b) * b
+        });
         let beat = s.clock / ui.desc.tempo.beat();
-        legend = format!("{legend}   ·   the two loops start together again in {} beats (every {meet})", meet - beat % meet);
+        legend = format!("{legend}   ·   all {} layers line up again in {} beats (every {meet})", on.len(), meet - beat % meet);
     }
     put(buf, r, 0, y, &legend, fg(DIM));
 }
@@ -1060,9 +1082,15 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
         Some(Solo::Drums) => DRUMS,
         Some(Solo::Loop1) => LOOPS,
         Some(Solo::Loop2) => mix(LOOPS, CHORD, 0.4),
+        Some(Solo::Loop3) => mix(LOOPS, CHORD, 0.3),
+        Some(Solo::Loop4) => mix(LOOPS, CHORD, 0.5),
         _ => REVERB,
     };
-    let top = (r.height * 3 / 5).max(3);
+    // Reserve room for the share-of-mix list below (one column when tall, two
+    // when short), so every layer stays visible on a laptop; the graph gives up
+    // the space.
+    let list_rows = if r.height < 14 { 5u16 } else { 10 };
+    let top = ((r.height * 3 / 5).max(3)).min(r.height.saturating_sub(list_rows + 2)).max(2);
     let half = r.width / 2;
     let heard = if ui.wanted_solo().is_some() { "this layer alone" } else { "the full mix" };
 
@@ -1106,32 +1134,55 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
         }
     }
 
-    // Its share of the mix: every layer's level, this one highlighted.
+    // Its share of the mix: the four atmosphere loops first (so they are always
+    // visible on a short screen), then the rest, this layer highlighted.
     let l = &ui.levels;
     let layers: [(&str, f64, Option<Solo>, Rgb); 10] = [
+        ("loop 1", l.loop1, Some(Solo::Loop1), LOOPS),
+        ("loop 2", l.loop2, Some(Solo::Loop2), mix(LOOPS, CHORD, 0.4)),
+        ("loop 3", l.loop3, Some(Solo::Loop3), mix(LOOPS, CHORD, 0.3)),
+        ("loop 4", l.loop4, Some(Solo::Loop4), mix(LOOPS, CHORD, 0.5)),
         ("drone", l.drone, Some(Solo::Drone), DRONE),
         ("glitch 1", l.glitch1, Some(Solo::Glitch1), GLITCH1),
         ("glitch 2", l.glitch2, Some(Solo::Glitch2), GLITCH2),
         ("bass", l.bass, Some(Solo::Bass), BASS),
         ("drums", l.drums, Some(Solo::Drums), DRUMS),
-        ("loop 1", l.loop1, Some(Solo::Loop1), LOOPS),
-        ("loop 2", l.loop2, Some(Solo::Loop2), mix(LOOPS, CHORD, 0.4)),
-        ("loop 3", l.loop3, Some(Solo::Loop3), mix(LOOPS, CHORD, 0.3)),
-        ("loop 4", l.loop4, Some(Solo::Loop4), mix(LOOPS, CHORD, 0.5)),
         ("echo+reverb", l.reverb.max(l.echo), Some(Solo::Space), REVERB),
     ];
     let y0 = top + 1;
     put(buf, r, 0, y0, "share of the mix (level)", fg(DIM));
-    let bar_w = (half as usize).saturating_sub(14);
-    for (i, (name, lvl, s, c)) in layers.iter().enumerate() {
-        let y = y0 + 1 + i as u16;
-        if y >= r.height {
-            break;
+    let avail = r.height.saturating_sub(y0 + 1) as usize;
+    if avail >= layers.len() {
+        let bar_w = (half as usize).saturating_sub(14);
+        for (i, (name, lvl, s, c)) in layers.iter().enumerate() {
+            let y = y0 + 1 + i as u16;
+            let me = *s == solo;
+            let st = if me { fg(*c).add_modifier(Modifier::BOLD) } else { fg(mix(DIM, *c, 0.3)) };
+            put(buf, r, 0, y, &format!("{}{:<11}", if me { "▶" } else { " " }, name), st);
+            put(buf, r, 12, y, &hbar(bar_w, level_frac(*lvl, 48.0)), fg(if me { *c } else { lit(*c, 0.35) }));
         }
-        let me = *s == solo;
-        let st = if me { fg(*c).add_modifier(Modifier::BOLD) } else { fg(mix(DIM, *c, 0.3)) };
-        put(buf, r, 0, y, &format!("{}{:<11}", if me { "▶" } else { " " }, name), st);
-        put(buf, r, 12, y, &hbar(bar_w, level_frac(*lvl, 48.0)), fg(if me { *c } else { lit(*c, 0.35) }));
+    } else {
+        // Two compact columns, filled to the height that is actually available,
+        // so the four atmosphere loops (listed first) always show.
+        let per_col = avail.max(1);
+        let col_w = (half as usize / 2).max(12);
+        let bar_w = col_w.saturating_sub(10).max(2);
+        for (i, (name, lvl, s, c)) in layers.iter().enumerate() {
+            let (col, row) = (i / per_col, i % per_col);
+            if col >= 2 {
+                break;
+            }
+            let y = y0 + 1 + row as u16;
+            if y >= r.height {
+                break;
+            }
+            let x = (col * col_w) as u16;
+            let me = *s == solo;
+            let st = if me { fg(*c).add_modifier(Modifier::BOLD) } else { fg(mix(DIM, *c, 0.3)) };
+            let short: String = name.chars().take(6).collect();
+            put(buf, r, x, y, &format!("{}{:<6}", if me { "▶" } else { " " }, short), st);
+            put(buf, r, x + 8, y, &hbar(bar_w, level_frac(*lvl, 48.0)), fg(if me { *c } else { lit(*c, 0.35) }));
+        }
     }
 
     // The layer's own mechanics, live.
@@ -1191,10 +1242,10 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
             mech(buf, 3, &format!("last hit: {}", if hits.is_empty() { "-".to_string() } else { hits }), fg(TEXT));
         }
         Some(Solo::Drums) => mech(buf, 0, "no drums in this version (kit: Off)", fg(DIM)),
-        Some(Solo::Loop1 | Solo::Loop2) if loop_index(solo).is_some_and(|k| !ui.desc.loops[k].on()) => {
+        Some(Solo::Loop1 | Solo::Loop2 | Solo::Loop3 | Solo::Loop4) if loop_index(solo).is_some_and(|k| !ui.desc.loops[k].on()) => {
             mech(buf, 0, "this loop is Off in this version", fg(DIM))
         }
-        Some(Solo::Loop1 | Solo::Loop2) => {
+        Some(Solo::Loop1 | Solo::Loop2 | Solo::Loop3 | Solo::Loop4) => {
             let k = loop_index(solo).unwrap_or(0);
             let lp = &ui.desc.loops[k];
             let pos = s.harmony;

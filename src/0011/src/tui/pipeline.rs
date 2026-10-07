@@ -227,7 +227,7 @@ impl Pipeline {
         self.loop_timer -= dt;
         if self.loop_timer <= 0.0 {
             self.loop_timer = 0.45;
-            let l = level_frac(ui_levels.loop1.max(ui_levels.loop2), 40.0);
+            let l = level_frac(ui_levels.loop1.max(ui_levels.loop2).max(ui_levels.loop3).max(ui_levels.loop4), 40.0);
             if self.loops_on && l > 0.05 {
                 self.spawn(Loop1, Out, LOOPS, '•', 0.3 + 0.5 * l, false);
             }
@@ -510,28 +510,27 @@ fn box_text(ui: &Ui, n: Node) -> BoxText {
             tag: "",
         },
         Loop1 if !d.loops.iter().any(|l| l.on()) => BoxText {
-            title: "LOOPS 1 + 2".into(),
-            lines: ["off (both Off)".into(), String::new()],
+            title: "LOOPS 1-4".into(),
+            lines: ["off (all Off)".into(), String::new()],
             color: FAINT,
             level: 0.0,
             panel: Panel::Loops,
             tag: "10",
         },
         Loop1 => {
-            // Both loop layers share one box: a line each.
-            let line = |k: usize| {
+            // The four loop layers share one box: two layers per line.
+            let one = |k: usize| {
                 let lp = &d.loops[k];
                 if !lp.on() {
                     return format!("{} off", k + 1);
                 }
-                let pass = s.map_or(String::new(), |s| format!(" · pass {}", s.clock / lp.len as u64 + 1));
-                format!("{} {} {}b{pass}", k + 1, lp.design.short(), lp.beats)
+                format!("{} {} {}b", k + 1, lp.design.short(), lp.beats)
             };
             BoxText {
-                title: "LOOPS 1 + 2".into(),
-                lines: [line(0), line(1)],
+                title: "LOOPS 1-4".into(),
+                lines: [format!("{}   {}", one(0), one(1)), format!("{}   {}", one(2), one(3))],
                 color: LOOPS,
-                level: lv(l.loop1.max(l.loop2)),
+                level: lv(l.loop1.max(l.loop2).max(l.loop3).max(l.loop4)),
                 panel: Panel::Loops,
                 tag: "10",
             }

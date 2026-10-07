@@ -37,8 +37,6 @@ pub enum When {
     Loop(LoopTimbre),
     /// When there are no atmosphere loops.
     NoLoops,
-    /// When both atmosphere loops play.
-    BothLoops,
     /// When the drone is gated by a repeating entrance/exit arc.
     DroneArc,
     /// When at least one atmosphere layer is an editable event grid.
@@ -53,7 +51,6 @@ impl When {
             When::Loops => any_loop,
             When::Loop(t) => loops.iter().any(|d| d.timbre() == Some(t)),
             When::NoLoops => !any_loop,
-            When::BothLoops => loops.iter().all(|d| d.is_on()),
             When::EventLoops => loops.iter().any(|d| matches!(d, LoopDesign::Events(_))),
             When::DroneArc => drone.is_on(),
             When::Always => true,
@@ -148,8 +145,8 @@ pub const EXPLAINERS: &[(Panel, When, &str)] = &[
     (General, When::Always, "Every rhythm here is a whole number of samples, so it can never drift. A drum sixteenth is rounded to a multiple of 12 samples ({drum16}) so glitch ratchets of 2, 3 and 4 divide it exactly. The tempo you actually hear is {exact} BPM."),
     (Cycles, When::Always, "The slow form cycles (41 to 307 s) are measured in seconds, not beats, so changing the BPM moves the rhythm but leaves the long breathing of the piece alone."),
     // Atmosphere loops.
-    (Loops, When::BothLoops, "Two loops play at once: {loop1} ({loop1_len}) and {loop2} ({loop2_len}). Their beat counts share no factor, so they drift in and out of step and only line up again after {loops_meet}, the same trick as the glitch layers' 7 and 11 steps."),
-    (Loops, When::BothLoops, "Loop 2 sits narrower in the stereo field than loop 1 and swells on different slow cycles, so the two never breathe in at the same moment."),
+    (Loops, When::Loops, "This version's atmosphere layers: {loops}, with lengths {loops_len}. Their beat counts are pairwise co-prime, so they drift in and out of step and only all line up again after {loops_meet}, the same trick as the glitch layers' 7 and 11 steps."),
+    (Loops, When::Loops, "The layers sit at different stereo widths and swell on different slow cycles, so two never breathe in at the same moment, and each has its own fade-in/out arc on top of that."),
     (Loops, When::Loops, "This version's atmosphere loops: {loops}. Each is a few seconds of sound, synthesised once at start-up for each chord and then looped for ever, the way 90s sample CDs and game soundtracks built their pads."),
     (Loops, When::Loops, "Loop lengths here: {loops_len}. Each is a whole number of beats, so it stays locked to the tempo. Three to eight seconds was the sweet spot of 90s samplers: long enough to breathe, short enough to fit in a few megabytes of memory."),
     (Loops, When::Loops, "The loop point is hidden with a crossfade: the sound just after the loop's end is faded into its first 150 ms, so the jump back to the start never clicks. Hardware samplers like the Akai S1000 had a 'loop crossfade' for exactly this."),
