@@ -25,8 +25,8 @@ use std::f64::consts::TAU;
 
 
 /// (title, the panel its Insights are tagged with). The first 9 explain how
-/// the piece is made; the last 7 each solo one instrument (in `audio::SOLOS` order).
-pub const LESSONS: [(&str, Panel); 16] = [
+/// the piece is made; the last 8 each solo one instrument (in `audio::SOLOS` order).
+pub const LESSONS: [(&str, Panel); 17] = [
     ("The score", Panel::Cycles),
     ("The chord", Panel::Chord),
     ("Freezing", Panel::Spectrum),
@@ -42,6 +42,7 @@ pub const LESSONS: [(&str, Panel); 16] = [
     ("Bass", Panel::Bass),
     ("Drums", Panel::Drums),
     ("Loop 1", Panel::Loops),
+    ("Loop 2", Panel::Loops),
     ("Space (echo+reverb)", Panel::Reverb),
 ];
 
@@ -109,8 +110,8 @@ pub fn draw(ui: &Ui, f: &mut Frame, area: Rect, explaining: Panel) {
         " ● SOLO: you hear only this layer · s = full mix ".to_string()
     } else if solo_for(ui.lesson) == Some(Solo::Drums) && !ui.desc.drums_on {
         " no drums in this version ".to_string()
-    } else if solo_for(ui.lesson) == Some(Solo::Loop1) && !ui.desc.loops[0].on() {
-        " no loop in this version ".to_string()
+    } else if loop_index(solo_for(ui.lesson)).is_some_and(|k| !ui.desc.loops[k].on()) {
+        " this loop is Off in this version ".to_string()
     } else {
         " ○ full mix · s = solo this layer ".to_string()
     };
@@ -312,19 +313,33 @@ fn text(ui: &Ui) -> (String, Vec<String>) {
                 space_tip(d.settings.space).to_string(),
             ],
         ),
-        8 if !d.loops[0].on() => (
-            "This version has no atmosphere loop (Loop 1: Off). Choose a timbre at setup to hear a 90s sample-CD pad built and looped live.".to_string(),
+        8 if !d.loops.iter().any(|l| l.on()) => (
+            "This version has no atmosphere loops (both Off). Choose a timbre at setup to hear a 90s sample-CD pad built and looped live.".to_string(),
             vec!["Short pad loops were the backbone of 90s game and sample-CD ambience: try Choir or Glass.".to_string()],
         ),
         8 => {
-            let lp = &d.loops[0];
+            // Explain the first loop that plays; mention the second if both do.
+            let k = if d.loops[0].on() { 0 } else { 1 };
+            let lp = &d.loops[k];
             let secs = lp.len as f64 / SR;
             let s = ui.snap.as_ref();
             let pass = s.map_or(1, |s| s.clock / lp.len as u64 + 1);
             let loop_notes: Vec<String> = lp.notes[pos.chord].iter().map(|n| note_name(*n)).collect();
+            let both = d.loops.iter().all(|l| l.on());
+            let second = if both {
+                let (a, b) = (d.loops[0].beats, d.loops[1].beats);
+                let meet = a * b / gcd(a, b);
+                format!(
+                    " Loop 2 ({}, {b} beats) runs alongside: {a} and {b} share no factor, so the two drift apart and only line up again every {meet} beats ({:.0} s).",
+                    d.loops[1].timbre.name(),
+                    meet as f64 * d.tempo.beat() as f64 / SR
+                )
+            } else {
+                String::new()
+            };
             (
                 format!(
-                    "At start-up a {} loop is synthesised once for each of the {} chord{}: {} beats ({secs:.1} s) of sound. It is rendered a second time round so every tail has settled, then the sound just after its end is crossfaded into its first 150 ms. From then on it is only played back, round and round (now pass {pass}), fading into the next chord's loop during each chord's last bar. This chord's loop plays {}.",
+                    "At start-up a {} loop is synthesised once for each of the {} chord{}: {} beats ({secs:.1} s) of sound. It is rendered a second time round so every tail has settled, then the sound just after its end is crossfaded into its first 150 ms. From then on it is only played back, round and round (now pass {pass}), fading into the next chord's loop during each chord's last bar. This chord's loop plays {}.{second}",
                     lp.timbre.name(),
                     h.chords.len(),
                     if h.chords.len() == 1 { "" } else { "s" },
@@ -867,16 +882,22 @@ fn instrument_text(ui: &Ui) -> (String, Vec<String>) {
                 ],
             )
         }
-        Some(Solo::Loop1) if !d.loops[0].on() => (
-            "This version has no atmosphere loop (Loop 1: Off).".to_string(),
+        Some(Solo::Loop1 | Solo::Loop2) if loop_index(solo_for(ui.lesson)).is_some_and(|k| !d.loops[k].on()) => (
+            format!("This loop is Off in this version (Loop {}: Off).", loop_index(solo_for(ui.lesson)).unwrap_or(0) + 1),
             vec!["Choose a loop timbre at setup to hear one here.".to_string()],
         ),
-        Some(Solo::Loop1) => {
-            let lp = &d.loops[0];
+        Some(Solo::Loop1 | Solo::Loop2) => {
+            let k = loop_index(solo_for(ui.lesson)).unwrap_or(0);
+            let lp = &d.loops[k];
             let loop_notes: Vec<String> = lp.notes[s.harmony.chord].iter().map(|n| note_name(*n)).collect();
+            let place = if k == 0 {
+                "in the mix it sits between the drone below and the glitches above, spread wide"
+            } else {
+                "it is shorter than loop 1 and sits nearer the centre, so the two interlock instead of piling up"
+            };
             (
                 format!(
-                    "{}: {} beats ({:.1} s) looped, now playing {} (pass {}). On its own it is a short, hypnotic cycle; in the mix it sits between the drone below and the glitches above.",
+                    "{}: {} beats ({:.1} s) looped, now playing {} (pass {}). On its own it is a short, hypnotic cycle; {place}.",
                     lp.timbre.name(),
                     lp.beats,
                     lp.len as f64 / SR,
@@ -911,6 +932,23 @@ fn instrument_text(ui: &Ui) -> (String, Vec<String>) {
     }
 }
 
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 {
+        a.max(1)
+    } else {
+        gcd(b, a % b)
+    }
+}
+
+/// Which atmosphere loop (0 or 1) a solo is, if it is one.
+fn loop_index(solo: Option<Solo>) -> Option<usize> {
+    match solo {
+        Some(Solo::Loop1) => Some(0),
+        Some(Solo::Loop2) => Some(1),
+        _ => None,
+    }
+}
+
 /// How to make each loop timbre yourself, as a recreate-it tip.
 fn timbre_tip(t: LoopTimbre) -> &'static str {
     match t {
@@ -935,38 +973,46 @@ fn space_tip(space: DrumSpace) -> &'static str {
 /// Lesson 9: the loop itself, going round, with its loop point and beats.
 fn sample_loops(ui: &Ui, buf: &mut Buffer, r: Rect) {
     let Some(s) = &ui.snap else { return };
-    let lp = &ui.desc.loops[0];
-    if r.width < 30 || r.height < 6 {
+    if r.width < 30 || r.height < 8 {
         return;
     }
-    if !lp.on() {
-        put(buf, r, 0, 1, "no atmosphere loop in this version (Loop 1: Off)", fg(DIM));
+    let on: Vec<usize> = (0..2).filter(|&k| ui.desc.loops[k].on()).collect();
+    if on.is_empty() {
+        put(buf, r, 0, 1, "no atmosphere loops in this version (both Off)", fg(DIM));
         return;
     }
     let pos = s.harmony;
-    let len = lp.len as u64;
-    let into = (s.clock % len) as f64 / SR;
-    put(
-        buf,
-        r,
-        0,
-        0,
-        &format!("loop 1 · {} · chord {}'s loop", lp.timbre.name(), pos.chord + 1),
-        fg(LOOPS).add_modifier(Modifier::BOLD),
-    );
     let fade = if pos.morph > 0.0 { format!(" · fading into chord {}: {:.0}%", pos.next + 1, pos.morph * 100.0) } else { String::new() };
-    put(
-        buf,
-        r,
-        0,
-        1,
-        &format!("pass {} · {:.1} of {:.1} s{fade}", s.clock / len + 1, into, lp.len as f64 / SR),
-        fg(TEXT),
-    );
-    let strip = Rect::new(r.x, r.y + 2, r.width, r.height.saturating_sub(3).min(10));
-    super::draw::loop_strip(ui, s, buf, strip, 0);
-    let y = 2 + strip.height;
-    put(buf, r, 0, y, "░ loop-point crossfade (150 ms)   ┴ beats   │ playhead: at the right edge it jumps back to the left, seamlessly", fg(DIM));
+    // Each loop: a title line, then its strip; both share the rows above the legend.
+    let each = (r.height.saturating_sub(2) / on.len() as u16).min(9);
+    let mut y = 0;
+    for &k in &on {
+        let lp = &ui.desc.loops[k];
+        let len = lp.len as u64;
+        let into = (s.clock % len) as f64 / SR;
+        let title = format!(
+            "loop {} · {} · {} beats · pass {} · {:.1} of {:.1} s · chord {}'s loop{fade}",
+            k + 1,
+            lp.timbre.name(),
+            lp.beats,
+            s.clock / len + 1,
+            into,
+            lp.len as f64 / SR,
+            pos.chord + 1
+        );
+        put(buf, r, 0, y, &title, fg(LOOPS).add_modifier(Modifier::BOLD));
+        let strip = Rect::new(r.x, r.y + y + 1, r.width, each.saturating_sub(1));
+        super::draw::loop_strip(ui, s, buf, strip, k);
+        y += each;
+    }
+    let mut legend = "░ loop-point crossfade (150 ms)   ┴ beats   │ playhead".to_string();
+    if on.len() == 2 {
+        let (a, b) = (ui.desc.loops[0].beats, ui.desc.loops[1].beats);
+        let meet = a * b / gcd(a, b);
+        let beat = s.clock / ui.desc.tempo.beat();
+        legend = format!("{legend}   ·   the two loops start together again in {} beats (every {meet})", meet - beat % meet);
+    }
+    put(buf, r, 0, y, &legend, fg(DIM));
 }
 
 /// What you hear (waveform + spectrum), the layer's share of the mix, and its mechanics.
@@ -982,6 +1028,7 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
         Some(Solo::Bass) => BASS,
         Some(Solo::Drums) => DRUMS,
         Some(Solo::Loop1) => LOOPS,
+        Some(Solo::Loop2) => mix(LOOPS, CHORD, 0.4),
         _ => REVERB,
     };
     let top = (r.height * 3 / 5).max(3);
@@ -1030,13 +1077,14 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
 
     // Its share of the mix: every layer's level, this one highlighted.
     let l = &ui.levels;
-    let layers: [(&str, f64, Option<Solo>, Rgb); 7] = [
+    let layers: [(&str, f64, Option<Solo>, Rgb); 8] = [
         ("drone", l.drone, Some(Solo::Drone), DRONE),
         ("glitch 1", l.glitch1, Some(Solo::Glitch1), GLITCH1),
         ("glitch 2", l.glitch2, Some(Solo::Glitch2), GLITCH2),
         ("bass", l.bass, Some(Solo::Bass), BASS),
         ("drums", l.drums, Some(Solo::Drums), DRUMS),
         ("loop 1", l.loop1, Some(Solo::Loop1), LOOPS),
+        ("loop 2", l.loop2, Some(Solo::Loop2), mix(LOOPS, CHORD, 0.4)),
         ("echo+reverb", l.reverb.max(l.echo), Some(Solo::Space), REVERB),
     ];
     let y0 = top + 1;
@@ -1110,9 +1158,12 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
             mech(buf, 3, &format!("last hit: {}", if hits.is_empty() { "-".to_string() } else { hits }), fg(TEXT));
         }
         Some(Solo::Drums) => mech(buf, 0, "no drums in this version (kit: Off)", fg(DIM)),
-        Some(Solo::Loop1) if !ui.desc.loops[0].on() => mech(buf, 0, "no loop in this version (Loop 1: Off)", fg(DIM)),
-        Some(Solo::Loop1) => {
-            let lp = &ui.desc.loops[0];
+        Some(Solo::Loop1 | Solo::Loop2) if loop_index(solo).is_some_and(|k| !ui.desc.loops[k].on()) => {
+            mech(buf, 0, "this loop is Off in this version", fg(DIM))
+        }
+        Some(Solo::Loop1 | Solo::Loop2) => {
+            let k = loop_index(solo).unwrap_or(0);
+            let lp = &ui.desc.loops[k];
             let pos = s.harmony;
             mech(buf, 0, &format!("{} · {} beats · pass {}", lp.timbre.name(), lp.beats, s.clock / lp.len as u64 + 1), fg(DIM));
             let fade = if pos.morph > 0.0 {
@@ -1122,7 +1173,7 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
             };
             mech(buf, 1, &fade, fg(TEXT));
             let strip = Rect::new(r.x + x0, r.y + y0 + 2, r.width.saturating_sub(x0), r.height.saturating_sub(y0 + 2).min(5));
-            super::draw::loop_strip(ui, s, buf, strip, 0);
+            super::draw::loop_strip(ui, s, buf, strip, k);
         }
         _ => {
             mech(buf, 0, "the room", fg(DIM));

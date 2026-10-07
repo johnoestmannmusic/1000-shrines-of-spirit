@@ -36,6 +36,8 @@ pub enum When {
     Loop(LoopTimbre),
     /// When there are no atmosphere loops.
     NoLoops,
+    /// When both atmosphere loops play.
+    BothLoops,
 }
 
 impl When {
@@ -46,6 +48,7 @@ impl When {
             When::Loops => any_loop,
             When::Loop(t) => loops.contains(&t),
             When::NoLoops => !any_loop,
+            When::BothLoops => loops.iter().all(|t| *t != LoopTimbre::Off),
             When::Always => true,
             When::Kit(k) => k == kit,
             When::Drums => drums,
@@ -66,9 +69,20 @@ pub struct Vars {
     pub chords: String,
     pub recipe: String,
     pub tempo: Tempo,
-    /// Loop 1's timbre and length (e.g. "8 beats, 5.7 s").
+    /// Each loop's timbre and length (e.g. "8 beats, 5.7 s"), and when the two line up again.
     pub loop1: String,
+    pub loop2: String,
     pub loop1_len: String,
+    pub loop2_len: String,
+    pub loops_meet: String,
+    /// The loops that play, e.g. "loop 1 Choir \"Aah\" and loop 2 Glass", and their lengths.
+    pub loops: String,
+    pub loops_len: String,
+}
+
+/// "8 beats, 5.7 s" for a loop layer.
+pub fn loop_len(l: &shrine0011::telemetry::LoopInfo, sample_rate: u32) -> String {
+    format!("{} beats, {:.1} s", l.beats, l.len as f64 / sample_rate as f64)
 }
 
 pub fn fill(text: &str, v: &Vars) -> String {
@@ -86,6 +100,11 @@ pub fn fill(text: &str, v: &Vars) -> String {
         .replace("{recipe}", &v.recipe)
         .replace("{loop1}", &v.loop1)
         .replace("{loop1_len}", &v.loop1_len)
+        .replace("{loop2}", &v.loop2)
+        .replace("{loop2_len}", &v.loop2_len)
+        .replace("{loops_meet}", &v.loops_meet)
+        .replace("{loops_len}", &v.loops_len)
+        .replace("{loops}", &v.loops)
         .replace("{bpm}", &t.bpm.to_string())
         .replace("{half}", &format!("{:.0}", t.half_bpm()))
         .replace("{exact}", &format!("{:.2}", t.exact_bpm()))
@@ -112,8 +131,10 @@ pub const EXPLAINERS: &[(Panel, When, &str)] = &[
     (General, When::Always, "Every rhythm here is a whole number of samples, so it can never drift. A drum sixteenth is rounded to a multiple of 12 samples ({drum16}) so glitch ratchets of 2, 3 and 4 divide it exactly. The tempo you actually hear is {exact} BPM."),
     (Cycles, When::Always, "The slow form cycles (41 to 307 s) are measured in seconds, not beats, so changing the BPM moves the rhythm but leaves the long breathing of the piece alone."),
     // Atmosphere loops.
-    (Loops, When::Loops, "Atmosphere loop 1 plays {loop1}: a few seconds of sound, synthesised once at start-up for each chord and then looped for ever, the way 90s sample CDs and game soundtracks built their pads."),
-    (Loops, When::Loops, "Loop 1 lasts {loop1_len}. It is a whole number of beats, so it stays locked to the tempo. Three to eight seconds was the sweet spot of 90s samplers: long enough to breathe, short enough to fit in a few megabytes of memory."),
+    (Loops, When::BothLoops, "Two loops play at once: {loop1} ({loop1_len}) and {loop2} ({loop2_len}). Their beat counts share no factor, so they drift in and out of step and only line up again after {loops_meet}, the same trick as the glitch layers' 7 and 11 steps."),
+    (Loops, When::BothLoops, "Loop 2 sits narrower in the stereo field than loop 1 and swells on different slow cycles, so the two never breathe in at the same moment."),
+    (Loops, When::Loops, "This version's atmosphere loops: {loops}. Each is a few seconds of sound, synthesised once at start-up for each chord and then looped for ever, the way 90s sample CDs and game soundtracks built their pads."),
+    (Loops, When::Loops, "Loop lengths here: {loops_len}. Each is a whole number of beats, so it stays locked to the tempo. Three to eight seconds was the sweet spot of 90s samplers: long enough to breathe, short enough to fit in a few megabytes of memory."),
     (Loops, When::Loops, "The loop point is hidden with a crossfade: the sound just after the loop's end is faded into its first 150 ms, so the jump back to the start never clicks. Hardware samplers like the Akai S1000 had a 'loop crossfade' for exactly this."),
     (Loops, When::Loops, "Everything that moves inside the loop (the vowel, the wave steps, the swells, the strikes) is timed to repeat exactly once per loop. Each pass sounds the same, while the music around it keeps changing."),
     (Loops, When::Loops, "Each chord gets its own loop. During a chord's last bar the next chord's loop fades in at the same position (equal power), so the pad changes harmony without ever restarting."),
@@ -124,7 +145,7 @@ pub const EXPLAINERS: &[(Panel, When, &str)] = &[
     (Loops, When::Loop(LoopTimbre::Fantasia), "Fantasia: a bright FM bell strum over a warm, detuned saw pad, after the Roland D-50's famous 1987 preset, which layered a sampled attack over a synth pad. The idea defined the late-80s and 90s 'new age' pad."),
     (Loops, When::Loop(LoopTimbre::WaveSeq), "Wave sequence: on every beat the loop moves to a new single-cycle waveform, crossfading over the last quarter-beat. Korg's Wavestation (1990) made whole evolving, rhythmic pads this way."),
     (Loops, When::Loop(LoopTimbre::Breath), "Breath: white noise through very narrow band-pass filters tuned to the chord, plus a wide 'air' band. Each note swells in turn, like a breathy pan-flute or wind pad."),
-    (General, When::NoLoops, "This version has no atmosphere loops (Loop 1: Off). Choose a timbre at setup to add a 90s sample-CD pad that follows the chords."),
+    (General, When::NoLoops, "This version has no atmosphere loops (both Off). Choose a timbre at setup to add a 90s sample-CD pad that follows the chords."),
     // Harmony.
     (Harmony, When::Always, "The scale you choose decides which notes exist; seed 1 decides the key and how the chords are stacked from those notes. This version is in {key} {scale}."),
     (Harmony, When::Always, "This version cycles through {chords} over 32 bars, each chord a dense stack of {scale} notes."),
@@ -281,7 +302,12 @@ mod tests {
             recipe: "R".into(),
             tempo: Tempo::new(120),
             loop1: "L".into(),
+            loop2: "M".into(),
             loop1_len: "8 beats".into(),
+            loop2_len: "5 beats".into(),
+            loops_meet: "40 beats".into(),
+            loops: "loop 1 L".into(),
+            loops_len: "loop 1 8 beats".into(),
         };
         for (_, _, text) in EXPLAINERS {
             assert!(!fill(text, &v).contains('{'), "{text}");

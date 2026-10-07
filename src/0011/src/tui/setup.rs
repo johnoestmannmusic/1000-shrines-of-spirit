@@ -129,6 +129,7 @@ enum Step {
     Kit,
     Space,
     Loop1,
+    Loop2,
     Seed(usize),
     File,
     Overwrite,
@@ -168,6 +169,7 @@ fn list_id(step: Step) -> Option<usize> {
         Step::Kit => Some(4),
         Step::Space => Some(5),
         Step::Loop1 => Some(6),
+        Step::Loop2 => Some(7),
         _ => None,
     }
 }
@@ -205,7 +207,7 @@ fn options(step: Step, bpm: u16) -> Vec<(String, String)> {
         Step::Pace => pace_choices(bpm),
         Step::Kit => shrine0011::kits::KITS.iter().map(|k| (k.name().to_string(), k.blurb().to_string())).collect(),
         Step::Space => shrine0011::kits::SPACES.iter().map(|k| (k.name().to_string(), k.blurb().to_string())).collect(),
-        Step::Loop1 => LOOP_TIMBRES.iter().map(|t| (t.name().to_string(), t.blurb().to_string())).collect(),
+        Step::Loop1 | Step::Loop2 => LOOP_TIMBRES.iter().map(|t| (t.name().to_string(), t.blurb().to_string())).collect(),
         _ => Vec::new(),
     }
 }
@@ -217,8 +219,8 @@ struct Setup {
     exit: bool,
     step: Step,
     back: Vec<Step>,
-    /// Selected entry of each list question (mode, scale, chords, pace, kit, space, loop 1).
-    sel: [usize; 7],
+    /// Selected entry of each list question (mode, scale, chords, pace, kit, space, loop 1, loop 2).
+    sel: [usize; 8],
     input: String,
     error: Option<String>,
     mode: Mode,
@@ -247,6 +249,7 @@ impl Setup {
                 set.kit.index(),
                 set.space.index(),
                 set.loops[0].index(),
+                set.loops[1].index(),
             ],
             input: String::new(),
             error: None,
@@ -268,7 +271,7 @@ impl Setup {
             kit: shrine0011::kits::KITS[self.sel[4]],
             space: shrine0011::kits::SPACES[self.sel[5]],
             bpm: self.bpm,
-            loops: [LOOP_TIMBRES[self.sel[6]], LoopTimbre::Off],
+            loops: [LOOP_TIMBRES[self.sel[6]], LOOP_TIMBRES[self.sel[7]]],
         }
     }
 
@@ -281,7 +284,7 @@ impl Setup {
         let l = &self.last;
         let d = [l.seeds.s1, l.seeds.s2, l.seeds.s3, l.seeds.s4, l.seeds.s5, l.seeds.s6];
         match step {
-            Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 => "1".into(),
+            Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 => "1".into(),
             Step::Label => l.label.clone(),
             Step::Bpm => l.settings.bpm.to_string(),
             Step::Seed(i) => d[i].to_string(),
@@ -322,7 +325,11 @@ impl Setup {
             Step::Space => ("Drum space".into(), "Where the drum hits sit between the speakers.".into()),
             Step::Loop1 => (
                 "Atmosphere loop 1".into(),
-                "A few seconds of evolving pad, looped like a 90s sample CD. It follows the chords; the next seed shapes it.".into(),
+                "A few seconds of evolving pad, looped like a 90s sample CD. It follows the chords; seed 6 shapes it.".into(),
+            ),
+            Step::Loop2 => (
+                "Atmosphere loop 2".into(),
+                "A shorter loop whose length shares no factor with loop 1's, so the two drift in and out of step.".into(),
             ),
             Step::Label => (
                 "Title shown in the player".into(),
@@ -364,9 +371,12 @@ impl Setup {
             Step::Space => Some(Step::Seed(4)),
             Step::Seed(i) if i < 4 => Some(Step::Seed(i + 1)),
             Step::Seed(4) => Some(Step::Loop1),
-            // No loop: nothing for seed 6 to shape.
-            Step::Loop1 if LOOP_TIMBRES[self.sel[6]] == LoopTimbre::Off => (!play_only).then_some(Step::File),
-            Step::Loop1 => Some(Step::Seed(5)),
+            Step::Loop1 => Some(Step::Loop2),
+            // No loops: nothing for seed 6 to shape.
+            Step::Loop2 if LOOP_TIMBRES[self.sel[6]] == LoopTimbre::Off && LOOP_TIMBRES[self.sel[7]] == LoopTimbre::Off => {
+                (!play_only).then_some(Step::File)
+            }
+            Step::Loop2 => Some(Step::Seed(5)),
             Step::Seed(_) => (!play_only).then_some(Step::File),
             Step::File => Some(if Path::new(&self.path).exists() { Step::Overwrite } else { Step::Length }),
             Step::Overwrite => Some(Step::Length),
@@ -387,7 +397,7 @@ impl Setup {
                 self.mode = parse_mode(&(self.sel[0] + 1).to_string()).unwrap_or(Mode::Play);
                 true
             }
-            Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 => true,
+            Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 => true,
             Step::Label => match parse_label(&answer) {
                 Some(l) => {
                     self.label = l;
@@ -488,6 +498,7 @@ impl Setup {
                 Step::Kit => ("Kit".into(), shrine0011::kits::KITS[self.sel[4]].name().to_string()),
                 Step::Space => ("Space".into(), shrine0011::kits::SPACES[self.sel[5]].name().to_string()),
                 Step::Loop1 => ("Loop 1".into(), LOOP_TIMBRES[self.sel[6]].name().to_string()),
+                Step::Loop2 => ("Loop 2".into(), LOOP_TIMBRES[self.sel[7]].name().to_string()),
                 Step::Label => ("Title".into(), self.label.clone()),
                 Step::Seed(i) => (format!("Seed {}", i + 1), self.seeds[*i].to_string()),
                 Step::File => ("File".into(), self.path.clone()),
@@ -637,7 +648,7 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
                 // Any new answer replaces the last round's message.
                 s.notice = None;
             }
-            (Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Overwrite, _) => {}
+            (Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Overwrite, _) => {}
             (_, KeyCode::Backspace) => {
                 s.input.pop();
             }

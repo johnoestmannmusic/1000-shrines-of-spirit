@@ -49,6 +49,8 @@ pub struct ModState {
     pub drums: f64,
     /// Atmosphere loop level, 0.7..1: a gentle drift on top of each loop.
     pub loop_level: f64,
+    /// Loop 2's level drift, on different cycles so the two never swell together.
+    pub loop2_level: f64,
 }
 
 pub struct Mods {
@@ -99,6 +101,7 @@ impl Mods {
             bass_swell: unit(0.7 + 0.3 * l307 * l233),
             drums: unit(0.5 + 0.34 * l233 + 0.25 * l97 * l41),
             loop_level: 0.85 + 0.15 * l113 * l61,
+            loop2_level: 0.85 + 0.15 * l97 * l233,
         }
     }
 }

@@ -58,8 +58,8 @@
   // ?kit=1-10 (1 Sub & clicks, 2 Micro blips, 3 Glass pings, 4 Data dust, 5 Pulse code, 6 Acoustic,
   //  7 FM metal, 8 Modal, 9 Digital crush, 10 Noise sculpture, 11 Off), ?space=centred|wide|tape (default wide),
   // ?bpm=70-180 (the drum tempo; ambient layers move at half, default 168),
-  // ?loop1=1-6 (atmosphere loop 1: 1 Choir, 2 Glass, 3 Fantasia, 4 Wave sequence, 5 Breath, 6 Off;
-  //  seed 6, ?s6=…, shapes it).
+  // ?loop1=1-6 and ?loop2=1-6 (atmosphere loops: 1 Choir, 2 Glass, 3 Fantasia, 4 Wave sequence,
+  //  5 Breath, 6 Off; defaults 1 and 2; seed 6, ?s6=…, shapes them).
   const DEFAULT_SEEDS = ["1000", "9", "1009", "2026", "168", "11"];
   const num = (k, d, lo, hi) => {
     const v = parseInt(params.get(k) ?? "", 10);
@@ -82,9 +82,9 @@
     space: { centred: 0, tape: 2 }[params.get("space")] ?? 1,
     bpm: num("bpm", 168, 70, 180),
     loop1: num("loop1", 1, 1, 6) - 1,
-    loop2: 5, // Off (not played yet)
+    loop2: num("loop2", 2, 1, 6) - 1,
   };
-  const custom = seeds.some((s, i) => s !== DEFAULT_SEEDS[i]) || settings.scale !== 0 || settings.chords !== 3 || settings.pace !== 0 || settings.kit !== 0 || settings.space !== 1 || settings.bpm !== 168 || settings.loop1 !== 0;
+  const custom = seeds.some((s, i) => s !== DEFAULT_SEEDS[i]) || settings.scale !== 0 || settings.chords !== 3 || settings.pace !== 0 || settings.kit !== 0 || settings.space !== 1 || settings.bpm !== 168 || settings.loop1 !== 0 || settings.loop2 !== 1;
   document.querySelector("#seeds").textContent =
     `seeds ${seeds.join(" · ")}${custom ? " (alternate rendition)" : ""}`;
 

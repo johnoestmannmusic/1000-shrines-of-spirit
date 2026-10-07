@@ -74,8 +74,13 @@ pub struct Levels {
     pub reverb: f64,
     pub drums: f64,
     pub loop1: f64,
+    pub loop2: f64,
     pub out_l: f64,
     pub out_r: f64,
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    if b == 0 { a.max(1) } else { gcd(b, a % b) }
 }
 
 /// "m:ss.s" for event timestamps.
@@ -136,7 +141,7 @@ pub struct Ui {
 impl Ui {
     fn new(desc: Description, device: String, device_rate: u32, recording: Option<(String, f64)>, label: String) -> Self {
         let (s1, s2) = (desc.layers[0].0, desc.layers[1].0);
-        let pipe = pipeline::Pipeline::new(desc.drums_on, desc.loops[0].on());
+        let pipe = pipeline::Pipeline::new(desc.drums_on, desc.loops.iter().any(|l| l.on()));
         let mods = shrine0011::modulate::Mods::new(desc.seeds.s1);
         let (kit, space, loops) = (desc.settings.kit, desc.settings.space, desc.settings.loops);
         let n = desc.harmony.chords.len();
@@ -148,9 +153,26 @@ impl Ui {
             recipe: shrine0011::cli::recipe(desc.seeds, desc.settings),
             tempo: desc.tempo,
             loop1: desc.loops[0].timbre.name().to_string(),
-            loop1_len: {
-                let lp = &desc.loops[0];
-                format!("{} beats, {:.1} s", lp.beats, lp.len as f64 / desc.sample_rate as f64)
+            loop2: desc.loops[1].timbre.name().to_string(),
+            loop1_len: explain::loop_len(&desc.loops[0], desc.sample_rate),
+            loop2_len: explain::loop_len(&desc.loops[1], desc.sample_rate),
+            loops: {
+                let on: Vec<String> = (0..2)
+                    .filter(|&k| desc.loops[k].on())
+                    .map(|k| format!("loop {} {}", k + 1, desc.loops[k].timbre.name()))
+                    .collect();
+                on.join(" and ")
+            },
+            loops_len: {
+                let on: Vec<String> = (0..2)
+                    .filter(|&k| desc.loops[k].on())
+                    .map(|k| format!("loop {} {}", k + 1, explain::loop_len(&desc.loops[k], desc.sample_rate)))
+                    .collect();
+                on.join("; ")
+            },
+            loops_meet: {
+                let (a, b) = (desc.loops[0].beats, desc.loops[1].beats);
+                format!("{} beats", a * b / gcd(a, b))
             },
         };
         Ui {
@@ -239,6 +261,7 @@ impl Ui {
         learn::solo_for(self.lesson).filter(|s| match s {
             shrine0011::Solo::Drums => self.desc.drums_on,
             shrine0011::Solo::Loop1 => self.desc.loops[0].on(),
+            shrine0011::Solo::Loop2 => self.desc.loops[1].on(),
             _ => true,
         })
     }
@@ -282,6 +305,7 @@ impl Ui {
             &mut l.reverb,
             &mut l.drums,
             &mut l.loop1,
+            &mut l.loop2,
             &mut l.out_l,
             &mut l.out_r,
         ] {
@@ -320,6 +344,7 @@ impl Ui {
         let l = &mut self.levels;
         l.drums = l.drums.max(m.drums);
         l.loop1 = l.loop1.max(m.loop1);
+        l.loop2 = l.loop2.max(m.loop2);
         l.drone = l.drone.max(m.drone);
         l.bass = l.bass.max(m.bass);
         l.glitch1 = l.glitch1.max(m.glitch1);
@@ -425,9 +450,11 @@ impl Ui {
         }
         // Each time an atmosphere loop goes round, a pulse leaves it in the pipeline.
         if let Some(prev) = &self.snap {
-            let len = self.desc.loops[0].len as u64;
-            if self.desc.loops[0].on() && prev.clock / len != s.clock / len {
-                self.pipe.loop_wrap(gfx::level_frac(self.levels.loop1, 40.0));
+            for (k, level) in [self.levels.loop1, self.levels.loop2].into_iter().enumerate() {
+                let len = self.desc.loops[k].len as u64;
+                if self.desc.loops[k].on() && prev.clock / len != s.clock / len {
+                    self.pipe.loop_wrap(gfx::level_frac(level, 40.0));
+                }
             }
         }
         if let Some(prev) = &self.snap {
@@ -693,6 +720,7 @@ pub fn print_frame(seeds: Seeds, settings: Settings, seconds: f64, width: u16, h
         (View::Learn, 13),
         (View::Learn, 14),
         (View::Learn, 15),
+        (View::Learn, 16),
     ] {
         ui.lesson = lesson;
         ui.update_spectrum();

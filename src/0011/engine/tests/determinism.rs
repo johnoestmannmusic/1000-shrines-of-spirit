@@ -31,9 +31,9 @@ fn render_with(seeds: Seeds, settings: Settings, frames: usize, block: usize) ->
 
 const SECONDS: usize = 30;
 
-/// The sound of the canonical track (0011: 0010 plus a choir loop). If this changes, the music changed:
+/// The sound of the canonical track (0011: 0010 plus choir and glass loops). If this changes, the music changed:
 /// only update it deliberately, as a new version of the piece.
-const GOLDEN_HASH: u64 = 0x58680a02ea30e52e;
+const GOLDEN_HASH: u64 = 0x9090317010f2e519;
 
 /// 0010's canonical sound: the default settings without atmosphere loops.
 /// Every 0010 recipe parses that way, so they must still sound exactly as they did.
@@ -140,7 +140,8 @@ fn each_setting_changes_the_output() {
         Settings { space: shrine0011::kits::DrumSpace::Centred, ..DEFAULT_SETTINGS },
         Settings { space: shrine0011::kits::DrumSpace::Tape, ..DEFAULT_SETTINGS },
         Settings { bpm: 160, ..DEFAULT_SETTINGS },
-        Settings { loops: [shrine0011::atmos::LoopTimbre::Glass, shrine0011::atmos::LoopTimbre::Off], ..DEFAULT_SETTINGS },
+        Settings { loops: [shrine0011::atmos::LoopTimbre::Glass, shrine0011::atmos::LoopTimbre::Glass], ..DEFAULT_SETTINGS },
+        Settings { loops: [shrine0011::atmos::LoopTimbre::Choir, shrine0011::atmos::LoopTimbre::Off], ..DEFAULT_SETTINGS },
         OLD_DEFAULTS,
     ];
     for v in variants {
@@ -206,7 +207,7 @@ fn solo_never_touches_the_mix() {
     let mut track = Track::new(DEFAULT_SEEDS, DEFAULT_SETTINGS);
     let mut mix = vec![0f32; frames * 2];
     let mut mon = vec![0f32; frames * 2];
-    let solos = [None, Some(Solo::Drone), Some(Solo::Glitch1), Some(Solo::Glitch2), Some(Solo::Bass), Some(Solo::Drums), Some(Solo::Loop1), Some(Solo::Space)];
+    let solos = [None, Some(Solo::Drone), Some(Solo::Glitch1), Some(Solo::Glitch2), Some(Solo::Bass), Some(Solo::Drums), Some(Solo::Loop1), Some(Solo::Loop2), Some(Solo::Space)];
     for (i, (m, o)) in mix.chunks_mut(8192).zip(mon.chunks_mut(8192)).enumerate() {
         track.set_solo(solos[(i / 20) % solos.len()]);
         track.render_split(m, o);

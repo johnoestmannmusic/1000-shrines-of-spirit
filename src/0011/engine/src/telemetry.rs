@@ -24,8 +24,9 @@ pub struct Meters {
     pub drums: f64,
     /// The drums' tape echo return.
     pub tape: f64,
-    /// Atmosphere loop 1.
+    /// Atmosphere loops 1 and 2.
     pub loop1: f64,
+    pub loop2: f64,
     pub out_l: f64,
     pub out_r: f64,
 }

@@ -102,7 +102,7 @@ pub const TRACK: &str = "0011";
 const OLDER_TRACK: &str = "0010";
 
 /// A recipe: everything needed to regenerate a version of the track,
-/// e.g. `0011-LYD-3H-168-SUB-W-CHO.OFF-1000.9.1009.2026.168.11` (track, scale,
+/// e.g. `0011-LYD-3H-168-SUB-W-CHO.GLS-1000.9.1009.2026.168.11` (track, scale,
 /// chord count + pace (H half-time / J jungle), drum BPM, drum kit, drum space
 /// (C/W/T), the two atmosphere loops' timbres, seeds 1-6).
 pub fn recipe(seeds: Seeds, settings: Settings) -> String {
@@ -168,7 +168,7 @@ pub fn parse_recipe(code: &str) -> Option<(Seeds, Settings)> {
         }
         None => DrumSpace::Centred,
     };
-    // The atmosphere loops ("CHO.OFF"); recipes from before them had none.
+    // The atmosphere loops ("CHO.GLS"); recipes from before them had none.
     let loops = match next.split_once('.').and_then(|(a, b)| Some([LoopTimbre::from_code(a)?, LoopTimbre::from_code(b)?])) {
         Some(l) => {
             next = parts.next()?;
@@ -289,8 +289,10 @@ pub fn ask_settings(input: &mut impl BufRead) -> Settings {
         println!("  {}) {:<16} {}", i + 1, t.name(), t.blurb());
     }
     let loop1 = ask_until(input, "Loop 1 timbre", "1", "Enter 1-6, a code or a timbre name (6 = Off).", parse_loop);
+    println!("Atmosphere loop 2: a shorter loop that drifts against loop 1 (same choices).");
+    let loop2 = ask_until(input, "Loop 2 timbre", "2", "Enter 1-6, a code or a timbre name (6 = Off).", parse_loop);
     println!();
-    Settings { scale, chords, pace, kit, space, bpm, loops: [loop1, LoopTimbre::Off] }
+    Settings { scale, chords, pace, kit, space, bpm, loops: [loop1, loop2] }
 }
 
 pub fn ask_seeds(input: &mut impl BufRead) -> Seeds {
@@ -409,7 +411,7 @@ pub fn wav_info(title: &str, software: &str, seeds: Seeds, settings: Settings) -
         software: software.to_string(),
         comment: format!(
             "GlitchAmbiToolkit track {TRACK}. Recipe {code}. {} BPM, {key} {}, {} chord(s) ({}), {pace} pace. \
-             Seeds {} {} {} {} {} {} (drums {drums}; loop 1 {}). Regenerate with: --recipe {code}",
+             Seeds {} {} {} {} {} {} (drums {drums}; loops {} and {}). Regenerate with: --recipe {code}",
             settings.bpm,
             settings.scale.name(),
             settings.chords,
@@ -421,6 +423,7 @@ pub fn wav_info(title: &str, software: &str, seeds: Seeds, settings: Settings) -
             seeds.s5,
             seeds.s6,
             settings.loops[0].name().to_lowercase(),
+            settings.loops[1].name().to_lowercase(),
         ),
     }
 }
@@ -579,7 +582,7 @@ mod tests {
 
     #[test]
     fn recipes_round_trip() {
-        assert_eq!(recipe(DEFAULT_SEEDS, DEFAULT_SETTINGS), "0011-LYD-3H-168-SUB-W-CHO.OFF-1000.9.1009.2026.168.11");
+        assert_eq!(recipe(DEFAULT_SEEDS, DEFAULT_SETTINGS), "0011-LYD-3H-168-SUB-W-CHO.GLS-1000.9.1009.2026.168.11");
         // 0010's recipes (no BPM, no loops) still read, at 168 BPM without loops.
         assert_eq!(
             parse_recipe("0010-LYD-3H-SUB-W-1000.9.1009.2026.168"),

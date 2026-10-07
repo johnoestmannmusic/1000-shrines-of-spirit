@@ -4,7 +4,7 @@
 //! Run with no arguments to be asked everything. For scripting:
 //!
 //!     shrine-0011 [--mode play|render|both] [--label TEXT] [--recipe R] [--scale S] [--chords 1-4] [--bpm 70-180] [--pace half|jungle] [--kit K] [--space centred|wide|tape]
-//!                 [--seconds N] [--out FILE] [--loop1 T] [--seed1 N] … [--seed6 N]
+//!                 [--seconds N] [--out FILE] [--loop1 T] [--loop2 T] [--seed1 N] … [--seed6 N]
 //!
 //! (`--mode` defaults to `play`.) The sound comes entirely from the
 //! dependency-free `engine/` crate; this app only adds the sound card and the
@@ -30,7 +30,7 @@ pub(crate) enum Mode {
 fn usage(msg: &str) -> ! {
     eprintln!("{msg}");
     eprintln!(
-        "usage: shrine-0011 [--mode play|render|both] [--label TEXT] [--recipe R] [--scale S] [--chords 1-4] [--bpm 70-180] [--pace half|jungle] [--kit K] [--space centred|wide|tape] [--seconds N] [--out FILE] [--loop1 T] [--seed1 N] … [--seed6 N]"
+        "usage: shrine-0011 [--mode play|render|both] [--label TEXT] [--recipe R] [--scale S] [--chords 1-4] [--bpm 70-180] [--pace half|jungle] [--kit K] [--space centred|wide|tape] [--seconds N] [--out FILE] [--loop1 T] [--loop2 T] [--seed1 N] … [--seed6 N]"
     );
     eprintln!("       shrine-0011            (asks for everything)");
     exit(2);
@@ -160,6 +160,7 @@ fn from_flags(args: Vec<String>) -> (Mode, Seeds, Settings, String, f64, String)
             "--seed5" => seeds.s5 = seed(),
             "--seed6" => seeds.s6 = seed(),
             "--loop1" => settings.loops[0] = cli::parse_loop(&value).unwrap_or_else(|| usage(&format!("bad loop timbre: {value}"))),
+            "--loop2" => settings.loops[1] = cli::parse_loop(&value).unwrap_or_else(|| usage(&format!("bad loop timbre: {value}"))),
             "--recipe" | "--code" => {
                 (seeds, settings) =
                     cli::parse_recipe(&value).unwrap_or_else(|| usage(&format!("bad recipe: {value}")))

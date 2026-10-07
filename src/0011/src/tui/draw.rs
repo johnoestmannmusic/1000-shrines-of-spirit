@@ -142,6 +142,7 @@ pub fn header(ui: &Ui, buf: &mut Buffer, r: Rect) {
             shrine0011::Solo::Bass => "bass",
             shrine0011::Solo::Drums => "drums",
             shrine0011::Solo::Loop1 => "loop 1",
+            shrine0011::Solo::Loop2 => "loop 2",
             shrine0011::Solo::Space => "echo+reverb",
         };
         spans.push(Span::styled(
@@ -269,21 +270,23 @@ pub fn panel(ui: &Ui, f: &mut Frame, p: Panel, area: Rect, explaining: bool) {
 // ---------------------------------------------------------------- 10 atmosphere loops
 
 fn loops(ui: &Ui, s: &Snapshot, buf: &mut Buffer, r: Rect) {
-    if r.height < 4 || r.width < 20 {
+    if r.height < 6 || r.width < 20 {
         return;
     }
-    let lp = &ui.desc.loops[0];
-    if !lp.on() {
-        put(buf, r, 1, 0, "loop 1: off", fg(DIM));
-        put(buf, r, 1, 1, "choose a timbre at setup", fg(FAINT));
-        return;
+    // Two stacked strips: loop 1 above, loop 2 below.
+    let half = r.height / 2;
+    for (k, (y, h)) in [(0, half), (half, r.height - half)].into_iter().enumerate() {
+        let lp = &ui.desc.loops[k];
+        if !lp.on() {
+            put(buf, r, 1, y, &format!("loop {}: off", k + 1), fg(DIM));
+            continue;
+        }
+        let secs = lp.len as f64 / ui.desc.sample_rate as f64;
+        let pass = s.clock / lp.len as u64 + 1;
+        let title = format!("LOOP {} · {} · {} beats · {secs:.1} s · pass {pass}", k + 1, lp.timbre.code(), lp.beats);
+        put(buf, r, 1, y, &title, fg(LOOPS).add_modifier(Modifier::BOLD));
+        loop_strip(ui, s, buf, Rect::new(r.x + 1, r.y + y + 1, r.width.saturating_sub(2), h.saturating_sub(1)), k);
     }
-    let secs = lp.len as f64 / ui.desc.sample_rate as f64;
-    put(buf, r, 1, 0, &format!("LOOP 1 · {}", lp.timbre.name()), fg(LOOPS).add_modifier(Modifier::BOLD));
-    let pass = s.clock / lp.len as u64 + 1;
-    let detail = format!("{} beats · {secs:.1} s · pass {pass}", lp.beats);
-    put(buf, r, 1, 1, &detail, fg(DIM));
-    loop_strip(ui, s, buf, Rect::new(r.x + 1, r.y + 2, r.width.saturating_sub(2), r.height - 2), 0);
 }
 
 /// One atmosphere loop's waveform (this chord's, blending into the next during

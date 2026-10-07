@@ -95,7 +95,7 @@ pub const DEFAULT_SETTINGS: Settings =
         kit: kits::Kit::SubClicks,
         space: kits::DrumSpace::Wide,
         bpm: tempo::DEFAULT_BPM,
-        loops: [LoopTimbre::Choir, LoopTimbre::Off],
+        loops: [LoopTimbre::Choir, LoopTimbre::Glass],
     };
 
 /// 0010's sound: the default settings with no atmosphere loops.
@@ -122,8 +122,14 @@ const ECHO_SEND: f64 = 0.5;
 const ECHO_FEEDBACK: f64 = 0.55;
 const LOOP1_DRY: f64 = 0.8;
 const LOOP1_SEND: f64 = 0.45;
-/// Loop 1 aims for about this many seconds (in whole beats, 3-8 s).
+const LOOP2_DRY: f64 = 0.7;
+const LOOP2_SEND: f64 = 0.5;
+/// Loop 1 aims for about this many seconds, loop 2 for about this many (in
+/// whole beats, 3-8 s, with no factor in common so the two drift apart).
 const LOOP1_SECONDS: u64 = 6;
+const LOOP2_SECONDS: u64 = 4;
+/// Loop 2's stereo width (side level): narrower, nearer the centre than loop 1.
+const LOOP2_WIDTH: f64 = 0.6;
 const DRUMS_DRY: f64 = 0.85;
 const DRUMS_SEND: f64 = 0.1;
 /// The drums' tape echo (Wide + tape echo only): send of the snare-type hits,
@@ -197,6 +203,8 @@ pub enum Solo {
     Drums,
     /// Atmosphere loop 1.
     Loop1,
+    /// Atmosphere loop 2.
+    Loop2,
     /// The echo and reverb returns only: the room without the instruments.
     Space,
 }
@@ -275,7 +283,6 @@ pub struct Track {
     glitch1: Layer,
     glitch2: Layer,
     loop1: AtmosLoop,
-    /// Loop 2 is not played yet: always Off (described, never heard).
     loop2: AtmosLoop,
     echo: PingPong,
     bass: Bass,
@@ -296,8 +303,7 @@ impl Track {
         let mut rest = Rng::stream(seeds.s1, 0xD7);
         let key = harmony::key_for(seeds.s1);
         let tempo = Tempo::new(settings.bpm);
-        // Loop 2 is not played yet, so it is always Off.
-        let settings = Settings { bpm: tempo.bpm, loops: [settings.loops[0], LoopTimbre::Off], ..settings };
+        let settings = Settings { bpm: tempo.bpm, ..settings };
         let chords = settings.chords.clamp(1, 4) as usize;
         let harmony = Harmony::new(settings.scale, chords, settings.pace, tempo.beat(), key, &mut first, &mut rest);
         let echo_delay = (ECHO_SIXTEENTHS * tempo.glitch16()) as usize;
@@ -318,7 +324,16 @@ impl Track {
             glitch1: Layer::new(layer1(&harmony, tempo), seeds.s2, 0x61),
             glitch2: Layer::new(layer2(&harmony, tempo), seeds.s3, 0x62),
             loop1: AtmosLoop::new(settings.loops[0], seeds.s6, 0xA1, &harmony, tempo.beat(), LOOP1_SECONDS, None),
-            loop2: AtmosLoop::new(LoopTimbre::Off, seeds.s6, 0xA2, &harmony, tempo.beat(), 4, None),
+            loop2: AtmosLoop::new(
+                settings.loops[1],
+                seeds.s6,
+                0xA2,
+                &harmony,
+                tempo.beat(),
+                LOOP2_SECONDS,
+                // Loop 1's length, whether or not it plays, so loop 2's never depends on it being on.
+                Some(atmos::loop_beats(tempo.beat(), LOOP1_SECONDS, None)),
+            ),
             drone: Drone::new(seeds.s1, harmony, first, rest),
             drone_filter: [Svf::new(1000.0, 0.7, sr), Svf::new(1000.0, 0.7, sr)],
             history: History::new(),
@@ -427,6 +442,14 @@ impl Track {
         } else {
             (0.0, 0.0)
         };
+        let (a2l, a2r) = if self.loop2.is_on() {
+            let (l, r) = self.loop2.next(clock, &self.harmony);
+            let g = duck * m.loop2_level;
+            let (mid, side) = (0.5 * (l + r), 0.5 * (l - r) * LOOP2_WIDTH);
+            ((mid + side) * g, (mid - side) * g)
+        } else {
+            (0.0, 0.0)
+        };
 
         // 4: bass, gliding to each chord's root during the morph bar.
         if clock % 32 == 0 {
@@ -438,17 +461,17 @@ impl Track {
 
         // Shared long reverb.
         let (rl, rr) = self.reverb.process(
-            dl * DRONE_SEND + a1l * LOOP1_SEND + b * BASS_SEND + g1.0 * GLITCH1_SEND + g2.0 * GLITCH2_SEND + el * ECHO_SEND + d * DRUMS_SEND
+            dl * DRONE_SEND + a1l * LOOP1_SEND + a2l * LOOP2_SEND + b * BASS_SEND + g1.0 * GLITCH1_SEND + g2.0 * GLITCH2_SEND + el * ECHO_SEND + d * DRUMS_SEND
                 + tl * TAPE_REVERB,
-            dr * DRONE_SEND + a1r * LOOP1_SEND + b * BASS_SEND + g1.1 * GLITCH1_SEND + g2.1 * GLITCH2_SEND + er * ECHO_SEND + d_r * DRUMS_SEND
+            dr * DRONE_SEND + a1r * LOOP1_SEND + a2r * LOOP2_SEND + b * BASS_SEND + g1.1 * GLITCH1_SEND + g2.1 * GLITCH2_SEND + er * ECHO_SEND + d_r * DRUMS_SEND
                 + tr * TAPE_REVERB,
         );
 
-        let mut l = dl * DRONE_DRY + a1l * LOOP1_DRY + b * BASS_DRY + (g1.0 * GLITCH1_DRY + g2.0 * GLITCH2_DRY + el * ECHO_DRY) * others
+        let mut l = dl * DRONE_DRY + a1l * LOOP1_DRY + a2l * LOOP2_DRY + b * BASS_DRY + (g1.0 * GLITCH1_DRY + g2.0 * GLITCH2_DRY + el * ECHO_DRY) * others
             + d * DRUMS_DRY
             + rl * REVERB_WET
             + tl * TAPE_WET;
-        let mut r = dr * DRONE_DRY + a1r * LOOP1_DRY + b * BASS_DRY + (g1.1 * GLITCH1_DRY + g2.1 * GLITCH2_DRY + er * ECHO_DRY) * others
+        let mut r = dr * DRONE_DRY + a1r * LOOP1_DRY + a2r * LOOP2_DRY + b * BASS_DRY + (g1.1 * GLITCH1_DRY + g2.1 * GLITCH2_DRY + er * ECHO_DRY) * others
             + d_r * DRUMS_DRY
             + rr * REVERB_WET
             + tr * TAPE_WET;
@@ -474,6 +497,7 @@ impl Track {
         mt.reverb = mt.reverb.max(rl.abs()).max(rr.abs());
         mt.drums = mt.drums.max(d_abs);
         mt.loop1 = mt.loop1.max(a1l.abs()).max(a1r.abs());
+        mt.loop2 = mt.loop2.max(a2l.abs()).max(a2r.abs());
         mt.tape = mt.tape.max(tl.abs()).max(tr.abs());
         mt.out_l = mt.out_l.max(l.abs());
         mt.out_r = mt.out_r.max(r.abs());
@@ -509,6 +533,7 @@ impl Track {
                         Solo::Drone => ((dl * DRONE_DRY, dr * DRONE_DRY), (0.0, 0.0), (dl * DRONE_SEND, dr * DRONE_SEND)),
                         Solo::Bass => ((b * BASS_DRY, b * BASS_DRY), (0.0, 0.0), (b * BASS_SEND, b * BASS_SEND)),
                         Solo::Loop1 => ((a1l * LOOP1_DRY, a1r * LOOP1_DRY), (0.0, 0.0), (a1l * LOOP1_SEND, a1r * LOOP1_SEND)),
+                        Solo::Loop2 => ((a2l * LOOP2_DRY, a2r * LOOP2_DRY), (0.0, 0.0), (a2l * LOOP2_SEND, a2r * LOOP2_SEND)),
                         Solo::Drums => (
                             (d * DRUMS_DRY + tl * TAPE_WET, d_r * DRUMS_DRY + tr * TAPE_WET),
                             (0.0, 0.0),

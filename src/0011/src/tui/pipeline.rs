@@ -227,7 +227,7 @@ impl Pipeline {
         self.loop_timer -= dt;
         if self.loop_timer <= 0.0 {
             self.loop_timer = 0.45;
-            let l = level_frac(ui_levels.loop1, 40.0);
+            let l = level_frac(ui_levels.loop1.max(ui_levels.loop2), 40.0);
             if self.loops_on && l > 0.05 {
                 self.spawn(Loop1, Out, LOOPS, '•', 0.3 + 0.5 * l, false);
             }
@@ -493,30 +493,35 @@ fn box_text(ui: &Ui, n: Node) -> BoxText {
         },
         Seed6 => BoxText {
             title: "seed 6".into(),
-            lines: [d.seeds.s6.to_string(), if d.loops[0].on() { String::new() } else { "loops off".into() }],
+            lines: [d.seeds.s6.to_string(), if d.loops.iter().any(|l| l.on()) { String::new() } else { "loops off".into() }],
             color: TEXT,
             level: 0.3,
             panel: Panel::Loops,
             tag: "",
         },
-        Loop1 if !d.loops[0].on() => BoxText {
-            title: "LOOP 1".into(),
-            lines: ["off (timbre: Off)".into(), String::new()],
+        Loop1 if !d.loops.iter().any(|l| l.on()) => BoxText {
+            title: "LOOPS 1 + 2".into(),
+            lines: ["off (both Off)".into(), String::new()],
             color: FAINT,
             level: 0.0,
             panel: Panel::Loops,
             tag: "10",
         },
         Loop1 => {
-            let lp = &d.loops[0];
+            // Both loop layers share one box: a line each.
+            let line = |k: usize| {
+                let lp = &d.loops[k];
+                if !lp.on() {
+                    return format!("{} off", k + 1);
+                }
+                let pass = s.map_or(String::new(), |s| format!(" · pass {}", s.clock / lp.len as u64 + 1));
+                format!("{} {} {}b{pass}", k + 1, lp.timbre.code(), lp.beats)
+            };
             BoxText {
-                title: format!("LOOP 1 · {}", lp.timbre.code()),
-                lines: [
-                    format!("{} beats · {:.1} s", lp.beats, lp.len as f64 / d.sample_rate as f64),
-                    s.map_or(String::new(), |s| format!("pass {}", s.clock / lp.len as u64 + 1)),
-                ],
+                title: "LOOPS 1 + 2".into(),
+                lines: [line(0), line(1)],
                 color: LOOPS,
-                level: lv(l.loop1),
+                level: lv(l.loop1.max(l.loop2)),
                 panel: Panel::Loops,
                 tag: "10",
             }
