@@ -127,16 +127,33 @@ pub fn recipe(seeds: Seeds, settings: Settings) -> String {
     } else {
         String::new()
     };
+    let loops = if !settings.loops[2].is_on() && !settings.loops[3].is_on() {
+        // The common case: only two layers, so the recipe is exactly what it always was.
+        format!("{}.{}", settings.loops[0].token(), settings.loops[1].token())
+    } else {
+        format!(
+            "{}.{}.{}.{}",
+            settings.loops[0].token(),
+            settings.loops[1].token(),
+            settings.loops[2].token(),
+            settings.loops[3].token()
+        )
+    };
+    let arcs = if settings.loop_arcs.iter().any(|a| a.is_on()) {
+        let parts: Vec<String> = settings.loop_arcs.iter().flat_map(|a| [a.cycle_s.to_string(), a.hold_s.to_string()]).collect();
+        format!("-A{}", parts.join("."))
+    } else {
+        String::new()
+    };
+    let tone = if settings.drone_tone > 0 { format!("-G{}", settings.drone_tone) } else { String::new() };
     format!(
-        "{TRACK}-{}-{}{}-{}-{}-{}-{}.{}{drone}{key}{transpose}-{}.{}.{}.{}.{}.{}",
+        "{TRACK}-{}-{}{}-{}-{}-{}-{loops}{drone}{key}{transpose}{arcs}{tone}-{}.{}.{}.{}.{}.{}",
         settings.scale.code(),
         settings.chords,
         if settings.pace == Pace::Jungle { "J" } else { "H" },
         settings.bpm,
         settings.kit.code(),
         settings.space.code(),
-        settings.loops[0].token(),
-        settings.loops[1].token(),
         seeds.s1,
         seeds.s2,
         seeds.s3,
@@ -189,8 +206,9 @@ pub fn parse_recipe(code: &str) -> Option<(Seeds, Settings)> {
         }
         None => DrumSpace::Centred,
     };
-    // The atmosphere loops ("CHO.GLS"); recipes from before them had none.
-    let loops = match next.split_once('.').and_then(|(a, b)| Some([LoopDesign::from_token(a)?, LoopDesign::from_token(b)?])) {
+    // The atmosphere layers ("CHO.GLS.OFF.OFF"); old recipes have two and the
+    // last two layers default to Off.
+    let loops = match parse_loops(next) {
         Some(l) => {
             next = parts.next()?;
             l
@@ -225,6 +243,22 @@ pub fn parse_recipe(code: &str) -> Option<(Seeds, Settings)> {
     } else {
         0
     };
+    // The four atmosphere arcs ("A0.0.0.0.0.0.0.0"); omitted when all always-on.
+    let loop_arcs = if next.starts_with('A') || next.starts_with('a') {
+        let a = parse_loop_arcs(next)?;
+        next = parts.next()?;
+        a
+    } else {
+        [crate::DroneArc::ALWAYS_ON; 4]
+    };
+    // The end-of-chain drone character low-pass ("G900"); omitted when off.
+    let drone_tone = if next.starts_with('G') || next.starts_with('g') {
+        let g: u16 = next[1..].parse().ok()?;
+        next = parts.next()?;
+        g
+    } else {
+        0
+    };
     // Seeds 1-6; recipes from before seed 6 have five.
     let seeds: Vec<u64> = next.split('.').map(|s| s.parse().ok()).collect::<Option<_>>()?;
     if parts.next().is_some() || !(5..=6).contains(&seeds.len()) {
@@ -234,7 +268,34 @@ pub fn parse_recipe(code: &str) -> Option<(Seeds, Settings)> {
     let seeds = Seeds { s1: seeds[0], s2: seeds[1], s3: seeds[2], s4: seeds[3], s5: seeds[4], s6 };
     // Older recipes: seed 5 picked the kit, and 0 meant no drums.
     let kit = kit.unwrap_or_else(|| if seeds.s5 == 0 { Kit::Off } else { crate::kits::legacy_kit_for(seeds.s5) });
-    Some((seeds, Settings { scale, chords, pace, kit, space, bpm, loops, drone, key, loop_transpose }))
+    Some((seeds, Settings { scale, chords, pace, kit, space, bpm, loops, loop_arcs, drone, key, loop_transpose, drone_tone }))
+}
+
+/// The atmosphere tokens: two (old) or four; the missing layers are Off.
+fn parse_loops(s: &str) -> Option<[LoopDesign; 4]> {
+    let toks: Vec<&str> = s.split('.').collect();
+    if toks.len() != 2 && toks.len() != 4 {
+        return None;
+    }
+    let mut out = crate::NO_LOOPS;
+    for (i, t) in toks.iter().enumerate() {
+        out[i] = LoopDesign::from_token(t)?;
+    }
+    Some(out)
+}
+
+/// `A` followed by eight numbers (cycle,hold per layer).
+fn parse_loop_arcs(s: &str) -> Option<[crate::DroneArc; 4]> {
+    let body = s.strip_prefix('A').or_else(|| s.strip_prefix('a'))?;
+    let n: Vec<u16> = body.split('.').map(|x| x.parse().ok()).collect::<Option<_>>()?;
+    if n.len() != 8 {
+        return None;
+    }
+    let mut out = [crate::DroneArc::ALWAYS_ON; 4];
+    for i in 0..4 {
+        out[i] = crate::DroneArc { cycle_s: n[2 * i], hold_s: n[2 * i + 1] };
+    }
+    Some(out)
 }
 
 /// An atmosphere transpose in semitones, -12 to 12.
@@ -331,7 +392,7 @@ pub fn parse_loop_design(s: &str) -> Option<LoopDesign> {
         "wood" => return Some(LoopDesign::Events(crate::texture::Grid::wood())),
         _ => {}
     }
-    if t.len() == 16 && t.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if (t.len() == 32 || t.len() == 16) && t.bytes().all(|b| b.is_ascii_hexdigit()) {
         return LoopDesign::from_token(&format!("E{t}"));
     }
     match LoopDesign::from_token(t) {
@@ -402,15 +463,27 @@ pub fn ask_settings(input: &mut impl BufRead) -> Settings {
         }
         ask_until(input, "Drum space", "2", "Enter 1, 2 or 3.", parse_space)
     };
-    println!("Atmosphere loop 1 (90s sample-CD pad loops; seed 6 shapes it):");
+    println!("Atmosphere layers (90s sample-CD pads and physical-texture event grids; seed 6 shapes them):");
     println!("   0) {:<16} {}", LoopTimbre::Off.name(), LoopTimbre::Off.blurb());
     for (i, t) in LOOP_TIMBRES.iter().filter(|t| **t != LoopTimbre::Off).enumerate() {
         println!("  {:>2}) {:<16} {}", i + 1, t.name(), t.blurb());
     }
     println!("   e) {:<16} fire, water, stones, wood: grains on an editable grid", "Event grid");
-    let loop1 = ask_until(input, "Loop 1 design", "1", "Enter 0 (none), a number, a timbre name, or fire/water/stones/wood.", parse_loop_design);
-    println!("Atmosphere loop 2: a shorter loop that drifts against loop 1 (same choices).");
-    let loop2 = ask_until(input, "Loop 2 design", "2", "Enter 0 (none), a number, a timbre name, or fire/water/stones/wood.", parse_loop_design);
+    let mut loops = [LoopDesign::OFF; 4];
+    for i in 0..4 {
+        let default = ["1", "2", "0", "0"][i];
+        loops[i] = ask_until(input, &format!("Layer {} design", i + 1), default, "Enter 0 (none), a number, a timbre name, or fire/water/stones/wood.", parse_loop_design);
+    }
+    let mut loop_arcs = [crate::DroneArc::ALWAYS_ON; 4];
+    for i in 0..4 {
+        let c = ask_until(input, &format!("Layer {} cycle seconds (0 = always on)", i + 1), "0", "Enter 0, or a whole number of seconds up to 3600.", parse_drone_cycle);
+        let h = if c == 0 {
+            0
+        } else {
+            ask_until(input, &format!("Layer {} seconds up per cycle", i + 1), &(c / 3).max(1).to_string(), "Enter a whole number of seconds from 1 to the cycle length.", |s: &str| parse_drone_hold(s, c))
+        };
+        loop_arcs[i] = crate::DroneArc { cycle_s: c, hold_s: h };
+    }
     println!();
     println!("Drone arc: the frozen drone can swell in and out on a slow repeat, for soundscape-style arrangements.");
     let cycle = ask_until(
@@ -446,7 +519,13 @@ pub fn ask_settings(input: &mut impl BufRead) -> Settings {
         "Enter a whole number from -12 to 12 (0 = the loops match the chord).",
         parse_transpose,
     );
-    Settings { scale, chords, pace, kit, space, bpm, loops: [loop1, loop2], drone: crate::DroneArc { cycle_s: cycle, hold_s: hold }, key, loop_transpose }
+    let drone_tone = ask_until(input, "Drone character low-pass Hz (0 = off)", "0", "Enter 0 (off), or 100 to 16000.", parse_drone_tone);
+    Settings { scale, chords, pace, kit, space, bpm, loops, loop_arcs, drone: crate::DroneArc { cycle_s: cycle, hold_s: hold }, key, loop_transpose, drone_tone }
+}
+
+/// The drone character low-pass in Hz: 0 = off, else 100..16000.
+pub fn parse_drone_tone(s: &str) -> Option<u16> {
+    s.trim().parse::<u16>().ok().filter(|n| *n == 0 || (100..=16_000).contains(n))
 }
 
 /// Drone-arc cycle in seconds: 0 = always on, up to 3600.
@@ -782,12 +861,21 @@ mod tests {
                         LoopDesign::Sustained(LOOP_TIMBRES[i % LOOP_TIMBRES.len()])
                     },
                     LoopDesign::Sustained(LOOP_TIMBRES[(i + 2) % LOOP_TIMBRES.len()]),
+                    if i % 3 == 0 { LoopDesign::Sustained(LoopTimbre::Choir) } else { LoopDesign::OFF },
+                    LoopDesign::OFF,
+                ],
+                loop_arcs: [
+                    crate::DroneArc::ALWAYS_ON,
+                    if i % 2 == 0 { crate::DroneArc { cycle_s: 120, hold_s: 40 } } else { crate::DroneArc::ALWAYS_ON },
+                    crate::DroneArc::ALWAYS_ON,
+                    crate::DroneArc::ALWAYS_ON,
                 ],
                 drone: if i % 3 == 0 {
                     crate::DroneArc::ALWAYS_ON
                 } else {
                     crate::DroneArc { cycle_s: 60 + i as u16, hold_s: 20 }
                 },
+                drone_tone: if i % 6 == 0 { 0 } else { 900 + i as u16 },
                 key: if i % 5 == 0 { crate::KeyChoice::Seed } else { crate::KeyChoice::Note((i % 12) as u8) },
                 loop_transpose: (i as i8 % 25) - 12,
             };
@@ -815,7 +903,7 @@ mod tests {
     fn event_grids_round_trip() {
         let fire = crate::texture::Grid::fire();
         let settings = Settings {
-            loops: [LoopDesign::Events(fire), LoopDesign::Sustained(LoopTimbre::Glass)],
+            loops: [LoopDesign::Events(fire), LoopDesign::Sustained(LoopTimbre::Glass), LoopDesign::OFF, LoopDesign::OFF],
             ..DEFAULT_SETTINGS
         };
         let code = recipe(DEFAULT_SEEDS, settings);

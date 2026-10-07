@@ -72,7 +72,7 @@ fn shuffled(n: usize, seed: &mut u64) -> Vec<usize> {
 }
 
 impl Ticker {
-    pub fn new(kit: Kit, space: DrumSpace, loops: [LoopDesign; 2], drone: DroneArc, vars: Vars) -> Self {
+    pub fn new(kit: Kit, space: DrumSpace, loops: [LoopDesign; 4], drone: DroneArc, vars: Vars) -> Self {
         let pool: Vec<usize> = EXPLAINERS
             .iter()
             .enumerate()

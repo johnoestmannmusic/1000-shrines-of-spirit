@@ -129,7 +129,7 @@ fn new_features_golden_hash() {
     use shrine0011::texture::Grid;
     use shrine0011::{KeyChoice, LoopDesign};
     let settings = Settings {
-        loops: [LoopDesign::Events(Grid::fire()), LoopDesign::Events(Grid::water())],
+        loops: [LoopDesign::Events(Grid::fire()), LoopDesign::Events(Grid::water()), LoopDesign::OFF, LoopDesign::OFF],
         key: KeyChoice::Note(5),
         loop_transpose: -3,
         ..DEFAULT_SETTINGS
@@ -137,6 +137,36 @@ fn new_features_golden_hash() {
     let h = hash(&render_with(DEFAULT_SEEDS, settings, SECONDS * SAMPLE_RATE as usize, 4096));
     println!("new-features golden hash: {h:#018x}");
     assert_eq!(h, 0xdfd6594597f52145, "the Phase 2 features changed (got {h:#018x})");
+}
+
+/// The Atmosphere Phase 3 features: four layers, 8-row event grids, per-layer
+/// arcs and an end-of-chain drone character filter.
+#[test]
+fn phase3_golden_hash() {
+    use shrine0011::atmos::LoopTimbre;
+    use shrine0011::texture::Grid;
+    use shrine0011::{DroneArc, KeyChoice, LoopDesign};
+    let settings = Settings {
+        loops: [
+            LoopDesign::Events(Grid::fire()),
+            LoopDesign::Events(Grid::stones()),
+            LoopDesign::Sustained(LoopTimbre::Whisper),
+            LoopDesign::Sustained(LoopTimbre::Aurora),
+        ],
+        loop_arcs: [
+            DroneArc::ALWAYS_ON,
+            DroneArc { cycle_s: 100, hold_s: 30 },
+            DroneArc::ALWAYS_ON,
+            DroneArc { cycle_s: 60, hold_s: 20 },
+        ],
+        drone_tone: 1500,
+        key: KeyChoice::Note(3),
+        loop_transpose: 2,
+        ..DEFAULT_SETTINGS
+    };
+    let h = hash(&render_with(DEFAULT_SEEDS, settings, SECONDS * SAMPLE_RATE as usize, 4096));
+    println!("phase3 golden hash: {h:#018x}");
+    assert_eq!(h, 0x86b87f90aea63e68, "Atmosphere Phase 3 changed (got {h:#018x})");
 }
 
 /// Any tempo is as deterministic as the default one.
@@ -192,9 +222,12 @@ fn each_setting_changes_the_output() {
         Settings { space: shrine0011::kits::DrumSpace::Centred, ..DEFAULT_SETTINGS },
         Settings { space: shrine0011::kits::DrumSpace::Tape, ..DEFAULT_SETTINGS },
         Settings { bpm: 160, ..DEFAULT_SETTINGS },
-        Settings { loops: [shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Glass), shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Glass)], ..DEFAULT_SETTINGS },
-        Settings { loops: [shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Choir), shrine0011::LoopDesign::OFF], ..DEFAULT_SETTINGS },
-        Settings { loops: [shrine0011::LoopDesign::Events(shrine0011::texture::Grid::stones()), shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Choir)], ..DEFAULT_SETTINGS },
+        Settings { loops: [shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Glass), shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Glass), shrine0011::LoopDesign::OFF, shrine0011::LoopDesign::OFF], ..DEFAULT_SETTINGS },
+        Settings { loops: [shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Choir), shrine0011::LoopDesign::OFF, shrine0011::LoopDesign::OFF, shrine0011::LoopDesign::OFF], ..DEFAULT_SETTINGS },
+        Settings { loops: [shrine0011::LoopDesign::Events(shrine0011::texture::Grid::stones()), shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Choir), shrine0011::LoopDesign::OFF, shrine0011::LoopDesign::OFF], ..DEFAULT_SETTINGS },
+        Settings { loops: [shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Choir), shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Glass), shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Fantasia), shrine0011::LoopDesign::Sustained(shrine0011::atmos::LoopTimbre::Breath)], ..DEFAULT_SETTINGS },
+        Settings { loop_arcs: [shrine0011::DroneArc::ALWAYS_ON, shrine0011::DroneArc { cycle_s: 120, hold_s: 40 }, shrine0011::DroneArc::ALWAYS_ON, shrine0011::DroneArc::ALWAYS_ON], ..DEFAULT_SETTINGS },
+        Settings { drone_tone: 1200, ..DEFAULT_SETTINGS },
         Settings { drone: shrine0011::DroneArc { cycle_s: 120, hold_s: 40 }, ..DEFAULT_SETTINGS },
         Settings { key: shrine0011::KeyChoice::Note(0), ..DEFAULT_SETTINGS },
         Settings { loop_transpose: 5, ..DEFAULT_SETTINGS },

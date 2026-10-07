@@ -58,14 +58,10 @@
   // ?kit=1-10 (1 Sub & clicks, 2 Micro blips, 3 Glass pings, 4 Data dust, 5 Pulse code, 6 Acoustic,
   //  7 FM metal, 8 Modal, 9 Digital crush, 10 Noise sculpture, 11 Off), ?space=centred|wide|tape (default wide),
   // ?bpm=70-180 (the drum tempo; ambient layers move at half, default 168),
-  // ?loop1 / ?loop2: 0 or none = off; 1..12 = sustained timbres (1 Choir, 2 Glass, 3 Fantasia,
-  //  4 Wave sequence, 5 Breath, 6 Whisper, 7 Wind, 8 Shimmer, 9 Stream, 10 Aurora, 11 Haze, 12 Off);
-  //  or fire / water / stones / wood for an event grid; or E + 16 hex digits for a custom grid.
-  //  defaults 1 and 2; seed 6, ?s6=…, shapes the sustained ones).
-  // ?dronecycle=0-3600 and ?dronehold=0-3600 (seconds): the drone swells in for dronehold seconds
-  //  of every dronecycle, then leaves; 0 = always on (default).
-  // ?key=seed|C|C#|D|…|B: fix the root note, or let seed 1 pick it (default).
-  // ?transpose=-12..12: shift the atmosphere loops relative to the chord (0 = match, default).
+  // ?loop1..?loop4: 0 or none = off; 1..12 = sustained timbres; or fire/water/stones/wood;
+  //  or E + 16/32 hex digits; ?loop1cycle/?loop1hold set each layer's fade arc (seconds, 0 = on).
+  //  defaults loop1=1, loop2=2, loop3/4=Off. ?dronecycle/?dronehold/?dronetone for the drone.
+  //  ?key=seed|C|C#|D|…|B; ?transpose=-12..12 (atmosphere semitones).
   const DEFAULT_SEEDS = ["1000", "9", "1009", "2026", "168", "11"];
   const num = (k, d, lo, hi) => {
     const v = parseInt(params.get(k) ?? "", 10);
@@ -73,26 +69,38 @@
   };
   const params = new URLSearchParams(location.search);
   // An atmosphere layer, as { kind, lo, hi }: kind 0 = sustained timbre index, 1 = event grid.
-  const GRIDS = { fire: "808000000202eeee", water: "ffff000011110000", stones: "00000000aaaa1040", wood: "0000aaaa02020000" };
+  const GRIDS = {
+    fire: "0000000000000000808000000202eeee",
+    water: "0000000000000000ffff000011110000",
+    stones: "000000000000000000000000aaaa1040",
+    wood: "00000000000000000000aaaa02020000",
+  };
+  const gridWords = (hex) => {
+    const b = BigInt("0x" + hex);
+    return [Number(b & 0xffffffffn), Number((b >> 32n) & 0xffffffffn), Number((b >> 64n) & 0xffffffffn), Number((b >> 96n) & 0xffffffffn)];
+  };
   const loopArg = (k, d) => {
     const v = (params.get(k) ?? "").trim().toLowerCase();
-    if (v in GRIDS) {
-      const bits = BigInt("0x" + GRIDS[v]);
-      return { kind: 1, lo: Number(bits & 0xffffffffn), hi: Number(bits >> 32n) };
-    }
-    if (v.startsWith("e") && v.length === 17) {
+    let kind = 0;
+    let w = [d, 0, 0, 0];
+    if (Object.hasOwn(GRIDS, v)) {
+      kind = 1;
+      w = gridWords(GRIDS[v]);
+    } else if (v.startsWith("e") && (v.length === 17 || v.length === 33)) {
       try {
-        const bits = BigInt("0x" + v.slice(1));
-        return { kind: 1, lo: Number(bits & 0xffffffffn), hi: Number(bits >> 32n) };
+        kind = 1;
+        w = gridWords(v.length === 17 ? "0".repeat(16) + v.slice(1) : v.slice(1));
       } catch {}
+    } else {
+      let n;
+      if (v === "0" || v === "none" || v === "off" || v === "") n = 11;
+      else {
+        const p = parseInt(v, 10);
+        n = Number.isFinite(p) && p >= 1 && p <= 12 ? p - 1 : d;
+      }
+      w = [n, 0, 0, 0];
     }
-    let n;
-    if (v === "0" || v === "none" || v === "off" || v === "") n = 11;
-    else {
-      const p = parseInt(v, 10);
-      n = Number.isFinite(p) && p >= 1 && p <= 12 ? p - 1 : d;
-    }
-    return { kind: 0, lo: n, hi: 0 };
+    return { kind, w0: w[0], w1: w[1], w2: w[2], w3: w[3], cycle: num(k + "cycle", 0, 0, 3600), hold: num(k + "hold", 0, 0, 3600) };
   };
   const NOTES = { c: 1, "c#": 2, cs: 2, d: 3, "d#": 4, ds: 4, e: 5, f: 6, "f#": 7, fs: 7, g: 8, "g#": 9, gs: 9, a: 10, "a#": 11, as: 11, b: 12 };
   const keyArg = () => {
@@ -116,13 +124,16 @@
     bpm: num("bpm", 168, 70, 180),
     loop1: loopArg("loop1", 0),
     loop2: loopArg("loop2", 1),
+    loop3: loopArg("loop3", 11),
+    loop4: loopArg("loop4", 11),
     droneCycle: num("dronecycle", 0, 0, 3600),
     droneHold: num("dronehold", 0, 0, 3600),
+    droneTone: num("dronetone", 0, 0, 16000),
     key: keyArg(),
     transpose: num("transpose", 0, -12, 12),
   };
-  const def = (l, i) => l.kind === 0 && l.lo === i && l.hi === 0;
-  const custom = seeds.some((s, i) => s !== DEFAULT_SEEDS[i]) || settings.scale !== 0 || settings.chords !== 3 || settings.pace !== 0 || settings.kit !== 0 || settings.space !== 1 || settings.bpm !== 168 || !def(settings.loop1, 0) || !def(settings.loop2, 1) || settings.droneCycle !== 0 || settings.droneHold !== 0 || settings.key !== 0 || settings.transpose !== 0;
+  const def = (l, i) => l.kind === 0 && l.w0 === i && l.w1 === 0 && l.w2 === 0 && l.w3 === 0 && l.cycle === 0 && l.hold === 0;
+  const custom = seeds.some((s, i) => s !== DEFAULT_SEEDS[i]) || settings.scale !== 0 || settings.chords !== 3 || settings.pace !== 0 || settings.kit !== 0 || settings.space !== 1 || settings.bpm !== 168 || !def(settings.loop1, 0) || !def(settings.loop2, 1) || !def(settings.loop3, 11) || !def(settings.loop4, 11) || settings.droneCycle !== 0 || settings.droneHold !== 0 || settings.droneTone !== 0 || settings.key !== 0 || settings.transpose !== 0;
   document.querySelector("#seeds").textContent =
     `seeds ${seeds.join(" · ")}${custom ? " (alternate rendition)" : ""}`;
 

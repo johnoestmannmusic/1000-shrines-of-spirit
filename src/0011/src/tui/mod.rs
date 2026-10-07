@@ -75,6 +75,8 @@ pub struct Levels {
     pub drums: f64,
     pub loop1: f64,
     pub loop2: f64,
+    pub loop3: f64,
+    pub loop4: f64,
     pub out_l: f64,
     pub out_r: f64,
 }
@@ -162,14 +164,14 @@ impl Ui {
             loop1_len: explain::loop_len(&desc.loops[0], desc.sample_rate),
             loop2_len: explain::loop_len(&desc.loops[1], desc.sample_rate),
             loops: {
-                let on: Vec<String> = (0..2)
+                let on: Vec<String> = (0..4)
                     .filter(|&k| desc.loops[k].on())
                     .map(|k| format!("loop {} {}", k + 1, desc.loops[k].design.name()))
                     .collect();
                 on.join(" and ")
             },
             loops_len: {
-                let on: Vec<String> = (0..2)
+                let on: Vec<String> = (0..4)
                     .filter(|&k| desc.loops[k].on())
                     .map(|k| format!("loop {} {}", k + 1, explain::loop_len(&desc.loops[k], desc.sample_rate)))
                     .collect();
@@ -323,6 +325,8 @@ impl Ui {
             &mut l.drums,
             &mut l.loop1,
             &mut l.loop2,
+            &mut l.loop3,
+            &mut l.loop4,
             &mut l.out_l,
             &mut l.out_r,
         ] {
@@ -362,6 +366,8 @@ impl Ui {
         l.drums = l.drums.max(m.drums);
         l.loop1 = l.loop1.max(m.loop1);
         l.loop2 = l.loop2.max(m.loop2);
+        l.loop3 = l.loop3.max(m.loop3);
+        l.loop4 = l.loop4.max(m.loop4);
         l.drone = l.drone.max(m.drone);
         l.bass = l.bass.max(m.bass);
         l.glitch1 = l.glitch1.max(m.glitch1);
@@ -467,7 +473,7 @@ impl Ui {
         }
         // Each time an atmosphere loop goes round, a pulse leaves it in the pipeline.
         if let Some(prev) = &self.snap {
-            for (k, level) in [self.levels.loop1, self.levels.loop2].into_iter().enumerate() {
+            for (k, level) in [self.levels.loop1, self.levels.loop2, self.levels.loop3, self.levels.loop4].into_iter().enumerate() {
                 let len = self.desc.loops[k].len as u64;
                 if self.desc.loops[k].on() && prev.clock / len != s.clock / len {
                     self.pipe.loop_wrap(gfx::level_frac(level, 40.0));

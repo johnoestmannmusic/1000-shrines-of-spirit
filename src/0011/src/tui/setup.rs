@@ -135,9 +135,14 @@ enum Step {
     Space,
     Loop1,
     Loop2,
+    Loop3,
+    Loop4,
+    LoopArc(usize),
+    LoopHold(usize),
     DroneCycle,
     DroneHold,
     Transpose,
+    DroneTone,
     Seed(usize),
     File,
     Overwrite,
@@ -168,6 +173,16 @@ impl Notice {
 }
 
 /// The list questions, and which entry of `Setup::sel` each one uses.
+fn loop_layer(step: Step) -> Option<usize> {
+    match step {
+        Step::Loop1 => Some(0),
+        Step::Loop2 => Some(1),
+        Step::Loop3 => Some(2),
+        Step::Loop4 => Some(3),
+        _ => None,
+    }
+}
+
 fn list_id(step: Step) -> Option<usize> {
     match step {
         Step::Mode => Some(0),
@@ -178,7 +193,9 @@ fn list_id(step: Step) -> Option<usize> {
         Step::Space => Some(5),
         Step::Loop1 => Some(6),
         Step::Loop2 => Some(7),
-        Step::Key => Some(8),
+        Step::Loop3 => Some(8),
+        Step::Loop4 => Some(9),
+        Step::Key => Some(10),
         _ => None,
     }
 }
@@ -262,7 +279,7 @@ fn options(step: Step, bpm: u16) -> Vec<(String, String)> {
         Step::Pace => pace_choices(bpm),
         Step::Kit => shrine0011::kits::KITS.iter().map(|k| (k.name().to_string(), k.blurb().to_string())).collect(),
         Step::Space => shrine0011::kits::SPACES.iter().map(|k| (k.name().to_string(), k.blurb().to_string())).collect(),
-        Step::Loop1 | Step::Loop2 => (0..loop_entry_count()).map(|i| (loop_entry_name(i), loop_entry_blurb(i))).collect(),
+        Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4 => (0..loop_entry_count()).map(|i| (loop_entry_name(i), loop_entry_blurb(i))).collect(),
         Step::Key => {
             let mut v = vec![("Seed picks".to_string(), "seed 1 chooses the tonic, as in every earlier recipe".to_string())];
             for pc in 0..12u8 {
@@ -281,8 +298,8 @@ struct Setup {
     exit: bool,
     step: Step,
     back: Vec<Step>,
-    /// Selected entry of each list question (mode, scale, chords, pace, kit, space, loop 1, loop 2, key).
-    sel: [usize; 9],
+    /// Selected entry of each list question (mode, scale, chords, pace, kit, space, loop 1..4, key).
+    sel: [usize; 11],
     input: String,
     error: Option<String>,
     mode: Mode,
@@ -295,7 +312,10 @@ struct Setup {
     drone_hold: u16,
     loop_transpose: i8,
     /// The event grid being edited for each layer.
-    grids: [Grid; 2],
+    grids: [Grid; 4],
+    /// Each atmosphere layer's fade-in/out arc.
+    loop_arcs: [shrine0011::DroneArc; 4],
+    drone_tone: u16,
     grid_cursor: (usize, usize),
     /// Which layer's grid is open in the editor (None = the list is shown).
     grid_edit: Option<usize>,
@@ -324,6 +344,8 @@ impl Setup {
                 set.space.index(),
                 design_to_entry(set.loops[0]),
                 design_to_entry(set.loops[1]),
+                design_to_entry(set.loops[2]),
+                design_to_entry(set.loops[3]),
                 match set.key {
                     KeyChoice::Seed => 0,
                     KeyChoice::Note(n) => n as usize + 1,
@@ -340,16 +362,12 @@ impl Setup {
             drone_cycle: set.drone.cycle_s,
             drone_hold: set.drone.hold_s,
             loop_transpose: set.loop_transpose,
-            grids: [
-                match set.loops[0] {
-                    LoopDesign::Events(g) => g,
-                    _ => Grid::fire(),
-                },
-                match set.loops[1] {
-                    LoopDesign::Events(g) => g,
-                    _ => Grid::fire(),
-                },
-            ],
+            grids: std::array::from_fn(|i| match set.loops[i] {
+                LoopDesign::Events(g) => g,
+                _ => Grid::fire(),
+            }),
+            loop_arcs: set.loop_arcs,
+            drone_tone: set.drone_tone,
             grid_cursor: (0, 0),
             grid_edit: None,
             audition: None,
@@ -363,6 +381,8 @@ impl Setup {
         let layer = match self.step {
             Step::Loop1 => Some(0),
             Step::Loop2 => Some(1),
+            Step::Loop3 => Some(2),
+            Step::Loop4 => Some(3),
             _ => None,
         };
         let Some(layer) = layer else {
@@ -391,10 +411,17 @@ impl Setup {
             kit: shrine0011::kits::KITS[self.sel[4]],
             space: shrine0011::kits::SPACES[self.sel[5]],
             bpm: self.bpm,
-            loops: [entry_to_design(self.sel[6], self.grids[0]), entry_to_design(self.sel[7], self.grids[1])],
+            loops: [
+                entry_to_design(self.sel[6], self.grids[0]),
+                entry_to_design(self.sel[7], self.grids[1]),
+                entry_to_design(self.sel[8], self.grids[2]),
+                entry_to_design(self.sel[9], self.grids[3]),
+            ],
+            loop_arcs: self.loop_arcs,
             loop_transpose: self.loop_transpose,
-            key: if self.sel[8] == 0 { KeyChoice::Seed } else { KeyChoice::Note((self.sel[8] - 1) as u8) },
+            key: if self.sel[10] == 0 { KeyChoice::Seed } else { KeyChoice::Note((self.sel[10] - 1) as u8) },
             drone: shrine0011::DroneArc { cycle_s: self.drone_cycle, hold_s: self.drone_hold },
+            drone_tone: self.drone_tone,
         }
     }
 
@@ -407,9 +434,12 @@ impl Setup {
         let l = &self.last;
         let d = [l.seeds.s1, l.seeds.s2, l.seeds.s3, l.seeds.s4, l.seeds.s5, l.seeds.s6];
         match step {
-            Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Key => "1".into(),
+            Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4 | Step::Key => "1".into(),
             Step::DroneCycle => l.settings.drone.cycle_s.to_string(),
             Step::DroneHold => (self.drone_cycle / 3).max(1).to_string(),
+            Step::LoopArc(i) => self.loop_arcs[i].cycle_s.to_string(),
+            Step::LoopHold(i) => self.loop_arcs[i].hold_s.max(1).to_string(),
+            Step::DroneTone => self.last.settings.drone_tone.to_string(),
             Step::Transpose => self.last.settings.loop_transpose.to_string(),
             Step::Label => l.label.clone(),
             Step::Bpm => l.settings.bpm.to_string(),
@@ -454,12 +484,26 @@ impl Setup {
             ),
             Step::Space => ("Drum space".into(), "Where the drum hits sit between the speakers.".into()),
             Step::Loop1 => (
-                "Atmosphere loop 1".into(),
-                "A few seconds of evolving pad, looped like a 90s sample CD. It follows the chords; seed 6 shapes it. 0 leaves it out.".into(),
+                "Atmosphere layer 1".into(),
+                "90s sample-CD pad or physical-texture event grid. 0 leaves it out.".into(),
             ),
             Step::Loop2 => (
-                "Atmosphere loop 2".into(),
-                "A shorter loop whose length shares no factor with loop 1's, so the two drift in and out of step. 0 leaves it out.".into(),
+                "Atmosphere layer 2".into(),
+                "A shorter layer that drifts against layer 1. 0 leaves it out.".into(),
+            ),
+            Step::Loop3 => ("Atmosphere layer 3".into(), "A third layer, off by default. 0 leaves it out.".into()),
+            Step::Loop4 => ("Atmosphere layer 4".into(), "A fourth layer, off by default. 0 leaves it out.".into()),
+            Step::LoopArc(i) => (
+                format!("Layer {} cycle seconds (0 = always on)", i + 1),
+                "Each layer can swell in and out on its own slow repeat, like the drone. 0 keeps it playing all the time.".into(),
+            ),
+            Step::LoopHold(i) => (
+                format!("Layer {} seconds up each cycle (1-{})", i + 1, self.loop_arcs[i].cycle_s),
+                "A raised-cosine swell fades it in and out automatically at each end of the hold.".into(),
+            ),
+            Step::DroneTone => (
+                "Drone character low-pass Hz (0 = off)".into(),
+                "An end-of-chain low-pass on the drone: lower values make it darker and further back. 0 bypasses it.".into(),
             ),
             Step::DroneCycle => (
                 "Drone cycle in seconds (0 = always on)".into(),
@@ -514,17 +558,34 @@ impl Setup {
             Step::Space => Some(Step::Seed(4)),
             Step::Seed(i) if i < 4 => Some(Step::Seed(i + 1)),
             Step::Seed(4) => Some(Step::Loop1),
-            Step::Loop1 => Some(Step::Loop2),
-            // No loops: nothing for seed 6 to shape.
-            Step::Loop2 if self.sel[6] == 0 && self.sel[7] == 0 => {
-                Some(Step::DroneCycle)
-            }
-            Step::Loop2 => Some(Step::Seed(5)),
+            Step::Loop1 if self.sel[6] == 0 => Some(Step::Loop2),
+            Step::Loop1 => Some(Step::LoopArc(0)),
+            Step::LoopArc(0) if self.loop_arcs[0].cycle_s == 0 => Some(Step::Loop2),
+            Step::LoopArc(0) => Some(Step::LoopHold(0)),
+            Step::LoopHold(0) => Some(Step::Loop2),
+            Step::Loop2 if self.sel[7] == 0 => Some(Step::Loop3),
+            Step::Loop2 => Some(Step::LoopArc(1)),
+            Step::LoopArc(1) if self.loop_arcs[1].cycle_s == 0 => Some(Step::Loop3),
+            Step::LoopArc(1) => Some(Step::LoopHold(1)),
+            Step::LoopHold(1) => Some(Step::Loop3),
+            Step::Loop3 if self.sel[8] == 0 => Some(Step::Loop4),
+            Step::Loop3 => Some(Step::LoopArc(2)),
+            Step::LoopArc(2) if self.loop_arcs[2].cycle_s == 0 => Some(Step::Loop4),
+            Step::LoopArc(2) => Some(Step::LoopHold(2)),
+            Step::LoopHold(2) => Some(Step::Loop4),
+            Step::Loop4 if self.sel[6] == 0 && self.sel[7] == 0 && self.sel[8] == 0 && self.sel[9] == 0 => Some(Step::DroneCycle),
+            Step::Loop4 if self.sel[9] == 0 => Some(Step::Seed(5)),
+            Step::Loop4 => Some(Step::LoopArc(3)),
+            Step::LoopArc(3) if self.loop_arcs[3].cycle_s == 0 => Some(Step::Seed(5)),
+            Step::LoopArc(3) => Some(Step::LoopHold(3)),
+            Step::LoopHold(3) => Some(Step::Seed(5)),
             Step::Seed(_) => Some(Step::DroneCycle),
             Step::DroneCycle if self.drone_cycle == 0 => Some(Step::Transpose),
             Step::DroneCycle => Some(Step::DroneHold),
             Step::DroneHold => Some(Step::Transpose),
-            Step::Transpose => (!play_only).then_some(Step::File),
+            Step::Transpose => Some(Step::DroneTone),
+            Step::DroneTone => (!play_only).then_some(Step::File),
+            Step::LoopArc(_) | Step::LoopHold(_) => Some(Step::DroneCycle),
             Step::File => Some(if Path::new(&self.path).exists() { Step::Overwrite } else { Step::Length }),
             Step::Overwrite => Some(Step::Length),
             Step::Length => None,
@@ -544,7 +605,7 @@ impl Setup {
                 self.mode = parse_mode(&(self.sel[0] + 1).to_string()).unwrap_or(Mode::Play);
                 true
             }
-            Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Key => true,
+            Step::Scale | Step::Chords | Step::Pace | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4 | Step::Key => true,
             Step::Label => match parse_label(&answer) {
                 Some(l) => {
                     self.label = l;
@@ -595,6 +656,39 @@ impl Setup {
                 }
                 None => {
                     self.error = Some(format!("Enter a whole number of seconds from 1 to {}.", self.drone_cycle));
+                    false
+                }
+            },
+            Step::LoopArc(i) => match cli::parse_drone_cycle(&answer) {
+                Some(c) => {
+                    self.loop_arcs[i].cycle_s = c;
+                    if c == 0 {
+                        self.loop_arcs[i].hold_s = 0;
+                    }
+                    true
+                }
+                None => {
+                    self.error = Some("Enter 0, or a whole number of seconds up to 3600.".into());
+                    false
+                }
+            },
+            Step::LoopHold(i) => match cli::parse_drone_hold(&answer, self.loop_arcs[i].cycle_s) {
+                Some(h) => {
+                    self.loop_arcs[i].hold_s = h;
+                    true
+                }
+                None => {
+                    self.error = Some(format!("Enter a whole number of seconds from 1 to {}.", self.loop_arcs[i].cycle_s));
+                    false
+                }
+            },
+            Step::DroneTone => match cli::parse_drone_tone(&answer) {
+                Some(hz) => {
+                    self.drone_tone = hz;
+                    true
+                }
+                None => {
+                    self.error = Some("Enter 0 (off), or 100 to 16000 Hz.".into());
                     false
                 }
             },
@@ -683,12 +777,17 @@ impl Setup {
                 Step::Space => ("Space".into(), shrine0011::kits::SPACES[self.sel[5]].name().to_string()),
             Step::Loop1 => ("Loop 1".into(), loop_entry_name(self.sel[6])),
             Step::Loop2 => ("Loop 2".into(), loop_entry_name(self.sel[7])),
+            Step::Loop3 => ("Loop 3".into(), loop_entry_name(self.sel[8])),
+            Step::Loop4 => ("Loop 4".into(), loop_entry_name(self.sel[9])),
+            Step::LoopArc(i) => (format!("Loop {} arc", i + 1), if self.loop_arcs[*i].cycle_s == 0 { "always on".into() } else { format!("{} s", self.loop_arcs[*i].cycle_s) }),
+            Step::LoopHold(i) => (format!("Loop {} up", i + 1), format!("{} s each cycle", self.loop_arcs[*i].hold_s)),
                 Step::DroneCycle => (
                     "Drone cycle".into(),
                     if self.drone_cycle == 0 { "always on".into() } else { format!("{} s", self.drone_cycle) },
                 ),
                 Step::DroneHold => ("Drone up".into(), format!("{} s each cycle", self.drone_hold)),
                 Step::Transpose => ("Atmos transpose".into(), format!("{} semitones", self.loop_transpose)),
+                Step::DroneTone => ("Drone tone".into(), if self.drone_tone == 0 { "off".into() } else { format!("{} Hz low-pass", self.drone_tone) }),
                 Step::Label => ("Title".into(), self.label.clone()),
                 Step::Seed(i) => (format!("Seed {}", i + 1), self.seeds[*i].to_string()),
                 Step::File => ("File".into(), self.path.clone()),
@@ -734,7 +833,7 @@ impl Setup {
             opts.len() as u16
         };
         let extra = if editing { 2 } else { grid as u16 * 2 };
-        let anim = self.audition.is_some() && matches!(self.step, Step::Loop1 | Step::Loop2);
+        let anim = self.audition.is_some() && matches!(self.step, Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4);
         // notice, summary (+ gap), question, options, [description], [preview], gap, hint, error line, borders
         let height = notice_rows + summary_lines.len() as u16 + (!summary_lines.is_empty()) as u16 + 1 + list_rows + extra + anim as u16 + 1 + 1 + 1 + 2;
         let footer = if self.step == Step::Mode { "Enter accept · Esc exit" } else { "Enter accept · Esc back · Ctrl-C exit" };
@@ -793,7 +892,7 @@ impl Setup {
                 let cell = (r.width as usize).saturating_sub(2) / cols;
                 for (i, (name, _)) in opts.iter().enumerate() {
                     let (row, col) = (i / cols, i % cols);
-                    let n = if matches!(self.step, Step::Loop1 | Step::Loop2) { i } else { i + 1 };
+                    let n = if matches!(self.step, Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4) { i } else { i + 1 };
                     let style = if i == selected { fg(GLITCH2).add_modifier(Modifier::BOLD) } else { fg(TEXT) };
                     put(buf, r, (col * cell) as u16, y + row as u16, &format!("{n:>2} {name}"), style);
                 }
@@ -809,7 +908,7 @@ impl Setup {
                     let marker = if sel { "›" } else { " " };
                     let style = if sel { fg(GLITCH2).add_modifier(Modifier::BOLD) } else { fg(TEXT) };
                     // The atmosphere questions put None first and number it 0.
-                    let n = if matches!(self.step, Step::Loop1 | Step::Loop2) { i } else { i + 1 };
+                    let n = if matches!(self.step, Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4) { i } else { i + 1 };
                     put(buf, r, 0, y, &format!("{marker} {n:>2}  {name:<name_w$}"), style);
                     put(buf, r, 7 + name_w as u16, y, desc, fg(if sel { TEXT } else { DIM }));
                     y += 1;
@@ -923,7 +1022,7 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
                 let (id, n) = (list_id(step).unwrap(), options(step, s.bpm).len());
                 s.sel[id] = if k.code == KeyCode::Up { (s.sel[id] + n - 1) % n } else { (s.sel[id] + 1) % n };
             }
-            (step @ (Step::Loop1 | Step::Loop2), KeyCode::Char(c @ '0'..='9')) => {
+            (step @ (Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4), KeyCode::Char(c @ '0'..='9')) => {
                 let (id, n) = (list_id(step).unwrap(), options(step, s.bpm).len());
                 let i = c as usize - '0' as usize;
                 if i < n {
@@ -953,12 +1052,12 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
                     break;
                 }
             }
-            (step @ (Step::Loop1 | Step::Loop2), KeyCode::Enter) if s.sel[list_id(step).unwrap()] == LOOP_GRID => {
-                s.grid_edit = Some(if step == Step::Loop1 { 0 } else { 1 });
+            (step @ (Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4), KeyCode::Enter) if s.sel[list_id(step).unwrap()] == LOOP_GRID => {
+                s.grid_edit = loop_layer(step);
                 s.grid_cursor = (0, 0);
             }
-            (step @ (Step::Loop1 | Step::Loop2), KeyCode::Char('g' | 'G')) => {
-                s.grid_edit = Some(if step == Step::Loop1 { 0 } else { 1 });
+            (step @ (Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4), KeyCode::Char('g' | 'G')) => {
+                s.grid_edit = loop_layer(step);
                 s.grid_cursor = (0, 0);
             }
             (_, KeyCode::Enter) => {
@@ -968,7 +1067,7 @@ pub fn run(terminal: &mut DefaultTerminal, notice: Option<Notice>) -> Result<Opt
                 // Any new answer replaces the last round's message.
                 s.notice = None;
             }
-            (Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Key | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Overwrite, _) => {}
+            (Step::Mode | Step::Scale | Step::Chords | Step::Pace | Step::Key | Step::Kit | Step::Space | Step::Loop1 | Step::Loop2 | Step::Loop3 | Step::Loop4 | Step::Overwrite, _) => {}
             (_, KeyCode::Backspace) => {
                 s.input.pop();
             }

@@ -1108,7 +1108,7 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
 
     // Its share of the mix: every layer's level, this one highlighted.
     let l = &ui.levels;
-    let layers: [(&str, f64, Option<Solo>, Rgb); 8] = [
+    let layers: [(&str, f64, Option<Solo>, Rgb); 10] = [
         ("drone", l.drone, Some(Solo::Drone), DRONE),
         ("glitch 1", l.glitch1, Some(Solo::Glitch1), GLITCH1),
         ("glitch 2", l.glitch2, Some(Solo::Glitch2), GLITCH2),
@@ -1116,6 +1116,8 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
         ("drums", l.drums, Some(Solo::Drums), DRUMS),
         ("loop 1", l.loop1, Some(Solo::Loop1), LOOPS),
         ("loop 2", l.loop2, Some(Solo::Loop2), mix(LOOPS, CHORD, 0.4)),
+        ("loop 3", l.loop3, Some(Solo::Loop3), mix(LOOPS, CHORD, 0.3)),
+        ("loop 4", l.loop4, Some(Solo::Loop4), mix(LOOPS, CHORD, 0.5)),
         ("echo+reverb", l.reverb.max(l.echo), Some(Solo::Space), REVERB),
     ];
     let y0 = top + 1;

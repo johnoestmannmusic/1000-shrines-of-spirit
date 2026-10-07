@@ -2,11 +2,11 @@
 //!
 //! The sustained timbres in `atmos` are pads; this module makes the *foley*
 //! kind of atmosphere — fire crackling, water running, stones knocking, wood
-//! creaking — as short synthesised grains placed on a 4 x 16 grid (four event
-//! rows, sixteen steps). Nothing is sampled: each grain is built from noise,
-//! clicks and resonances, then wrapped circularly into the loop the same way
-//! the sustained timbres are, so the seam is hidden and playback can go round
-//! for ever.
+//! creaking, rocks and logs struck, cave drips and natural chimes — as short
+//! synthesised grains placed on an 8 x 16 grid (eight event rows, sixteen
+//! steps). Nothing is sampled: each grain is built from noise, clicks and
+//! resonances, then wrapped circularly into the loop the same way the sustained
+//! timbres are, so the seam is hidden and playback can go round for ever.
 //!
 //! The grid is the design. The Fire / Water / Stones / Wood presets are just
 //! starting grids; every bit is editable in setup and stored in the recipe.
@@ -19,13 +19,13 @@ use crate::SAMPLE_RATE;
 const SR: f64 = SAMPLE_RATE as f64;
 
 /// Event rows.
-pub const ROWS: usize = 4;
+pub const ROWS: usize = 8;
 /// Steps per grid row.
 pub const STEPS: usize = 16;
 /// The rows, top to bottom, for the editor and the recipe.
-pub const EVENT_NAMES: [&str; ROWS] = ["Crackle", "Knock", "Creak", "Hiss"];
+pub const EVENT_NAMES: [&str; ROWS] = ["Crackle", "Knock", "Creak", "Hiss", "Rock", "Log", "Drip", "Chime"];
 
-/// A 4 x 16 on/off grid: one bitmask per event row.
+/// An 8 x 16 on/off grid: one bitmask per event row (row 0 in the low bits).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Grid {
     pub rows: [u16; ROWS],
@@ -54,38 +54,63 @@ impl Grid {
         self.rows[row] ^= 1 << step;
     }
 
-    /// The whole grid as 64 bits (row 0 in the low 16 bits).
-    pub fn bits(&self) -> u64 {
-        (self.rows[0] as u64) | ((self.rows[1] as u64) << 16) | ((self.rows[2] as u64) << 32) | ((self.rows[3] as u64) << 48)
+    /// The whole grid as 128 bits (row 0 in the low 16 bits).
+    pub fn bits(&self) -> u128 {
+        self.rows.iter().enumerate().fold(0u128, |b, (i, r)| b | ((*r as u128) << (16 * i)))
     }
 
-    pub fn from_bits(bits: u64) -> Grid {
-        Grid { rows: [bits as u16, (bits >> 16) as u16, (bits >> 32) as u16, (bits >> 48) as u16] }
+    pub fn from_bits(bits: u128) -> Grid {
+        let mut rows = [0u16; ROWS];
+        for (i, r) in rows.iter_mut().enumerate() {
+            *r = (bits >> (16 * i)) as u16;
+        }
+        Grid { rows }
     }
 
-    /// Sixteen lowercase hex digits, used as the recipe token.
+    /// Four 32-bit words, for the WASM ABI.
+    pub fn words(&self) -> [u32; 4] {
+        let b = self.bits();
+        [b as u32, (b >> 32) as u32, (b >> 64) as u32, (b >> 96) as u32]
+    }
+
+    pub fn from_words(w: [u32; 4]) -> Grid {
+        let b = (w[0] as u128) | ((w[1] as u128) << 32) | ((w[2] as u128) << 64) | ((w[3] as u128) << 96);
+        Grid::from_bits(b)
+    }
+
+    /// 32 lowercase hex digits, used as the recipe token.
     pub fn to_hex(&self) -> String {
-        format!("{:016x}", self.bits())
+        format!("{:032x}", self.bits())
     }
 
     pub fn from_hex(s: &str) -> Option<Grid> {
-        (s.len() == 16).then(|| u64::from_str_radix(s, 16).ok()).flatten().map(Grid::from_bits)
+        // The old 4-row form (16 digits) is the low half of the new one.
+        let padded;
+        let s = match s.len() {
+            32 => s,
+            16 => {
+                padded = format!("{}{s}", "0".repeat(16));
+                &padded
+            }
+            _ => return None,
+        };
+        u128::from_str_radix(s, 16).ok().map(Grid::from_bits)
     }
 
     pub fn fire() -> Grid {
-        Grid { rows: [0b1110_1110_1110_1110, 0b0000_0010_0000_0010, 0, 0b1000_0000_1000_0000] }
+        Grid { rows: [0b1110_1110_1110_1110, 0b0000_0010_0000_0010, 0, 0b1000_0000_1000_0000, 0, 0, 0, 0] }
     }
 
     pub fn water() -> Grid {
-        Grid { rows: [0, 0b0001_0001_0001_0001, 0, 0b1111_1111_1111_1111] }
+        Grid { rows: [0, 0b0001_0001_0001_0001, 0, 0b1111_1111_1111_1111, 0, 0, 0, 0] }
     }
 
     pub fn stones() -> Grid {
-        Grid { rows: [0b0001_0000_0100_0000, 0b1010_1010_1010_1010, 0, 0] }
+        Grid { rows: [0b0001_0000_0100_0000, 0b1010_1010_1010_1010, 0, 0, 0, 0, 0, 0] }
     }
 
     pub fn wood() -> Grid {
-        Grid { rows: [0, 0b0000_0010_0000_0010, 0b1010_1010_1010_1010, 0] }
+        Grid { rows: [0, 0b0000_0010_0000_0010, 0b1010_1010_1010_1010, 0, 0, 0, 0, 0] }
     }
 }
 
@@ -126,7 +151,11 @@ fn grain(kind: usize, out: &mut [f64], start: usize, notes: &[f64], noise: &mut 
         0 => crackle(out, start, noise, rng),
         1 => knock(out, start, notes, rng),
         2 => creak(out, start, noise, rng),
-        _ => hiss(out, start, noise, rng),
+        3 => hiss(out, start, noise, rng),
+        4 => rock(out, start, noise, rng),
+        5 => log(out, start, notes, rng),
+        6 => drip(out, start, notes, noise, rng),
+        _ => chime(out, start, notes, rng),
     }
 }
 
@@ -163,14 +192,86 @@ fn knock(out: &mut [f64], start: usize, notes: &[f64], rng: &mut Rng) {
     let modes = [1.0, rng.range(2.3, 3.1), rng.range(4.5, 6.5)];
     let taus = [rng.range(0.09, 0.26), rng.range(0.05, 0.16), rng.range(0.02, 0.08)];
     let gains = [1.0, rng.range(0.4, 0.75), rng.range(0.15, 0.4)];
+    partials(out, start, hz, &modes, &taus, &gains, 0.6);
+}
+
+/// A rock struck: a low, dull thud — a pitch-diving sine under a short burst of
+/// low-passed noise. Untuned, like a stone on stone.
+fn rock(out: &mut [f64], start: usize, noise: &mut Rng, rng: &mut Rng) {
+    let hz0 = rng.range(150.0, 320.0);
+    let hz1 = hz0 * rng.range(0.45, 0.7);
+    let tau = rng.range(0.06, 0.16);
+    let dur = (tau * 7.0 * SR) as usize;
+    let mut f = Svf::new(rng.range(600.0, 1_400.0), 0.8, SR);
+    let c = exp(-1.0 / (tau * SR));
+    let mut env = 1.0;
+    let mut ph = 0.0;
+    for i in 0..dur {
+        let u = i as f64 / dur as f64;
+        let hz = hz0 + (hz1 - hz0) * u;
+        ph += hz / SR;
+        ph -= ph.floor();
+        let noise_low = f.process(noise.bipolar()).low;
+        add(out, start + i, (0.9 * sin_turns(ph) + 0.5 * noise_low) * env);
+        env *= c;
+    }
+}
+
+/// A hollow log hit: a click into a woody mid resonance with two inharmonic
+/// partners. Short and dry, a little lower than a chime.
+fn log(out: &mut [f64], start: usize, notes: &[f64], rng: &mut Rng) {
+    let base = if notes.is_empty() { 55.0 } else { notes[rng.below(notes.len())] - 7.0 };
+    let hz = midi_hz(base + rng.range(-1.0, 1.0));
+    let modes = [1.0, rng.range(1.7, 2.2), rng.range(2.6, 3.4)];
+    let taus = [rng.range(0.08, 0.18), rng.range(0.05, 0.12), rng.range(0.03, 0.08)];
+    let gains = [1.0, rng.range(0.5, 0.85), rng.range(0.2, 0.5)];
+    partials(out, start, hz, &modes, &taus, &gains, 0.7);
+}
+
+/// A cave/water drip: a short pitched blip whose pitch rises, with a whisper of
+/// noise at the impact. Tuned two octaves up so it glints above the mix.
+fn drip(out: &mut [f64], start: usize, notes: &[f64], noise: &mut Rng, rng: &mut Rng) {
+    let base = if notes.is_empty() { 72.0 } else { notes[rng.below(notes.len())] + 12.0 };
+    let hz0 = midi_hz(base) * rng.range(0.8, 1.0);
+    let hz1 = hz0 * rng.range(1.5, 2.4);
+    let tau = rng.range(0.04, 0.1);
+    let dur = (tau * 8.0 * SR) as usize;
+    let c = exp(-1.0 / (tau * SR));
+    let mut env = 1.0;
+    let mut ph = 0.0;
+    for i in 0..dur {
+        let u = i as f64 / dur as f64;
+        let hz = hz0 + (hz1 - hz0) * u;
+        ph += hz / SR;
+        ph -= ph.floor();
+        let impact = if i < 12 { 0.25 * noise.bipolar() } else { 0.0 };
+        add(out, start + i, (sin_turns(ph) + impact) * env * 0.7);
+        env *= c;
+    }
+}
+
+/// A natural chime/bell: four inharmonic partials with a long decay, tuned to a
+/// chord tone an octave up. The brightest and longest of the hits.
+fn chime(out: &mut [f64], start: usize, notes: &[f64], rng: &mut Rng) {
+    let base = if notes.is_empty() { 79.0 } else { notes[rng.below(notes.len())] + 12.0 };
+    let hz = midi_hz(base + rng.range(-1.0, 1.0));
+    let modes = [1.0, rng.range(2.7, 3.3), rng.range(5.1, 6.2), rng.range(8.2, 10.5)];
+    let taus = [rng.range(0.4, 0.9), rng.range(0.3, 0.7), rng.range(0.15, 0.4), rng.range(0.08, 0.25)];
+    let gains = [1.0, rng.range(0.5, 0.8), rng.range(0.25, 0.5), rng.range(0.1, 0.3)];
+    partials(out, start, hz, &modes, &taus, &gains, 0.45);
+}
+
+/// A struck resonator: `hz` plus inharmonic modes, each an exponentially
+/// decaying sine. Shared by the knock, log and chime.
+fn partials(out: &mut [f64], start: usize, hz: f64, modes: &[f64], taus: &[f64], gains: &[f64], amp: f64) {
     let dur = (taus[0] * 8.0 * SR) as usize;
     for i in 0..dur {
         let t = i as f64 / SR;
         let mut y = 0.0;
-        for m in 0..3 {
+        for m in 0..modes.len() {
             y += gains[m] * sin_turns(modes[m] * hz * t) * exp(-t / taus[m]);
         }
-        add(out, start + i, y * 0.6);
+        add(out, start + i, y * amp);
     }
 }
 
@@ -224,8 +325,11 @@ mod tests {
         for grid in [Grid::EMPTY, Grid::fire(), Grid::water(), Grid::stones(), Grid::wood()] {
             assert_eq!(Grid::from_bits(grid.bits()), grid);
             assert_eq!(Grid::from_hex(&grid.to_hex()), Some(grid));
+            assert_eq!(Grid::from_words(grid.words()), grid);
         }
-        assert_eq!(Grid::from_hex("zzzzzzzzzzzzzzzz"), None);
+        // The old 16-digit form is the low half.
+        assert_eq!(Grid::from_hex("808000000202eeee"), Some(Grid::from_bits(0x8080_0000_0202_EEEE)));
+        assert_eq!(Grid::from_hex("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"), None);
         assert_eq!(Grid::from_hex("abc"), None);
     }
 
@@ -248,6 +352,9 @@ mod tests {
         assert!(g.get(1, 3));
         g.set(1, 3, false);
         assert!(!g.get(1, 3));
+        // The new rows are addressable too.
+        g.toggle(7, 15);
+        assert!(g.get(7, 15));
     }
 
     #[test]
@@ -255,15 +362,18 @@ mod tests {
         let len = 4 * SAMPLE_RATE as usize;
         let total = 2 * len + 4800;
         let mut hashes = Vec::new();
-        for grid in [Grid::fire(), Grid::water(), Grid::stones(), Grid::wood()] {
+        // One row lit at a time, so every event kind is exercised.
+        for row in 0..ROWS {
+            let mut grid = Grid::EMPTY;
+            grid.set(row, 3, true);
             let mut rng = Rng::stream(11, 0xA1);
             let s = render_channel(grid, &[62.0, 66.0, 69.0], &mut rng, len, total);
-            assert!(s.iter().all(|x| x.is_finite()));
-            assert!(s.iter().any(|x| x.abs() > 1e-6), "grid produced silence");
+            assert!(s.iter().all(|x| x.is_finite()), "row {row} non-finite");
+            assert!(s.iter().any(|x| x.abs() > 1e-6), "row {row} produced silence");
             let h = s.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, x| {
                 x.to_bits().to_le_bytes().into_iter().fold(h, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
             });
-            assert!(!hashes.contains(&h), "two presets rendered identically");
+            assert!(!hashes.contains(&h), "two event rows rendered identically");
             hashes.push(h);
         }
     }

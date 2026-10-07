@@ -213,8 +213,10 @@ pub struct Settings {
     pub space: kits::DrumSpace,
     /// The drum tempo; every ambient layer moves at exactly half of it.
     pub bpm: u16,
-    /// The two atmosphere loop layers (seed 6 shapes the sustained ones).
-    pub loops: [LoopDesign; 2],
+    /// The four atmosphere loop layers (seed 6 shapes the sustained ones).
+    pub loops: [LoopDesign; 4],
+    /// A fade-in/out arc per atmosphere layer (cycle 0 = always on).
+    pub loop_arcs: [DroneArc; 4],
     /// Semitones the atmosphere loops are transposed by (0 = the chord tones
     /// exactly, so they match the chosen root note).
     pub loop_transpose: i8,
@@ -222,6 +224,8 @@ pub struct Settings {
     pub key: KeyChoice,
     /// The repeating entrance/exit arc of the frozen-chord drone.
     pub drone: DroneArc,
+    /// An end-of-chain low-pass on the drone, in Hz (0 = off, bypass).
+    pub drone_tone: u16,
 }
 
 pub const DEFAULT_SETTINGS: Settings =
@@ -232,14 +236,21 @@ pub const DEFAULT_SETTINGS: Settings =
         kit: kits::Kit::SubClicks,
         space: kits::DrumSpace::Wide,
         bpm: tempo::DEFAULT_BPM,
-        loops: [LoopDesign::Sustained(LoopTimbre::Choir), LoopDesign::Sustained(LoopTimbre::Glass)],
+        loops: [
+            LoopDesign::Sustained(LoopTimbre::Choir),
+            LoopDesign::Sustained(LoopTimbre::Glass),
+            LoopDesign::OFF,
+            LoopDesign::OFF,
+        ],
+        loop_arcs: [DroneArc::ALWAYS_ON; 4],
         loop_transpose: 0,
         key: KeyChoice::Seed,
         drone: DroneArc::ALWAYS_ON,
+        drone_tone: 0,
     };
 
 /// 0010's sound: the default settings with no atmosphere loops.
-pub const NO_LOOPS: [LoopDesign; 2] = [LoopDesign::OFF, LoopDesign::OFF];
+pub const NO_LOOPS: [LoopDesign; 4] = [LoopDesign::OFF; 4];
 
 /// The ping-pong echo's delay, in glitch sixteenths (3/16).
 const ECHO_SIXTEENTHS: u64 = 3;
@@ -260,16 +271,12 @@ const GLITCH2_SEND: f64 = 0.4;
 const ECHO_DRY: f64 = 0.6;
 const ECHO_SEND: f64 = 0.5;
 const ECHO_FEEDBACK: f64 = 0.55;
-const LOOP1_DRY: f64 = 0.8;
-const LOOP1_SEND: f64 = 0.45;
-const LOOP2_DRY: f64 = 0.7;
-const LOOP2_SEND: f64 = 0.5;
-/// Loop 1 aims for about this many seconds, loop 2 for about this many (in
-/// whole beats, 3-8 s, with no factor in common so the two drift apart).
-const LOOP1_SECONDS: u64 = 6;
-const LOOP2_SECONDS: u64 = 4;
-/// Loop 2's stereo width (side level): narrower, nearer the centre than loop 1.
-const LOOP2_WIDTH: f64 = 0.6;
+/// Per atmosphere layer: dry level, reverb send, target length in seconds, and
+/// stereo side level (1.0 = full width).
+const LOOP_DRY: [f64; 4] = [0.8, 0.7, 0.6, 0.55];
+const LOOP_SEND: [f64; 4] = [0.45, 0.5, 0.45, 0.4];
+const LOOP_SECONDS: [u64; 4] = [6, 4, 5, 7];
+const LOOP_WIDTH: [f64; 4] = [1.0, 0.6, 0.8, 0.7];
 const DRUMS_DRY: f64 = 0.85;
 const DRUMS_SEND: f64 = 0.1;
 /// The drums' tape echo (Wide + tape echo only): send of the snare-type hits,
@@ -345,6 +352,10 @@ pub enum Solo {
     Loop1,
     /// Atmosphere loop 2.
     Loop2,
+    /// Atmosphere loop 3.
+    Loop3,
+    /// Atmosphere loop 4.
+    Loop4,
     /// The echo and reverb returns only: the room without the instruments.
     Space,
 }
@@ -419,13 +430,16 @@ pub struct Track {
     mods: Mods,
     drone: Drone,
     drone_filter: [Svf; 2],
+    /// End-of-chain drone character filter (a chosen low-pass).
+    drone_tone_filter: [Svf; 2],
     /// Drone gain from the repeating entrance/exit arc (1 = always on).
     drone_window: f64,
     history: History,
     glitch1: Layer,
     glitch2: Layer,
-    loop1: AtmosLoop,
-    loop2: AtmosLoop,
+    loops: [AtmosLoop; 4],
+    /// Per-layer gain from each atmosphere layer's own arc.
+    loop_windows: [f64; 4],
     echo: PingPong,
     bass: Bass,
     reverb: Reverb,
@@ -452,6 +466,14 @@ impl Track {
         let chords = settings.chords.clamp(1, 4) as usize;
         let harmony = Harmony::new(settings.scale, chords, settings.pace, tempo.beat(), key, &mut first, &mut rest);
         let echo_delay = (ECHO_SIXTEENTHS * tempo.glitch16()) as usize;
+        // Loop lengths: whole beats, 3-8 s, pairwise co-prime so all four drift.
+        let mut avoid = 1u64;
+        let mut avoids = [0u64; 4];
+        for (i, a) in avoids.iter_mut().enumerate() {
+            *a = avoid;
+            let beats = atmos::loop_beats(tempo.beat(), LOOP_SECONDS[i], (i > 0).then_some(avoid));
+            avoid = avoid.wrapping_mul(beats);
+        }
         Track {
             seeds,
             tempo,
@@ -468,20 +490,22 @@ impl Track {
             mods: Mods::new(seeds.s1),
             glitch1: Layer::new(layer1(&harmony, tempo), seeds.s2, 0x61),
             glitch2: Layer::new(layer2(&harmony, tempo), seeds.s3, 0x62),
-            loop1: AtmosLoop::new(settings.loops[0], seeds.s6, 0xA1, &harmony, tempo.beat(), LOOP1_SECONDS, None, settings.loop_transpose),
-            loop2: AtmosLoop::new(
-                settings.loops[1],
-                seeds.s6,
-                0xA2,
-                &harmony,
-                tempo.beat(),
-                LOOP2_SECONDS,
-                // Loop 1's length, whether or not it plays, so loop 2's never depends on it being on.
-                Some(atmos::loop_beats(tempo.beat(), LOOP1_SECONDS, None)),
-                settings.loop_transpose,
-            ),
+            loops: std::array::from_fn(|i| {
+                AtmosLoop::new(
+                    settings.loops[i],
+                    seeds.s6,
+                    0xA1 + i as u64,
+                    &harmony,
+                    tempo.beat(),
+                    LOOP_SECONDS[i],
+                    (i > 0).then_some(avoids[i]),
+                    settings.loop_transpose,
+                )
+            }),
+            loop_windows: [1.0; 4],
             drone: Drone::new(seeds.s1, harmony, first, rest),
             drone_filter: [Svf::new(1000.0, 0.7, sr), Svf::new(1000.0, 0.7, sr)],
+            drone_tone_filter: [Svf::new(8_000.0, 0.7, sr), Svf::new(8_000.0, 0.7, sr)],
             drone_window: 1.0,
             history: History::new(),
             echo: PingPong::new(echo_delay, ECHO_FEEDBACK),
@@ -549,11 +573,25 @@ impl Track {
             self.drone_cutoff = cutoff;
             self.drone_q = q;
             self.drone_window = self.settings.drone.gain(clock);
+            for k in 0..4 {
+                self.loop_windows[k] = self.settings.loop_arcs[k].gain(clock);
+            }
+            if self.settings.drone_tone > 0 {
+                for f in self.drone_tone_filter.iter_mut() {
+                    f.set(self.settings.drone_tone as f64, 0.7, sr);
+                }
+            }
         }
         let window = self.drone_window;
         let (dl, dr) = self.drone.next();
         let dl = self.drone_filter[0].process(dl).low * window;
         let dr = self.drone_filter[1].process(dr).low * window;
+        // The chosen drone character filter, at the very end of the drone chain.
+        let (dl, dr) = if self.settings.drone_tone > 0 {
+            (self.drone_tone_filter[0].process(dl).low, self.drone_tone_filter[1].process(dr).low)
+        } else {
+            (dl, dr)
+        };
         self.history.push(dl, dr);
 
         // 5 (computed early): jungle drums, and how present they are right now.
@@ -584,22 +622,23 @@ impl Track {
             g1.1 * GLITCH1_ECHO + g2.1 * GLITCH2_ECHO,
         );
 
-        // Atmosphere loop 1: makes room for the drums like the drone, drifting gently in level.
-        let (a1l, a1r) = if self.loop1.is_on() {
-            let (l, r) = self.loop1.next(clock, &self.harmony);
-            let g = duck * m.loop_level;
-            (l * g, r * g)
-        } else {
-            (0.0, 0.0)
-        };
-        let (a2l, a2r) = if self.loop2.is_on() {
-            let (l, r) = self.loop2.next(clock, &self.harmony);
-            let g = duck * m.loop2_level;
-            let (mid, side) = (0.5 * (l + r), 0.5 * (l - r) * LOOP2_WIDTH);
-            ((mid + side) * g, (mid - side) * g)
-        } else {
-            (0.0, 0.0)
-        };
+        // The four atmosphere layers: they make room for the drums like the
+        // drone, drift gently in level, and each breathes on its own arc.
+        let mut a = [(0.0f64, 0.0f64); 4];
+        for k in 0..4 {
+            if self.loops[k].is_on() {
+                let (l, r) = self.loops[k].next(clock, &self.harmony);
+                let level = if k % 2 == 0 { m.loop_level } else { m.loop2_level };
+                let g = duck * level * self.loop_windows[k];
+                a[k] = if LOOP_WIDTH[k] == 1.0 {
+                    // Full width: bit-identical to the old un-narrowed mix.
+                    (l * g, r * g)
+                } else {
+                    let (mid, side) = (0.5 * (l + r), 0.5 * (l - r) * LOOP_WIDTH[k]);
+                    ((mid + side) * g, (mid - side) * g)
+                };
+            }
+        }
 
         // 4: bass, gliding to each chord's root during the morph bar. The bass
         // leaves with the drone: one arrangement, one envelope.
@@ -612,17 +651,47 @@ impl Track {
 
         // Shared long reverb.
         let (rl, rr) = self.reverb.process(
-            dl * DRONE_SEND + a1l * LOOP1_SEND + a2l * LOOP2_SEND + b * BASS_SEND + g1.0 * GLITCH1_SEND + g2.0 * GLITCH2_SEND + el * ECHO_SEND + d * DRUMS_SEND
+            dl * DRONE_SEND
+                + a[0].0 * LOOP_SEND[0]
+                + a[1].0 * LOOP_SEND[1]
+                + a[2].0 * LOOP_SEND[2]
+                + a[3].0 * LOOP_SEND[3]
+                + b * BASS_SEND
+                + g1.0 * GLITCH1_SEND
+                + g2.0 * GLITCH2_SEND
+                + el * ECHO_SEND
+                + d * DRUMS_SEND
                 + tl * TAPE_REVERB,
-            dr * DRONE_SEND + a1r * LOOP1_SEND + a2r * LOOP2_SEND + b * BASS_SEND + g1.1 * GLITCH1_SEND + g2.1 * GLITCH2_SEND + er * ECHO_SEND + d_r * DRUMS_SEND
+            dr * DRONE_SEND
+                + a[0].1 * LOOP_SEND[0]
+                + a[1].1 * LOOP_SEND[1]
+                + a[2].1 * LOOP_SEND[2]
+                + a[3].1 * LOOP_SEND[3]
+                + b * BASS_SEND
+                + g1.1 * GLITCH1_SEND
+                + g2.1 * GLITCH2_SEND
+                + er * ECHO_SEND
+                + d_r * DRUMS_SEND
                 + tr * TAPE_REVERB,
         );
 
-        let mut l = dl * DRONE_DRY + a1l * LOOP1_DRY + a2l * LOOP2_DRY + b * BASS_DRY + (g1.0 * GLITCH1_DRY + g2.0 * GLITCH2_DRY + el * ECHO_DRY) * others
+        let mut l = dl * DRONE_DRY
+            + a[0].0 * LOOP_DRY[0]
+            + a[1].0 * LOOP_DRY[1]
+            + a[2].0 * LOOP_DRY[2]
+            + a[3].0 * LOOP_DRY[3]
+            + b * BASS_DRY
+            + (g1.0 * GLITCH1_DRY + g2.0 * GLITCH2_DRY + el * ECHO_DRY) * others
             + d * DRUMS_DRY
             + rl * REVERB_WET
             + tl * TAPE_WET;
-        let mut r = dr * DRONE_DRY + a1r * LOOP1_DRY + a2r * LOOP2_DRY + b * BASS_DRY + (g1.1 * GLITCH1_DRY + g2.1 * GLITCH2_DRY + er * ECHO_DRY) * others
+        let mut r = dr * DRONE_DRY
+            + a[0].1 * LOOP_DRY[0]
+            + a[1].1 * LOOP_DRY[1]
+            + a[2].1 * LOOP_DRY[2]
+            + a[3].1 * LOOP_DRY[3]
+            + b * BASS_DRY
+            + (g1.1 * GLITCH1_DRY + g2.1 * GLITCH2_DRY + er * ECHO_DRY) * others
             + d_r * DRUMS_DRY
             + rr * REVERB_WET
             + tr * TAPE_WET;
@@ -647,8 +716,10 @@ impl Track {
         mt.echo_r = mt.echo_r.max(er.abs());
         mt.reverb = mt.reverb.max(rl.abs()).max(rr.abs());
         mt.drums = mt.drums.max(d_abs);
-        mt.loop1 = mt.loop1.max(a1l.abs()).max(a1r.abs());
-        mt.loop2 = mt.loop2.max(a2l.abs()).max(a2r.abs());
+        mt.loop1 = mt.loop1.max(a[0].0.abs()).max(a[0].1.abs());
+        mt.loop2 = mt.loop2.max(a[1].0.abs()).max(a[1].1.abs());
+        mt.loop3 = mt.loop3.max(a[2].0.abs()).max(a[2].1.abs());
+        mt.loop4 = mt.loop4.max(a[3].0.abs()).max(a[3].1.abs());
         mt.tape = mt.tape.max(tl.abs()).max(tr.abs());
         mt.out_l = mt.out_l.max(l.abs());
         mt.out_r = mt.out_r.max(r.abs());
@@ -683,8 +754,10 @@ impl Track {
                     let (dry, echo_in, send) = match solo {
                         Solo::Drone => ((dl * DRONE_DRY, dr * DRONE_DRY), (0.0, 0.0), (dl * DRONE_SEND, dr * DRONE_SEND)),
                         Solo::Bass => ((b * BASS_DRY, b * BASS_DRY), (0.0, 0.0), (b * BASS_SEND, b * BASS_SEND)),
-                        Solo::Loop1 => ((a1l * LOOP1_DRY, a1r * LOOP1_DRY), (0.0, 0.0), (a1l * LOOP1_SEND, a1r * LOOP1_SEND)),
-                        Solo::Loop2 => ((a2l * LOOP2_DRY, a2r * LOOP2_DRY), (0.0, 0.0), (a2l * LOOP2_SEND, a2r * LOOP2_SEND)),
+                        Solo::Loop1 => ((a[0].0 * LOOP_DRY[0], a[0].1 * LOOP_DRY[0]), (0.0, 0.0), (a[0].0 * LOOP_SEND[0], a[0].1 * LOOP_SEND[0])),
+                        Solo::Loop2 => ((a[1].0 * LOOP_DRY[1], a[1].1 * LOOP_DRY[1]), (0.0, 0.0), (a[1].0 * LOOP_SEND[1], a[1].1 * LOOP_SEND[1])),
+                        Solo::Loop3 => ((a[2].0 * LOOP_DRY[2], a[2].1 * LOOP_DRY[2]), (0.0, 0.0), (a[2].0 * LOOP_SEND[2], a[2].1 * LOOP_SEND[2])),
+                        Solo::Loop4 => ((a[3].0 * LOOP_DRY[3], a[3].1 * LOOP_DRY[3]), (0.0, 0.0), (a[3].0 * LOOP_SEND[3], a[3].1 * LOOP_SEND[3])),
                         Solo::Drums => (
                             (d * DRUMS_DRY + tl * TAPE_WET, d_r * DRUMS_DRY + tr * TAPE_WET),
                             (0.0, 0.0),

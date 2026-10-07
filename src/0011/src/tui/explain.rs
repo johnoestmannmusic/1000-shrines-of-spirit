@@ -46,7 +46,7 @@ pub enum When {
 }
 
 impl When {
-    pub fn applies(self, kit: Kit, space: DrumSpace, loops: [LoopDesign; 2], drone: DroneArc) -> bool {
+    pub fn applies(self, kit: Kit, space: DrumSpace, loops: [LoopDesign; 4], drone: DroneArc) -> bool {
         let drums = kit != Kit::Off;
         let any_loop = loops.iter().any(|d| d.is_on());
         match self {
@@ -174,6 +174,9 @@ pub const EXPLAINERS: &[(Panel, When, &str)] = &[
     (Loops, When::EventLoops, "Physical textures are events, not pads: each marked cell on the 4 x 16 grid fires a short synthesised grain — a band-passed crackle, a struck resonance, a bending creak or a swell of flow. Fire, water, stones and wood are just starting grids; every cell is yours."),
     (Loops, When::EventLoops, "Nothing here is a sample pack. Crackles are noise through a narrow band-pass, knocks are an impulse into three inharmonic resonances tuned to a chord tone, creaks are noise through a bending filter, and hiss is a slowly moving band. The 'nature' is synthesised from first principles."),
     (Loops, When::EventLoops, "The grains are wrapped circularly into the loop, so a tail that would run past the end is already present at the start — the same trick a DAW uses when it loops a reverb tail or a foley recording."),
+    (Loops, When::EventLoops, "The four natural hits: Rock is a low pitch-diving sine under low-passed noise; Log is a hollow woody resonance; Drip is a short pitched blip that bends upwards; Chime is four inharmonic partials ringing out. Rock and Log are unpitched; Drip and Chime take a chord tone an octave up."),
+    (Loops, When::Loops, "Every layer has its own fade-in/out arc (its own cycle and hold, measured in seconds), so the four can breathe against one another without a shared clock: one may enter while another leaves."),
+    (Cycles, When::DroneArc, "The drone also has an end-of-chain character filter: a low-pass you set at setup. Lower it and the whole drone recedes and darkens; 0 bypasses it."),
     (Loops, When::Loops, "Both atmosphere layers play the chord tones, so they move with the chosen root note and scale. A transpose at setup can shift them away from the chord (0 = exactly on it), which is how you get a drone that sits a fifth above or an octave below."),
     (Harmony, When::Always, "The root note comes from {key_source}. The scale supplies the intervals, so changing the root just moves the whole piece without changing its shape."),
     (General, When::NoLoops, "This version has no atmosphere loops (both Off). Choose a timbre at setup to add a 90s sample-CD pad that follows the chords."),
@@ -291,7 +294,7 @@ mod tests {
     fn insights_only_describe_the_playing_kit() {
         for kit in KITS {
             for (_, when, text) in EXPLAINERS {
-                if !when.applies(kit, DrumSpace::Tape, [LoopDesign::Sustained(LoopTimbre::Choir), LoopDesign::OFF], DroneArc::ALWAYS_ON) {
+                if !when.applies(kit, DrumSpace::Tape, [LoopDesign::Sustained(LoopTimbre::Choir), LoopDesign::OFF, LoopDesign::OFF, LoopDesign::OFF], DroneArc::ALWAYS_ON) {
                     continue;
                 }
                 for other in KITS.iter().filter(|k| **k != kit && **k != Kit::Off) {
@@ -310,7 +313,7 @@ mod tests {
         use shrine0011::atmos::LOOP_TIMBRES;
         for t in LOOP_TIMBRES {
             for (_, when, text) in EXPLAINERS {
-                if !when.applies(Kit::Off, DrumSpace::Centred, [LoopDesign::Sustained(t), LoopDesign::OFF], DroneArc::ALWAYS_ON) {
+                if !when.applies(Kit::Off, DrumSpace::Centred, [LoopDesign::Sustained(t), LoopDesign::OFF, LoopDesign::OFF, LoopDesign::OFF], DroneArc::ALWAYS_ON) {
                     continue;
                 }
                 for other in LOOP_TIMBRES.iter().filter(|o| **o != t && **o != LoopTimbre::Off) {

@@ -143,6 +143,8 @@ pub fn header(ui: &Ui, buf: &mut Buffer, r: Rect) {
             shrine0011::Solo::Drums => "drums",
             shrine0011::Solo::Loop1 => "loop 1",
             shrine0011::Solo::Loop2 => "loop 2",
+        shrine0011::Solo::Loop3 => "loop 3",
+        shrine0011::Solo::Loop4 => "loop 4",
             shrine0011::Solo::Space => "echo+reverb",
         };
         spans.push(Span::styled(
@@ -273,9 +275,11 @@ fn loops(ui: &Ui, s: &Snapshot, buf: &mut Buffer, r: Rect) {
     if r.height < 6 || r.width < 20 {
         return;
     }
-    // Two stacked strips: loop 1 above, loop 2 below.
-    let half = r.height / 2;
-    for (k, (y, h)) in [(0, half), (half, r.height - half)].into_iter().enumerate() {
+    // Four stacked strips.
+    let base = (r.height / 4).max(1);
+    for k in 0..4usize {
+        let y = k as u16 * base;
+        let h = if k == 3 { r.height.saturating_sub(y) } else { base };
         let lp = &ui.desc.loops[k];
         if !lp.on() {
             put(buf, r, 1, y, &format!("loop {}: off", k + 1), fg(DIM));

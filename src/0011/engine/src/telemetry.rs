@@ -27,6 +27,8 @@ pub struct Meters {
     /// Atmosphere loops 1 and 2.
     pub loop1: f64,
     pub loop2: f64,
+    pub loop3: f64,
+    pub loop4: f64,
     pub out_l: f64,
     pub out_r: f64,
 }
@@ -65,7 +67,7 @@ pub struct Description {
     pub reverb_decay: f64,
     pub bass_root: f64,
     /// The atmosphere loop layers (a layer that is Off has no chords).
-    pub loops: [LoopInfo; 2],
+    pub loops: [LoopInfo; 4],
     /// The repeating entrance/exit arc of the frozen-chord drone.
     pub drone_arc: crate::DroneArc,
 }
@@ -159,6 +161,8 @@ pub struct Snapshot {
     pub duck_gain: f64,
     /// The drone's gain from its repeating entrance/exit arc (1 = always on).
     pub drone_window: f64,
+    /// Each atmosphere layer's gain from its own arc (1 = always on).
+    pub loop_windows: [f64; 4],
     /// The bass's current (gliding) root, MIDI.
     pub bass_root: f64,
     /// Where the chord progression is.
@@ -235,7 +239,7 @@ impl Track {
             reverb_lines: crate::reverb::LINES,
             reverb_decay: crate::reverb::DECAY_SECONDS,
             bass_root: crate::bass::ROOT,
-            loops: [loop_info(&self.loop1), loop_info(&self.loop2)],
+            loops: std::array::from_fn(|i| loop_info(&self.loops[i])),
             drone_arc: self.settings.drone,
         }
     }
@@ -268,6 +272,7 @@ impl Track {
             bass_root: self.bass.root(),
             duck_gain: self.duck_gain,
             drone_window: self.drone_window,
+            loop_windows: self.loop_windows,
             solo: self.solo().0,
             solo_amount: self.solo().1,
             harmony: self.harmony.at(clock.saturating_sub(1)),
