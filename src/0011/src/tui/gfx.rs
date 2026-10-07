@@ -16,6 +16,7 @@ pub const ECHO: Rgb = (110, 145, 255);
 pub const REVERB: Rgb = (175, 135, 255);
 pub const OUTPUT: Rgb = (232, 232, 228);
 pub const DRUMS: Rgb = (255, 128, 64);
+pub const LOOPS: Rgb = (250, 160, 190);
 pub const HARMONY: Rgb = (150, 200, 255);
 pub const TEXT: Rgb = (205, 203, 198);
 pub const DIM: Rgb = (110, 108, 104);

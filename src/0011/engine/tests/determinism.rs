@@ -31,17 +31,30 @@ fn render_with(seeds: Seeds, settings: Settings, frames: usize, block: usize) ->
 
 const SECONDS: usize = 30;
 
-/// The sound of the canonical track. If this changes, the music changed:
+/// The sound of the canonical track (0011: 0010 plus a choir loop). If this changes, the music changed:
 /// only update it deliberately, as a new version of the piece.
-const GOLDEN_HASH: u64 = 0x3231a5d529d9a713;
+const GOLDEN_HASH: u64 = 0x58680a02ea30e52e;
+
+/// 0010's canonical sound: the default settings without atmosphere loops.
+/// Every 0010 recipe parses that way, so they must still sound exactly as they did.
+const NO_LOOPS_GOLDEN_HASH: u64 = 0x3231a5d529d9a713;
 
 /// The golden hash from before "drum space" existed. Recipes without a space
-/// letter parse as Centred and must still sound exactly as they did.
+/// letter parse as Centred (and without loops) and must still sound exactly as they did.
 const CENTRED_GOLDEN_HASH: u64 = 0x2c58bac59719fe83;
+
+/// The default settings as 0010 had them: no atmosphere loops.
+const OLD_DEFAULTS: Settings = Settings { loops: shrine0011::NO_LOOPS, ..DEFAULT_SETTINGS };
+
+#[test]
+fn without_loops_sounds_exactly_like_0010() {
+    let h = hash(&render_with(DEFAULT_SEEDS, OLD_DEFAULTS, SECONDS * SAMPLE_RATE as usize, 4096));
+    assert_eq!(h, NO_LOOPS_GOLDEN_HASH, "0010's sound changed (got {h:#018x})");
+}
 
 #[test]
 fn centred_drums_sound_exactly_as_before() {
-    let centred = Settings { space: shrine0011::kits::DrumSpace::Centred, ..DEFAULT_SETTINGS };
+    let centred = Settings { space: shrine0011::kits::DrumSpace::Centred, ..OLD_DEFAULTS };
     let h = hash(&render_with(DEFAULT_SEEDS, centred, SECONDS * SAMPLE_RATE as usize, 4096));
     assert_eq!(h, CENTRED_GOLDEN_HASH, "Centred drums changed (got {h:#018x})");
 }
@@ -106,6 +119,7 @@ fn each_seed_changes_the_output() {
         Seeds { s3: 3, ..DEFAULT_SEEDS },
         Seeds { s4: 4, ..DEFAULT_SEEDS },
         Seeds { s5: 5, ..DEFAULT_SEEDS },
+        Seeds { s6: 6, ..DEFAULT_SEEDS },
     ];
     for v in variants {
         assert_ne!(hash(&render(v, frames, 4096)), base, "{v:?} sounds the same as the default");
@@ -126,6 +140,8 @@ fn each_setting_changes_the_output() {
         Settings { space: shrine0011::kits::DrumSpace::Centred, ..DEFAULT_SETTINGS },
         Settings { space: shrine0011::kits::DrumSpace::Tape, ..DEFAULT_SETTINGS },
         Settings { bpm: 160, ..DEFAULT_SETTINGS },
+        Settings { loops: [shrine0011::atmos::LoopTimbre::Glass, shrine0011::atmos::LoopTimbre::Off], ..DEFAULT_SETTINGS },
+        OLD_DEFAULTS,
     ];
     for v in variants {
         assert_ne!(hash(&render_with(DEFAULT_SEEDS, v, frames, 4096)), base, "{v:?} sounds the same as the default");
@@ -190,7 +206,7 @@ fn solo_never_touches_the_mix() {
     let mut track = Track::new(DEFAULT_SEEDS, DEFAULT_SETTINGS);
     let mut mix = vec![0f32; frames * 2];
     let mut mon = vec![0f32; frames * 2];
-    let solos = [None, Some(Solo::Drone), Some(Solo::Glitch1), Some(Solo::Glitch2), Some(Solo::Bass), Some(Solo::Drums), Some(Solo::Space)];
+    let solos = [None, Some(Solo::Drone), Some(Solo::Glitch1), Some(Solo::Glitch2), Some(Solo::Bass), Some(Solo::Drums), Some(Solo::Loop1), Some(Solo::Space)];
     for (i, (m, o)) in mix.chunks_mut(8192).zip(mon.chunks_mut(8192)).enumerate() {
         track.set_solo(solos[(i / 20) % solos.len()]);
         track.render_split(m, o);

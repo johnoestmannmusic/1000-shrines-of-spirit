@@ -8,6 +8,7 @@
 //! from the wall clock: it only affects the display, never the sound.
 
 use super::explain::{fill, Vars, EXPLAINERS};
+use shrine0011::atmos::LoopTimbre;
 use shrine0011::kits::{DrumSpace, Kit};
 use super::gfx::*;
 use super::Panel;
@@ -71,9 +72,13 @@ fn shuffled(n: usize, seed: &mut u64) -> Vec<usize> {
 }
 
 impl Ticker {
-    pub fn new(kit: Kit, space: DrumSpace, vars: Vars) -> Self {
-        let pool: Vec<usize> =
-            EXPLAINERS.iter().enumerate().filter(|(_, (_, when, _))| when.applies(kit, space)).map(|(i, _)| i).collect();
+    pub fn new(kit: Kit, space: DrumSpace, loops: [LoopTimbre; 2], vars: Vars) -> Self {
+        let pool: Vec<usize> = EXPLAINERS
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, when, _))| when.applies(kit, space, loops))
+            .map(|(i, _)| i)
+            .collect();
         let mut shuffle = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)

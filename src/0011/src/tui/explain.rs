@@ -7,6 +7,7 @@
 //! this version's values.
 
 use super::Panel::{self, *};
+use shrine0011::atmos::LoopTimbre;
 use shrine0011::harmony::Pace;
 use shrine0011::kits::{DrumSpace, Kit};
 use shrine0011::tempo::Tempo;
@@ -29,12 +30,22 @@ pub enum When {
     Panned,
     /// Drums with the tape echo.
     TapeEcho,
+    /// Whenever an atmosphere loop plays.
+    Loops,
+    /// Only when this loop timbre is playing.
+    Loop(LoopTimbre),
+    /// When there are no atmosphere loops.
+    NoLoops,
 }
 
 impl When {
-    pub fn applies(self, kit: Kit, space: DrumSpace) -> bool {
+    pub fn applies(self, kit: Kit, space: DrumSpace, loops: [LoopTimbre; 2]) -> bool {
         let drums = kit != Kit::Off;
+        let any_loop = loops.iter().any(|t| *t != LoopTimbre::Off);
         match self {
+            When::Loops => any_loop,
+            When::Loop(t) => loops.contains(&t),
+            When::NoLoops => !any_loop,
             When::Always => true,
             When::Kit(k) => k == kit,
             When::Drums => drums,
@@ -55,6 +66,9 @@ pub struct Vars {
     pub chords: String,
     pub recipe: String,
     pub tempo: Tempo,
+    /// Loop 1's timbre and length (e.g. "8 beats, 5.7 s").
+    pub loop1: String,
+    pub loop1_len: String,
 }
 
 pub fn fill(text: &str, v: &Vars) -> String {
@@ -70,6 +84,8 @@ pub fn fill(text: &str, v: &Vars) -> String {
         .replace("{scale}", &v.scale)
         .replace("{chords}", &v.chords)
         .replace("{recipe}", &v.recipe)
+        .replace("{loop1}", &v.loop1)
+        .replace("{loop1_len}", &v.loop1_len)
         .replace("{bpm}", &t.bpm.to_string())
         .replace("{half}", &format!("{:.0}", t.half_bpm()))
         .replace("{exact}", &format!("{:.2}", t.exact_bpm()))
@@ -89,12 +105,26 @@ pub const EXPLAINERS: &[(Panel, When, &str)] = &[
     (General, When::Always, "Soloing only changes what you hear. The engine still makes the full mix underneath, so a recording always gets the whole piece, byte for byte the same as a render."),
     (Flow, When::Always, "View 4, Learn, walks through how this piece is made, lesson by lesson, with this version's real settings, so you could rebuild it in your own studio. Use the up and down arrows there to choose a lesson."),
     (General, When::Always, "This version's recipe is {recipe}. Paste it into --recipe to hear exactly this again."),
-    (General, When::Always, "Every sample is computed from five seeds, five choices (tempo, scale, chord count, chord pace, drum kit) and a counter. The same inputs give the exact same music on any computer, now or in 20 years."),
-    (General, When::Always, "Seed 1 sets the key and builds the chords, seeds 2 and 3 shape the two glitch layers, seed 4 the bass, and seed 5 the chosen drum kit's sounds and break. Choosing the kit 'Off' leaves the drums out entirely."),
+    (General, When::Always, "Every sample is computed from six seeds, a handful of choices (tempo, scale, chord count, chord pace, drum kit, loop timbre) and a counter. The same inputs give the exact same music on any computer, now or in 20 years."),
+    (General, When::Always, "Seed 1 sets the key and builds the chords, seeds 2 and 3 shape the two glitch layers, seed 4 the bass, seed 5 the chosen drum kit's sounds and break, and seed 6 the atmosphere loops. Choosing the kit 'Off' leaves the drums out entirely."),
     // Tempo.
     (General, When::Always, "Tempo is the first choice at setup. This version runs its drums at {bpm} BPM, and everything ambient (the glitch grid, chord bars, echoes) at exactly half, {half} BPM, so the two layers of time always line up."),
     (General, When::Always, "Every rhythm here is a whole number of samples, so it can never drift. A drum sixteenth is rounded to a multiple of 12 samples ({drum16}) so glitch ratchets of 2, 3 and 4 divide it exactly. The tempo you actually hear is {exact} BPM."),
     (Cycles, When::Always, "The slow form cycles (41 to 307 s) are measured in seconds, not beats, so changing the BPM moves the rhythm but leaves the long breathing of the piece alone."),
+    // Atmosphere loops.
+    (Loops, When::Loops, "Atmosphere loop 1 plays {loop1}: a few seconds of sound, synthesised once at start-up for each chord and then looped for ever, the way 90s sample CDs and game soundtracks built their pads."),
+    (Loops, When::Loops, "Loop 1 lasts {loop1_len}. It is a whole number of beats, so it stays locked to the tempo. Three to eight seconds was the sweet spot of 90s samplers: long enough to breathe, short enough to fit in a few megabytes of memory."),
+    (Loops, When::Loops, "The loop point is hidden with a crossfade: the sound just after the loop's end is faded into its first 150 ms, so the jump back to the start never clicks. Hardware samplers like the Akai S1000 had a 'loop crossfade' for exactly this."),
+    (Loops, When::Loops, "Everything that moves inside the loop (the vowel, the wave steps, the swells, the strikes) is timed to repeat exactly once per loop. Each pass sounds the same, while the music around it keeps changing."),
+    (Loops, When::Loops, "Each chord gets its own loop. During a chord's last bar the next chord's loop fades in at the same position (equal power), so the pad changes harmony without ever restarting."),
+    (Loops, When::Loops, "Seed 6 chooses which chord tones each loop plays (moved into the octave above middle C, never closer than a whole tone) and the details of its movement."),
+    (Loops, When::Loops, "The loops step back for the drums exactly like the drone does, and drift a little in level with two of the slow cycles, so even a repeating loop never sits quite still in the mix."),
+    (Loops, When::Loop(LoopTimbre::Choir), "Choir \"Aah\": nine detuned sawtooth voices pass through three resonant band-pass filters set to vocal formants. Gliding the formants from 'ah' through 'oh', 'oo' and 'eh' is how the synth choirs of the Korg M1 and Roland JD-800 era sang."),
+    (Loops, When::Loop(LoopTimbre::Glass), "Glass: FM with two modulators at inharmonic ratios (3.5 and 7.07), struck softly on beats and half-beats. Brightness fades faster than volume, so each strike rings out as a pure tone: the DX7's glassy bell family."),
+    (Loops, When::Loop(LoopTimbre::Fantasia), "Fantasia: a bright FM bell strum over a warm, detuned saw pad, after the Roland D-50's famous 1987 preset, which layered a sampled attack over a synth pad. The idea defined the late-80s and 90s 'new age' pad."),
+    (Loops, When::Loop(LoopTimbre::WaveSeq), "Wave sequence: on every beat the loop moves to a new single-cycle waveform, crossfading over the last quarter-beat. Korg's Wavestation (1990) made whole evolving, rhythmic pads this way."),
+    (Loops, When::Loop(LoopTimbre::Breath), "Breath: white noise through very narrow band-pass filters tuned to the chord, plus a wide 'air' band. Each note swells in turn, like a breathy pan-flute or wind pad."),
+    (General, When::NoLoops, "This version has no atmosphere loops (Loop 1: Off). Choose a timbre at setup to add a 90s sample-CD pad that follows the chords."),
     // Harmony.
     (Harmony, When::Always, "The scale you choose decides which notes exist; seed 1 decides the key and how the chords are stacked from those notes. This version is in {key} {scale}."),
     (Harmony, When::Always, "This version cycles through {chords} over 32 bars, each chord a dense stack of {scale} notes."),
@@ -164,7 +194,7 @@ pub const EXPLAINERS: &[(Panel, When, &str)] = &[
     (Drums, When::Kit(Kit::Acoustic), "Acoustic hats vary from hit to hit: the metallic oscillators are detuned by up to 3%, the noise colour is re-rolled, and harder hits are brighter."),
     (Break, When::HeavyKit, "Punch: before sampling, each drum's first few milliseconds are boosted and driven, then the whole break goes through a 4:1 compressor and an asymmetric soft clip, like a break bussed through hardware. All of this happens once, at start-up."),
     (Spectrum, When::Drums, "Making room for the drums: while the break plays, the drone dips about 5 dB, pumps gently on each hit, and loses 6 dB above 2.5 kHz. When the drums drop out, the drone swells back to full."),
-    (General, When::Always, "Every version has a recipe. This one is {recipe}: the track, scale, chord count and pace (H or J), the BPM, the drum kit and space, then the five seeds. It is shown in the header, saved in each WAV's metadata, and recreates the version with --recipe."),
+    (General, When::Always, "Every version has a recipe. This one is {recipe}: the track, scale, chord count and pace (H or J), the BPM, the drum kit and space, the two loop timbres, then the six seeds. It is shown in the header, saved in each WAV's metadata, and recreates the version with --recipe."),
     (General, When::Always, "The setup screen remembers your last answers as the next defaults, and r on a seed question rolls a random seed."),
     (Drums, When::Drums, "Arrangement: every 4-bar phrase picks a section (out, hats only, half-time, full, or full with rolls) from the slow drum-energy LFO, so the drums breathe with the ambience."),
     (Drums, When::Drums, "The drums stay out for the first two phrases, then enter on hats alone: the piece always opens as ambient music before the break arrives."),
@@ -209,7 +239,7 @@ mod tests {
     fn insights_only_describe_the_playing_kit() {
         for kit in KITS {
             for (_, when, text) in EXPLAINERS {
-                if !when.applies(kit, DrumSpace::Tape) {
+                if !when.applies(kit, DrumSpace::Tape, [LoopTimbre::Choir, LoopTimbre::Off]) {
                     continue;
                 }
                 for other in KITS.iter().filter(|k| **k != kit && **k != Kit::Off) {
@@ -224,6 +254,24 @@ mod tests {
     }
 
     #[test]
+    fn loop_insights_only_describe_the_playing_timbre() {
+        use shrine0011::atmos::LOOP_TIMBRES;
+        for t in LOOP_TIMBRES {
+            for (_, when, text) in EXPLAINERS {
+                if !when.applies(Kit::Off, DrumSpace::Centred, [t, LoopTimbre::Off]) {
+                    continue;
+                }
+                for other in LOOP_TIMBRES.iter().filter(|o| **o != t && **o != LoopTimbre::Off) {
+                    assert!(!text.starts_with(&format!("{}:", other.name())), "{} shown while playing {}", other.name(), t.name());
+                }
+                if t == LoopTimbre::Off {
+                    assert!(!matches!(when, When::Loops | When::Loop(_)), "{text}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn placeholders_are_filled() {
         let v = Vars {
             kit: "K".into(),
@@ -232,6 +280,8 @@ mod tests {
             chords: "3 chords".into(),
             recipe: "R".into(),
             tempo: Tempo::new(120),
+            loop1: "L".into(),
+            loop1_len: "8 beats".into(),
         };
         for (_, _, text) in EXPLAINERS {
             assert!(!fill(text, &v).contains('{'), "{text}");

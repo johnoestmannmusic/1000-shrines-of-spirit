@@ -24,6 +24,8 @@ pub struct Meters {
     pub drums: f64,
     /// The drums' tape echo return.
     pub tape: f64,
+    /// Atmosphere loop 1.
+    pub loop1: f64,
     pub out_l: f64,
     pub out_r: f64,
 }
@@ -61,6 +63,41 @@ pub struct Description {
     pub reverb_lines: [usize; 8],
     pub reverb_decay: f64,
     pub bass_root: f64,
+    /// The atmosphere loop layers (a layer that is Off has no chords).
+    pub loops: [LoopInfo; 2],
+}
+
+/// One atmosphere loop layer, as built at start-up.
+#[derive(Clone, Debug)]
+pub struct LoopInfo {
+    pub timbre: crate::atmos::LoopTimbre,
+    pub beats: u64,
+    /// Loop length in samples.
+    pub len: usize,
+    /// The loop-point crossfade, in samples.
+    pub xfade: usize,
+    /// Per chord: the notes it plays, and its waveform (left, 256 peaks).
+    pub notes: Vec<Vec<f64>>,
+    pub overviews: Vec<Vec<f32>>,
+}
+
+impl LoopInfo {
+    pub fn on(&self) -> bool {
+        !self.notes.is_empty()
+    }
+}
+
+fn loop_info(l: &crate::atmos::AtmosLoop) -> LoopInfo {
+    let (beats, len) = l.length();
+    let perfs = l.performances();
+    LoopInfo {
+        timbre: l.timbre(),
+        beats,
+        len,
+        xfade: crate::atmos::XFADE,
+        notes: perfs.iter().map(|p| p.notes.clone()).collect(),
+        overviews: (0..perfs.len()).map(|i| l.overview(i, 256)).collect(),
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -193,6 +230,7 @@ impl Track {
             reverb_lines: crate::reverb::LINES,
             reverb_decay: crate::reverb::DECAY_SECONDS,
             bass_root: crate::bass::ROOT,
+            loops: [loop_info(&self.loop1), loop_info(&self.loop2)],
         }
     }
 

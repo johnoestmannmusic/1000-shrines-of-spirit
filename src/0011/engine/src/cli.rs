@@ -6,6 +6,7 @@ use crate::math::cos_turns;
 use crate::rng::Rng;
 use crate::harmony::{bar_weights, Pace, Scale, SCALES};
 use crate::kits::{DrumSpace, Kit, KITS, SPACES};
+use crate::atmos::{LoopTimbre, LOOP_TIMBRES};
 use crate::tempo::{DEFAULT_BPM, MAX_BPM, MIN_BPM};
 use crate::{Seeds, Settings, Track, DEFAULT_SEEDS, DEFAULT_SETTINGS, SAMPLE_RATE};
 use std::fs::File;
@@ -101,22 +102,26 @@ pub const TRACK: &str = "0011";
 const OLDER_TRACK: &str = "0010";
 
 /// A recipe: everything needed to regenerate a version of the track,
-/// e.g. `0011-LYD-3H-168-SUB-W-1000.9.1009.2026.168` (track, scale, chord count +
-/// pace (H half-time / J jungle), drum BPM, drum kit, drum space (C/W/T), seeds 1-5).
+/// e.g. `0011-LYD-3H-168-SUB-W-CHO.OFF-1000.9.1009.2026.168.11` (track, scale,
+/// chord count + pace (H half-time / J jungle), drum BPM, drum kit, drum space
+/// (C/W/T), the two atmosphere loops' timbres, seeds 1-6).
 pub fn recipe(seeds: Seeds, settings: Settings) -> String {
     format!(
-        "{TRACK}-{}-{}{}-{}-{}-{}-{}.{}.{}.{}.{}",
+        "{TRACK}-{}-{}{}-{}-{}-{}-{}.{}-{}.{}.{}.{}.{}.{}",
         settings.scale.code(),
         settings.chords,
         if settings.pace == Pace::Jungle { "J" } else { "H" },
         settings.bpm,
         settings.kit.code(),
         settings.space.code(),
+        settings.loops[0].code(),
+        settings.loops[1].code(),
         seeds.s1,
         seeds.s2,
         seeds.s3,
         seeds.s4,
-        seeds.s5
+        seeds.s5,
+        seeds.s6
     )
 }
 
@@ -163,14 +168,24 @@ pub fn parse_recipe(code: &str) -> Option<(Seeds, Settings)> {
         }
         None => DrumSpace::Centred,
     };
+    // The atmosphere loops ("CHO.OFF"); recipes from before them had none.
+    let loops = match next.split_once('.').and_then(|(a, b)| Some([LoopTimbre::from_code(a)?, LoopTimbre::from_code(b)?])) {
+        Some(l) => {
+            next = parts.next()?;
+            l
+        }
+        None => crate::NO_LOOPS,
+    };
+    // Seeds 1-6; recipes from before seed 6 have five.
     let seeds: Vec<u64> = next.split('.').map(|s| s.parse().ok()).collect::<Option<_>>()?;
-    if parts.next().is_some() || seeds.len() != 5 {
+    if parts.next().is_some() || !(5..=6).contains(&seeds.len()) {
         return None;
     }
-    let seeds = Seeds { s1: seeds[0], s2: seeds[1], s3: seeds[2], s4: seeds[3], s5: seeds[4] };
+    let s6 = seeds.get(5).copied().unwrap_or(DEFAULT_SEEDS.s6);
+    let seeds = Seeds { s1: seeds[0], s2: seeds[1], s3: seeds[2], s4: seeds[3], s5: seeds[4], s6 };
     // Older recipes: seed 5 picked the kit, and 0 meant no drums.
     let kit = kit.unwrap_or_else(|| if seeds.s5 == 0 { Kit::Off } else { crate::kits::legacy_kit_for(seeds.s5) });
-    Some((seeds, Settings { scale, chords, pace, kit, space, bpm }))
+    Some((seeds, Settings { scale, chords, pace, kit, space, bpm, loops }))
 }
 
 /// A drum space by number (1-3), letter or name.
@@ -193,6 +208,18 @@ pub fn parse_kit(s: &str) -> Option<Kit> {
     let want = s.to_ascii_lowercase();
     (!want.is_empty()).then_some(())?;
     Kit::from_code(s).or_else(|| KITS.iter().copied().find(|k| k.name().to_ascii_lowercase().starts_with(&want)))
+}
+
+/// A loop timbre by number (1-6), code (e.g. CHO) or (the start of) its name.
+pub fn parse_loop(s: &str) -> Option<LoopTimbre> {
+    let s = s.trim();
+    if let Ok(n) = s.parse::<usize>() {
+        return (1..=LOOP_TIMBRES.len()).contains(&n).then(|| LOOP_TIMBRES[n - 1]);
+    }
+    let want = s.to_ascii_lowercase().replace('"', "");
+    (!want.is_empty()).then_some(())?;
+    LoopTimbre::from_code(s)
+        .or_else(|| LOOP_TIMBRES.iter().copied().find(|t| t.name().to_ascii_lowercase().replace('"', "").starts_with(&want)))
 }
 
 /// A drum tempo in BPM, from 70 to 180 (whole numbers).
@@ -257,8 +284,13 @@ pub fn ask_settings(input: &mut impl BufRead) -> Settings {
         }
         ask_until(input, "Drum space", "2", "Enter 1, 2 or 3.", parse_space)
     };
+    println!("Atmosphere loop 1 (90s sample-CD pad loops; seed 6 shapes it):");
+    for (i, t) in LOOP_TIMBRES.iter().enumerate() {
+        println!("  {}) {:<16} {}", i + 1, t.name(), t.blurb());
+    }
+    let loop1 = ask_until(input, "Loop 1 timbre", "1", "Enter 1-6, a code or a timbre name (6 = Off).", parse_loop);
     println!();
-    Settings { scale, chords, pace, kit, space, bpm }
+    Settings { scale, chords, pace, kit, space, bpm, loops: [loop1, LoopTimbre::Off] }
 }
 
 pub fn ask_seeds(input: &mut impl BufRead) -> Seeds {
@@ -275,6 +307,10 @@ pub fn ask_seeds(input: &mut impl BufRead) -> Seeds {
         s5: {
             println!("  (seed 5 shapes the drum kit's sounds and break)");
             seed(5, DEFAULT_SEEDS.s5)
+        },
+        s6: {
+            println!("  (seed 6 shapes the atmosphere loops)");
+            seed(6, DEFAULT_SEEDS.s6)
         },
     };
     println!();
@@ -373,7 +409,7 @@ pub fn wav_info(title: &str, software: &str, seeds: Seeds, settings: Settings) -
         software: software.to_string(),
         comment: format!(
             "GlitchAmbiToolkit track {TRACK}. Recipe {code}. {} BPM, {key} {}, {} chord(s) ({}), {pace} pace. \
-             Seeds {} {} {} {} {} (drums {drums}). Regenerate with: --recipe {code}",
+             Seeds {} {} {} {} {} {} (drums {drums}; loop 1 {}). Regenerate with: --recipe {code}",
             settings.bpm,
             settings.scale.name(),
             settings.chords,
@@ -383,6 +419,8 @@ pub fn wav_info(title: &str, software: &str, seeds: Seeds, settings: Settings) -
             seeds.s3,
             seeds.s4,
             seeds.s5,
+            seeds.s6,
+            settings.loops[0].name().to_lowercase(),
         ),
     }
 }
@@ -477,7 +515,7 @@ pub fn render_to_wav(seeds: Seeds, settings: Settings, path: &str, seconds: f64,
     let total = (seconds * SAMPLE_RATE as f64) as u64;
     let fade = Fade::new(total);
     eprintln!(
-        "0011: rendering {} in {}, {} chord(s), seeds {} {} {} {} {}, fading out over the last {:.0} s -> {path}",
+        "0011: rendering {} in {}, {} chord(s), seeds {} {} {} {} {} {}, fading out over the last {:.0} s -> {path}",
         format_length(seconds),
         settings.scale.name(),
         settings.chords,
@@ -486,6 +524,7 @@ pub fn render_to_wav(seeds: Seeds, settings: Settings, path: &str, seconds: f64,
         seeds.s3,
         seeds.s4,
         seeds.s5,
+        seeds.s6,
         fade.seconds(),
     );
     let minute = SAMPLE_RATE as u64 * 60;
@@ -540,9 +579,12 @@ mod tests {
 
     #[test]
     fn recipes_round_trip() {
-        assert_eq!(recipe(DEFAULT_SEEDS, DEFAULT_SETTINGS), "0011-LYD-3H-168-SUB-W-1000.9.1009.2026.168");
-        // 0010's recipes (no BPM) still read, at 168 BPM.
-        assert_eq!(parse_recipe("0010-LYD-3H-SUB-W-1000.9.1009.2026.168"), Some((DEFAULT_SEEDS, DEFAULT_SETTINGS)));
+        assert_eq!(recipe(DEFAULT_SEEDS, DEFAULT_SETTINGS), "0011-LYD-3H-168-SUB-W-CHO.OFF-1000.9.1009.2026.168.11");
+        // 0010's recipes (no BPM, no loops) still read, at 168 BPM without loops.
+        assert_eq!(
+            parse_recipe("0010-LYD-3H-SUB-W-1000.9.1009.2026.168"),
+            Some((DEFAULT_SEEDS, Settings { loops: crate::NO_LOOPS, ..DEFAULT_SETTINGS }))
+        );
         assert_eq!(parse_recipe("0011-LYD-3H-120-SUB-W-1.2.3.4.5").unwrap().1.bpm, 120);
         // Recipes from before drum space existed had mono drums.
         assert_eq!(parse_recipe("0011-LYD-3H-SUB-1.2.3.4.5").unwrap().1.space, DrumSpace::Centred);
@@ -551,7 +593,7 @@ mod tests {
         let (seeds, settings) = parse_recipe("0011-LYD-3H-1000.9.1009.2026.168").unwrap();
         assert_eq!(
             (seeds, settings),
-            (DEFAULT_SEEDS, Settings { kit: Kit::Acoustic, space: DrumSpace::Centred, ..DEFAULT_SETTINGS })
+            (DEFAULT_SEEDS, Settings { kit: Kit::Acoustic, space: DrumSpace::Centred, loops: crate::NO_LOOPS, ..DEFAULT_SETTINGS })
         );
         // …and seed 5 = 0 meant "no drums".
         assert_eq!(parse_recipe("0011-LYD-3H-1.2.3.4.0").unwrap().1.kit, Kit::Off);
@@ -566,13 +608,14 @@ mod tests {
                 kit: KITS[i % KITS.len()],
                 space: SPACES[i % SPACES.len()],
                 bpm: MIN_BPM + 9 * i as u16,
+                loops: [LOOP_TIMBRES[i % LOOP_TIMBRES.len()], LOOP_TIMBRES[(i + 2) % LOOP_TIMBRES.len()]],
             };
-            let seeds = Seeds { s1: i as u64, s2: u64::MAX, s3: 0, s4: 42, s5: 7 };
+            let seeds = Seeds { s1: i as u64, s2: u64::MAX, s3: 0, s4: 42, s5: 7, s6: 3 };
             let code = recipe(seeds, settings);
             assert_eq!(parse_recipe(&code), Some((seeds, settings)), "{code}");
             assert_eq!(parse_recipe(&code.to_ascii_lowercase()), Some((seeds, settings)));
         }
-        for bad in ["", "0009-LYD-3H-1.2.3.4.5", "0011-XXX-3H-1.2.3.4.5", "0011-LYD-5H-1.2.3.4.5", "0011-LYD-3Q-1.2.3.4.5", "0011-LYD-3H-1.2.3.4", "0011-LYD-3H-1.2.3.4.x", "0011-LYD-3H-XYZ-1.2.3.4.5", "0011-LYD-3H-SUB-Q-1.2.3.4.5", "0011-LYD-3H-69-SUB-W-1.2.3.4.5", "0011-LYD-3H-181-SUB-W-1.2.3.4.5"] {
+        for bad in ["", "0009-LYD-3H-1.2.3.4.5", "0011-XXX-3H-1.2.3.4.5", "0011-LYD-5H-1.2.3.4.5", "0011-LYD-3Q-1.2.3.4.5", "0011-LYD-3H-1.2.3.4", "0011-LYD-3H-1.2.3.4.x", "0011-LYD-3H-XYZ-1.2.3.4.5", "0011-LYD-3H-SUB-Q-1.2.3.4.5", "0011-LYD-3H-69-SUB-W-1.2.3.4.5", "0011-LYD-3H-181-SUB-W-1.2.3.4.5", "0011-LYD-3H-SUB-W-CHO.XYZ-1.2.3.4.5", "0011-LYD-3H-SUB-W-1.2.3.4.5.6.7"] {
             assert_eq!(parse_recipe(bad), None, "{bad}");
         }
     }

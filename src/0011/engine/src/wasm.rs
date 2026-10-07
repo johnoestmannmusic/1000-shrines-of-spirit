@@ -2,10 +2,10 @@
 //! generation), so the .wasm stays loadable with nothing but the standard
 //! WebAssembly API.
 //!
-//!   const p = sos_new(s1hi, s1lo, … s5hi, s5lo, scale, chords, pace, kit, space, bpm);
+//!   const p = sos_new(s1hi, s1lo, … s6hi, s6lo, scale, chords, pace, kit, space, bpm, loop1, loop2);
 //!   (scale: index into `harmony::SCALES`; chords: 1-4; pace: 0 half-time, 1 jungle;
 //!    kit: index into `kits::KITS`; space: 0 centred, 1 wide, 2 wide + tape echo;
-//!    bpm: the drum tempo, 70-180)
+//!    bpm: the drum tempo, 70-180; loop1, loop2: indices into `atmos::LOOP_TIMBRES`)
 //!   const ptr = sos_render(p, frames);  // → `frames` interleaved stereo f32s
 //!
 //! The returned pointer is valid until the next call; re-create any
@@ -36,12 +36,16 @@ pub extern "C" fn sos_new(
     s4lo: u32,
     s5hi: u32,
     s5lo: u32,
+    s6hi: u32,
+    s6lo: u32,
     scale: u32,
     chords: u32,
     pace: u32,
     kit: u32,
     space: u32,
     bpm: u32,
+    loop1: u32,
+    loop2: u32,
 ) -> *mut Player {
     let seeds = Seeds {
         s1: join(s1hi, s1lo),
@@ -49,6 +53,7 @@ pub extern "C" fn sos_new(
         s3: join(s3hi, s3lo),
         s4: join(s4hi, s4lo),
         s5: join(s5hi, s5lo),
+        s6: join(s6hi, s6lo),
     };
     let settings = Settings {
         scale: Scale::from_index(scale as usize),
@@ -57,6 +62,7 @@ pub extern "C" fn sos_new(
         kit: crate::kits::KITS[kit as usize % crate::kits::KITS.len()],
         space: crate::kits::SPACES[space as usize % crate::kits::SPACES.len()],
         bpm: bpm.min(u16::MAX as u32) as u16,
+        loops: [loop1, loop2].map(|i| crate::atmos::LOOP_TIMBRES[i as usize % crate::atmos::LOOP_TIMBRES.len()]),
     };
     Box::into_raw(Box::new(Player { track: Track::new(seeds, settings), buf: Vec::new() }))
 }

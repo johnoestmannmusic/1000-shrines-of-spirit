@@ -47,6 +47,8 @@ pub struct ModState {
     pub bass_swell: f64,
     /// Drum energy, 0..1: picks each phrase's arrangement section.
     pub drums: f64,
+    /// Atmosphere loop level, 0.7..1: a gentle drift on top of each loop.
+    pub loop_level: f64,
 }
 
 pub struct Mods {
@@ -96,6 +98,7 @@ impl Mods {
             bass_bright: unit(0.4 + 0.35 * l113 + 0.2 * l41),
             bass_swell: unit(0.7 + 0.3 * l307 * l233),
             drums: unit(0.5 + 0.34 * l233 + 0.25 * l97 * l41),
+            loop_level: 0.85 + 0.15 * l113 * l61,
         }
     }
 }

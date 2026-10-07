@@ -15,6 +15,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType};
 use ratatui::Frame;
+use shrine0011::atmos::LoopTimbre;
 use shrine0011::drone::Algo;
 use shrine0011::drums::{PHRASE_BARS, STEPS};
 use shrine0011::harmony::{key_name, Pace};
@@ -23,9 +24,9 @@ use shrine0011::{Solo, DRONE_CUTOFF_MIN, DRONE_CUTOFF_OCTAVES, SAMPLE_RATE};
 use std::f64::consts::TAU;
 
 
-/// (title, the panel its Insights are tagged with). The first 8 explain how
-/// the piece is made; the last 6 each solo one instrument.
-pub const LESSONS: [(&str, Panel); 14] = [
+/// (title, the panel its Insights are tagged with). The first 9 explain how
+/// the piece is made; the last 7 each solo one instrument (in `audio::SOLOS` order).
+pub const LESSONS: [(&str, Panel); 16] = [
     ("The score", Panel::Cycles),
     ("The chord", Panel::Chord),
     ("Freezing", Panel::Spectrum),
@@ -34,16 +35,18 @@ pub const LESSONS: [(&str, Panel); 14] = [
     ("Space", Panel::Reverb),
     ("The break", Panel::Break),
     ("Making room", Panel::Drums),
+    ("Sample loops", Panel::Loops),
     ("Drone", Panel::Spectrum),
     ("Glitch layer 1", Panel::Glitch),
     ("Glitch layer 2", Panel::Glitch),
     ("Bass", Panel::Bass),
     ("Drums", Panel::Drums),
+    ("Loop 1", Panel::Loops),
     ("Space (echo+reverb)", Panel::Reverb),
 ];
 
 /// Lessons from here on are instrument lessons.
-const FIRST_INSTRUMENT: usize = 8;
+const FIRST_INSTRUMENT: usize = 9;
 
 pub fn is_instrument(lesson: usize) -> bool {
     lesson >= FIRST_INSTRUMENT
@@ -106,6 +109,8 @@ pub fn draw(ui: &Ui, f: &mut Frame, area: Rect, explaining: Panel) {
         " ● SOLO: you hear only this layer · s = full mix ".to_string()
     } else if solo_for(ui.lesson) == Some(Solo::Drums) && !ui.desc.drums_on {
         " no drums in this version ".to_string()
+    } else if solo_for(ui.lesson) == Some(Solo::Loop1) && !ui.desc.loops[0].on() {
+        " no loop in this version ".to_string()
     } else {
         " ○ full mix · s = solo this layer ".to_string()
     };
@@ -147,6 +152,7 @@ pub fn draw(ui: &Ui, f: &mut Frame, area: Rect, explaining: Panel) {
         5 => space(ui, buf, vis),
         6 => brk(ui, buf, vis),
         7 => room(ui, buf, vis),
+        8 => sample_loops(ui, buf, vis),
         _ => instrument_view(ui, buf, vis),
     }
     let mut y = vis_h + 1;
@@ -306,6 +312,34 @@ fn text(ui: &Ui) -> (String, Vec<String>) {
                 space_tip(d.settings.space).to_string(),
             ],
         ),
+        8 if !d.loops[0].on() => (
+            "This version has no atmosphere loop (Loop 1: Off). Choose a timbre at setup to hear a 90s sample-CD pad built and looped live.".to_string(),
+            vec!["Short pad loops were the backbone of 90s game and sample-CD ambience: try Choir or Glass.".to_string()],
+        ),
+        8 => {
+            let lp = &d.loops[0];
+            let secs = lp.len as f64 / SR;
+            let s = ui.snap.as_ref();
+            let pass = s.map_or(1, |s| s.clock / lp.len as u64 + 1);
+            let loop_notes: Vec<String> = lp.notes[pos.chord].iter().map(|n| note_name(*n)).collect();
+            (
+                format!(
+                    "At start-up a {} loop is synthesised once for each of the {} chord{}: {} beats ({secs:.1} s) of sound. It is rendered a second time round so every tail has settled, then the sound just after its end is crossfaded into its first 150 ms. From then on it is only played back, round and round (now pass {pass}), fading into the next chord's loop during each chord's last bar. This chord's loop plays {}.",
+                    lp.timbre.name(),
+                    h.chords.len(),
+                    if h.chords.len() == 1 { "" } else { "s" },
+                    lp.beats,
+                    loop_notes.join(" ")
+                ),
+                vec![
+                    format!("Record {secs:.1} s of a held chord: a whole number of beats at your tempo ({} beats at {half:.0} BPM), 3 to 8 seconds long.", lp.beats),
+                    timbre_tip(lp.timbre).to_string(),
+                    "In your sampler, set the loop start and end, then turn on loop crossfade (100–200 ms) until the jump disappears.".to_string(),
+                    "Keep every movement (filter, vowel, wave) to whole cycles per loop, so each pass sounds the same.".to_string(),
+                    "Make one loop per chord, and crossfade to the next during the last bar of each chord, at the same point in the loop.".to_string(),
+                ],
+            )
+        }
         _ if !drums => (
             "With no drums in this version, nothing needs to duck: the drone stays at full level and full brightness.".to_string(),
             vec!["When you add drums to a dense drone, plan to carve space for them (see this lesson with a kit chosen).".to_string()],
@@ -833,6 +867,33 @@ fn instrument_text(ui: &Ui) -> (String, Vec<String>) {
                 ],
             )
         }
+        Some(Solo::Loop1) if !d.loops[0].on() => (
+            "This version has no atmosphere loop (Loop 1: Off).".to_string(),
+            vec!["Choose a loop timbre at setup to hear one here.".to_string()],
+        ),
+        Some(Solo::Loop1) => {
+            let lp = &d.loops[0];
+            let loop_notes: Vec<String> = lp.notes[s.harmony.chord].iter().map(|n| note_name(*n)).collect();
+            (
+                format!(
+                    "{}: {} beats ({:.1} s) looped, now playing {} (pass {}). On its own it is a short, hypnotic cycle; in the mix it sits between the drone below and the glitches above.",
+                    lp.timbre.name(),
+                    lp.beats,
+                    lp.len as f64 / SR,
+                    loop_notes.join(" "),
+                    s.clock / lp.len as u64 + 1
+                ),
+                vec![
+                    "It follows the chords: every chord has its own loop, crossfaded in during the morph bar at the same point in the cycle.".to_string(),
+                    if d.drums_on {
+                        format!("Like the drone, it steps back while the drums play (now {duck_db:+.1} dB).")
+                    } else {
+                        "With no drums it is never ducked; only a slow level drift moves it.".to_string()
+                    },
+                    "It sends generously to the reverb, so it blooms into the same room as the drone.".to_string(),
+                ],
+            )
+        }
         _ => {
             let ms = d.echo_delay as f64 / SR * 1000.0;
             (
@@ -850,6 +911,18 @@ fn instrument_text(ui: &Ui) -> (String, Vec<String>) {
     }
 }
 
+/// How to make each loop timbre yourself, as a recreate-it tip.
+fn timbre_tip(t: LoopTimbre) -> &'static str {
+    match t {
+        LoopTimbre::Choir => "Choir: three detuned saws per note through three parallel band-passes at vocal formants (730 / 1090 / 2440 Hz is 'ah'); glide the formants a → o → u → e once per loop.",
+        LoopTimbre::Glass => "Glass: FM with modulators at 3.5 and 7.07 × the note, the index decaying faster than the volume; strike one or two notes per beat, softly, over a quiet sine bed.",
+        LoopTimbre::Fantasia => "Fantasia: a short FM bell (3 : 1) strummed at the top of the loop, over a detuned-saw pad through a slowly swelling low-pass.",
+        LoopTimbre::WaveSeq => "Wave sequence: one single-cycle wave per beat (a few harmonics each), crossfaded over the last quarter of every beat, with a soft accent on each step.",
+        LoopTimbre::Breath => "Breath: white noise into very narrow band-passes (Q ≈ 28) at each chord tone and its octave, each note swelling in turn.",
+        LoopTimbre::Off => "Choose a loop timbre at setup.",
+    }
+}
+
 /// How the drums use the stereo field, as a recreate-it tip.
 fn space_tip(space: DrumSpace) -> &'static str {
     match space {
@@ -857,6 +930,43 @@ fn space_tip(space: DrumSpace) -> &'static str {
         DrumSpace::Wide => "Each hit gets its own pan, fixed in the break: the kick centred, snares 45–65% to one side, hats 50–75%.",
         DrumSpace::Tape => "Hits are panned (kick centred, snares 45–65%, hats 50–75%) and the snares feed a ping-pong tape echo, half-width: 268 ms, a slow wobble, darker and thinner each repeat.",
     }
+}
+
+/// Lesson 9: the loop itself, going round, with its loop point and beats.
+fn sample_loops(ui: &Ui, buf: &mut Buffer, r: Rect) {
+    let Some(s) = &ui.snap else { return };
+    let lp = &ui.desc.loops[0];
+    if r.width < 30 || r.height < 6 {
+        return;
+    }
+    if !lp.on() {
+        put(buf, r, 0, 1, "no atmosphere loop in this version (Loop 1: Off)", fg(DIM));
+        return;
+    }
+    let pos = s.harmony;
+    let len = lp.len as u64;
+    let into = (s.clock % len) as f64 / SR;
+    put(
+        buf,
+        r,
+        0,
+        0,
+        &format!("loop 1 · {} · chord {}'s loop", lp.timbre.name(), pos.chord + 1),
+        fg(LOOPS).add_modifier(Modifier::BOLD),
+    );
+    let fade = if pos.morph > 0.0 { format!(" · fading into chord {}: {:.0}%", pos.next + 1, pos.morph * 100.0) } else { String::new() };
+    put(
+        buf,
+        r,
+        0,
+        1,
+        &format!("pass {} · {:.1} of {:.1} s{fade}", s.clock / len + 1, into, lp.len as f64 / SR),
+        fg(TEXT),
+    );
+    let strip = Rect::new(r.x, r.y + 2, r.width, r.height.saturating_sub(3).min(10));
+    super::draw::loop_strip(ui, s, buf, strip, 0);
+    let y = 2 + strip.height;
+    put(buf, r, 0, y, "░ loop-point crossfade (150 ms)   ┴ beats   │ playhead: at the right edge it jumps back to the left, seamlessly", fg(DIM));
 }
 
 /// What you hear (waveform + spectrum), the layer's share of the mix, and its mechanics.
@@ -871,6 +981,7 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
         Some(Solo::Glitch2) => GLITCH2,
         Some(Solo::Bass) => BASS,
         Some(Solo::Drums) => DRUMS,
+        Some(Solo::Loop1) => LOOPS,
         _ => REVERB,
     };
     let top = (r.height * 3 / 5).max(3);
@@ -919,12 +1030,13 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
 
     // Its share of the mix: every layer's level, this one highlighted.
     let l = &ui.levels;
-    let layers: [(&str, f64, Option<Solo>, Rgb); 6] = [
+    let layers: [(&str, f64, Option<Solo>, Rgb); 7] = [
         ("drone", l.drone, Some(Solo::Drone), DRONE),
         ("glitch 1", l.glitch1, Some(Solo::Glitch1), GLITCH1),
         ("glitch 2", l.glitch2, Some(Solo::Glitch2), GLITCH2),
         ("bass", l.bass, Some(Solo::Bass), BASS),
         ("drums", l.drums, Some(Solo::Drums), DRUMS),
+        ("loop 1", l.loop1, Some(Solo::Loop1), LOOPS),
         ("echo+reverb", l.reverb.max(l.echo), Some(Solo::Space), REVERB),
     ];
     let y0 = top + 1;
@@ -998,6 +1110,20 @@ fn instrument_view(ui: &Ui, buf: &mut Buffer, r: Rect) {
             mech(buf, 3, &format!("last hit: {}", if hits.is_empty() { "-".to_string() } else { hits }), fg(TEXT));
         }
         Some(Solo::Drums) => mech(buf, 0, "no drums in this version (kit: Off)", fg(DIM)),
+        Some(Solo::Loop1) if !ui.desc.loops[0].on() => mech(buf, 0, "no loop in this version (Loop 1: Off)", fg(DIM)),
+        Some(Solo::Loop1) => {
+            let lp = &ui.desc.loops[0];
+            let pos = s.harmony;
+            mech(buf, 0, &format!("{} · {} beats · pass {}", lp.timbre.name(), lp.beats, s.clock / lp.len as u64 + 1), fg(DIM));
+            let fade = if pos.morph > 0.0 {
+                format!("crossfading to chord {}: {:.0}%", pos.next + 1, pos.morph * 100.0)
+            } else {
+                format!("chord {}'s loop", pos.chord + 1)
+            };
+            mech(buf, 1, &fade, fg(TEXT));
+            let strip = Rect::new(r.x + x0, r.y + y0 + 2, r.width.saturating_sub(x0), r.height.saturating_sub(y0 + 2).min(5));
+            super::draw::loop_strip(ui, s, buf, strip, 0);
+        }
         _ => {
             mech(buf, 0, "the room", fg(DIM));
             mech(buf, 1, &format!("echo {:.0} ms · feedback {:.0}%", ui.desc.echo_delay as f64 / SR * 1000.0, ui.desc.echo_feedback * 100.0), fg(TEXT));

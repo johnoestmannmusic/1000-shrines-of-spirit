@@ -4,7 +4,8 @@
 //! Particles are spawned by real engine events, at the moment they are
 //! heard: a drone grain each time a new FFT frame starts sounding, a lettered
 //! particle for every glitch hit, dimmer copies leaving the echo at its
-//! delay time, and a stream out of the reverb as thick as its level.
+//! delay time, a stream out of the reverb as thick as its level, and a
+//! pulse from each atmosphere loop every time it goes round.
 
 use super::draw::{kind_letter, kind_color, fmt_hz, note_name, fmt_ratio};
 use super::gfx::*;
@@ -43,16 +44,18 @@ pub enum Node {
     Smp,
     Chop,
     Bus,
+    Seed6,
+    Loop1,
 }
 use Node::*;
 
-const NODES: [Node; 21] = [
+const NODES: [Node; 23] = [
     Seed1, Seed2, Seed3, Seed4, Fm, Freeze, Filter, G1, Rep1, G2, Rep2, Echo, Bass, Lp, Reverb, Out, Seed5, Brk, Smp,
-    Chop, Bus,
+    Chop, Bus, Seed6, Loop1,
 ];
 
 /// (from, to, carries settings rather than sound)
-const EDGES: [(Node, Node, bool); 21] = [
+const EDGES: [(Node, Node, bool); 24] = [
     (Seed1, Fm, true),
     (Seed2, G1, true),
     (Seed3, G2, true),
@@ -74,6 +77,9 @@ const EDGES: [(Node, Node, bool); 21] = [
     (Smp, Chop, false),
     (Chop, Bus, false),
     (Bus, Out, false),
+    (Seed6, Loop1, true),
+    (Loop1, Out, false),
+    (Loop1, Reverb, false),
 ];
 
 fn edge(from: Node, to: Node) -> usize {
@@ -101,6 +107,7 @@ fn onward(n: Node) -> &'static [(Node, Node, f64)] {
         Smp => &[(Smp, Chop, 1.0)],
         Chop => &[(Chop, Bus, 1.0)],
         Bus => &[(Bus, Out, 1.0)],
+        Loop1 => &[(Loop1, Out, 1.0), (Loop1, Reverb, 0.5)],
         _ => &[],
     }
 }
@@ -125,20 +132,30 @@ pub struct Pipeline {
     particles: Vec<Particle>,
     /// (time, particle) spawns waiting to happen (echo repeats).
     scheduled: Vec<(f64, Particle)>,
-    flash: [f64; 21],
+    flash: [f64; 23],
     /// Path lengths from the last draw, so motion can be advanced between draws.
     lengths: RefCell<Vec<usize>>,
     seed_timer: f64,
     bass_timer: f64,
     reverb_timer: f64,
     fm_timer: f64,
-    /// Whether the drums exist (seed 5 ≠ 0).
+    loop_timer: f64,
+    /// Whether the drums exist (kit not Off).
     pub drums_on: bool,
+    /// Whether atmosphere loop 1 plays.
+    pub loops_on: bool,
 }
 
 impl Pipeline {
-    pub fn new(drums_on: bool) -> Self {
-        Pipeline { drums_on, ..Default::default() }
+    pub fn new(drums_on: bool, loops_on: bool) -> Self {
+        Pipeline { drums_on, loops_on, ..Default::default() }
+    }
+
+    /// An atmosphere loop just went round: a bright pulse leaves it.
+    pub fn loop_wrap(&mut self, level: f64) {
+        self.flash[idx(Loop1)] = 1.0;
+        self.spawn(Loop1, Out, LOOPS, '◌', 0.6 + 0.4 * level, false);
+        self.spawn(Loop1, Reverb, LOOPS, '◌', 0.4 + 0.3 * level, false);
     }
 
     fn spawn(&mut self, from: Node, to: Node, color: Rgb, ch: char, bright: f64, hit: bool) {
@@ -175,12 +192,14 @@ impl Pipeline {
         self.seed_timer -= dt;
         if self.seed_timer <= 0.0 {
             self.seed_timer = 1.6;
-            let seeds: &[(Node, Node)] = if self.drums_on {
-                &[(Seed1, Fm), (Seed2, G1), (Seed3, G2), (Seed4, Bass), (Seed5, Brk)]
-            } else {
-                &[(Seed1, Fm), (Seed2, G1), (Seed3, G2), (Seed4, Bass)]
-            };
-            for (s, g) in seeds.iter().copied() {
+            let mut seeds = vec![(Seed1, Fm), (Seed2, G1), (Seed3, G2), (Seed4, Bass)];
+            if self.drums_on {
+                seeds.push((Seed5, Brk));
+            }
+            if self.loops_on {
+                seeds.push((Seed6, Loop1));
+            }
+            for (s, g) in seeds {
                 self.particles.push(Particle { edge: edge(s, g), pos: 0.0, color: DIM, ch: '·', bright: 0.6, hit: false });
             }
         }
@@ -202,6 +221,15 @@ impl Pipeline {
             let l = level_frac(ui_levels.bass, 40.0);
             if l > 0.05 {
                 self.spawn(Bass, Lp, BASS, '•', 0.4 + 0.6 * l, false);
+            }
+        }
+        // The loop plays continuously: a gentle stream as thick as its level.
+        self.loop_timer -= dt;
+        if self.loop_timer <= 0.0 {
+            self.loop_timer = 0.45;
+            let l = level_frac(ui_levels.loop1, 40.0);
+            if self.loops_on && l > 0.05 {
+                self.spawn(Loop1, Out, LOOPS, '•', 0.3 + 0.5 * l, false);
             }
         }
         // The reverb's output: denser and brighter as its tail grows.
@@ -280,14 +308,14 @@ impl Pipeline {
 // ---------------------------------------------------------------- geometry
 
 struct Geo {
-    boxes: [Rect; 21],
+    boxes: [Rect; 23],
     paths: Vec<Vec<(u16, u16)>>,
 }
 
 const BOX_H: u16 = 4;
 
 fn layout(r: Rect) -> Option<Geo> {
-    if r.width < 90 || r.height < 24 {
+    if r.width < 90 || r.height < 29 {
         return None;
     }
     let (seed_w, out_w) = (11u16, 13u16);
@@ -295,11 +323,11 @@ fn layout(r: Rect) -> Option<Geo> {
     let gap = (r.width - seed_w - out_w - 4 * bw) / 5;
     let cx = [0, seed_w + gap, seed_w + 2 * gap + bw, seed_w + 3 * gap + 2 * bw, seed_w + 4 * gap + 3 * bw];
     let c5 = seed_w + 5 * gap + 4 * bw;
-    let gy = ((r.height.min(28) - 5 * BOX_H) / 4).clamp(1, 2);
-    let y: Vec<u16> = (0..5).map(|i| i * (BOX_H + gy)).collect();
+    let gy = ((r.height.min(34) - 6 * BOX_H) / 5).clamp(1, 2);
+    let y: Vec<u16> = (0..6).map(|i| i * (BOX_H + gy)).collect();
     let mid12 = (y[1] + y[2]) / 2;
     let rect = |x: u16, y: u16, w: u16| Rect::new(r.x + x, r.y + y, w, BOX_H);
-    let mut boxes = [Rect::default(); 21];
+    let mut boxes = [Rect::default(); 23];
     let mut set = |n: Node, rc: Rect| boxes[idx(n)] = rc;
     set(Seed1, rect(cx[0], y[0], seed_w));
     set(Seed2, rect(cx[0], y[1], seed_w));
@@ -322,6 +350,8 @@ fn layout(r: Rect) -> Option<Geo> {
     set(Smp, rect(cx[2], y[4], bw));
     set(Chop, rect(cx[3], y[4], bw));
     set(Bus, rect(cx[4], y[4], bw));
+    set(Seed6, rect(cx[0], y[5], seed_w));
+    set(Loop1, rect(cx[1], y[5], bw));
 
     // Wires run right from a box's middle, drop or rise on a column two cells
     // before the target (so wires into one box share a bus), then run in.
@@ -461,6 +491,36 @@ fn box_text(ui: &Ui, n: Node) -> BoxText {
             panel: Panel::Drums,
             tag: "",
         },
+        Seed6 => BoxText {
+            title: "seed 6".into(),
+            lines: [d.seeds.s6.to_string(), if d.loops[0].on() { String::new() } else { "loops off".into() }],
+            color: TEXT,
+            level: 0.3,
+            panel: Panel::Loops,
+            tag: "",
+        },
+        Loop1 if !d.loops[0].on() => BoxText {
+            title: "LOOP 1".into(),
+            lines: ["off (timbre: Off)".into(), String::new()],
+            color: FAINT,
+            level: 0.0,
+            panel: Panel::Loops,
+            tag: "10",
+        },
+        Loop1 => {
+            let lp = &d.loops[0];
+            BoxText {
+                title: format!("LOOP 1 · {}", lp.timbre.code()),
+                lines: [
+                    format!("{} beats · {:.1} s", lp.beats, lp.len as f64 / d.sample_rate as f64),
+                    s.map_or(String::new(), |s| format!("pass {}", s.clock / lp.len as u64 + 1)),
+                ],
+                color: LOOPS,
+                level: lv(l.loop1),
+                panel: Panel::Loops,
+                tag: "10",
+            }
+        }
         Brk | Smp | Chop | Bus if !d.drums_on => BoxText {
             title: match n {
                 Brk => "BREAK SYNTH",
@@ -692,10 +752,10 @@ pub fn draw(ui: &Ui, f: &mut Frame, area: Rect, explaining: Panel) {
 
     // The chord progression across the top, then the diagram.
     super::rhythm::chord_strip(ui, buf, Rect::new(r.x + 1, r.y, r.width.saturating_sub(2), 2));
-    let diagram_h = 29.min(r.height.saturating_sub(3));
+    let diagram_h = 35.min(r.height.saturating_sub(3));
     let diagram = Rect::new(r.x + 1, r.y + 3, r.width.saturating_sub(2), diagram_h);
     let Some(geo) = layout(diagram) else {
-        put(buf, r, 1, 3, "Make the terminal at least 94 x 36 for the pipeline view, or press [tab].", fg(TEXT));
+        put(buf, r, 1, 3, "Make the terminal at least 94 x 41 for the pipeline view, or press [tab].", fg(TEXT));
         return;
     };
     *ui.pipe.lengths.borrow_mut() = geo.paths.iter().map(|p| p.len()).collect();

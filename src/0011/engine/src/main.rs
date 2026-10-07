@@ -4,7 +4,7 @@
 //! Run with no arguments to be asked for the seeds, file name and length.
 //! For scripting, pass any of these flags instead (no questions asked):
 //!
-//!     render-0011 [--recipe R] [--seconds N] [--out FILE] [--scale S] [--chords 1-4] [--bpm 70-180] [--pace half|jungle] [--kit K] [--space centred|wide|tape] [--seed1 N] … [--seed5 N]
+//!     render-0011 [--recipe R] [--seconds N] [--out FILE] [--scale S] [--chords 1-4] [--bpm 70-180] [--pace half|jungle] [--kit K] [--space centred|wide|tape] [--loop1 T] [--seed1 N] … [--seed6 N]
 //!
 //! The piece itself is endless; the length decides how much of it to capture,
 //! and the end of the file fades out.
@@ -17,7 +17,7 @@ use std::process::exit;
 fn usage(msg: &str) -> ! {
     eprintln!("{msg}");
     eprintln!(
-        "usage: render-0011 [--recipe R] [--seconds N] [--out FILE] [--scale S] [--chords 1-4] [--bpm 70-180] [--pace half|jungle] [--kit K] [--space centred|wide|tape] [--seed1 N] … [--seed5 N]"
+        "usage: render-0011 [--recipe R] [--seconds N] [--out FILE] [--scale S] [--chords 1-4] [--bpm 70-180] [--pace half|jungle] [--kit K] [--space centred|wide|tape] [--loop1 T] [--seed1 N] … [--seed6 N]"
     );
     eprintln!("       render-0011            (asks for everything)");
     exit(2);
@@ -44,6 +44,8 @@ fn from_flags(args: Vec<String>) -> (Seeds, Settings, String, f64) {
             "--seed3" => seeds.s3 = seed(),
             "--seed4" => seeds.s4 = seed(),
             "--seed5" => seeds.s5 = seed(),
+            "--seed6" => seeds.s6 = seed(),
+            "--loop1" => settings.loops[0] = cli::parse_loop(&value).unwrap_or_else(|| usage(&format!("bad loop timbre: {value}"))),
             "--recipe" | "--code" => {
                 (seeds, settings) =
                     cli::parse_recipe(&value).unwrap_or_else(|| usage(&format!("bad recipe: {value}")))

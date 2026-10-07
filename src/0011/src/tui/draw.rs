@@ -141,6 +141,7 @@ pub fn header(ui: &Ui, buf: &mut Buffer, r: Rect) {
             shrine0011::Solo::Glitch2 => "glitch 2",
             shrine0011::Solo::Bass => "bass",
             shrine0011::Solo::Drums => "drums",
+            shrine0011::Solo::Loop1 => "loop 1",
             shrine0011::Solo::Space => "echo+reverb",
         };
         spans.push(Span::styled(
@@ -192,6 +193,7 @@ fn meta(p: Panel) -> Meta {
         Panel::Harmony => ("HARMONY · scale, key and progression · seed 1", HARMONY),
         Panel::Break => ("BREAK CHOPPER · the sampled break, re-sequenced · seed 5", DRUMS),
         Panel::Drums => ("DRUM VOICES · how each drum is synthesised", DRUMS),
+        Panel::Loops => ("10 · ATMOSPHERE LOOPS · seed 6", LOOPS),
         Panel::General => ("", TEXT),
     };
     Meta { title, color }
@@ -221,6 +223,7 @@ fn caption(ui: &Ui, p: Panel) -> String {
         Panel::Harmony => "lit keys = this chord · dim keys = the scale".into(),
         Panel::Break => "→ play  ← reverse  ≡ roll  ↓ pitch down  ½ half-time".into(),
         Panel::Drums => "flashes show each voice as it is hit".into(),
+        Panel::Loops => "│ playhead · ░ loop-point crossfade".into(),
         _ => String::new(),
     }
 }
@@ -258,7 +261,70 @@ pub fn panel(ui: &Ui, f: &mut Frame, p: Panel, area: Rect, explaining: bool) {
         Panel::Echo => echo(ui, buf, r),
         Panel::Reverb => reverb(ui, buf, r),
         Panel::Output => output(ui, buf, r),
+        Panel::Loops => loops(ui, s, buf, r),
         _ => {}
+    }
+}
+
+// ---------------------------------------------------------------- 10 atmosphere loops
+
+fn loops(ui: &Ui, s: &Snapshot, buf: &mut Buffer, r: Rect) {
+    if r.height < 4 || r.width < 20 {
+        return;
+    }
+    let lp = &ui.desc.loops[0];
+    if !lp.on() {
+        put(buf, r, 1, 0, "loop 1: off", fg(DIM));
+        put(buf, r, 1, 1, "choose a timbre at setup", fg(FAINT));
+        return;
+    }
+    let secs = lp.len as f64 / ui.desc.sample_rate as f64;
+    put(buf, r, 1, 0, &format!("LOOP 1 · {}", lp.timbre.name()), fg(LOOPS).add_modifier(Modifier::BOLD));
+    let pass = s.clock / lp.len as u64 + 1;
+    let detail = format!("{} beats · {secs:.1} s · pass {pass}", lp.beats);
+    put(buf, r, 1, 1, &detail, fg(DIM));
+    loop_strip(ui, s, buf, Rect::new(r.x + 1, r.y + 2, r.width.saturating_sub(2), r.height - 2), 0);
+}
+
+/// One atmosphere loop's waveform (this chord's, blending into the next during
+/// a morph), with the playhead, the beats and the loop-point crossfade.
+pub(super) fn loop_strip(ui: &Ui, s: &Snapshot, buf: &mut Buffer, r: Rect, layer: usize) {
+    let lp = &ui.desc.loops[layer];
+    if !lp.on() || r.height < 2 || r.width < 8 {
+        return;
+    }
+    let pos = s.harmony;
+    let (a, b, x) = (&lp.overviews[pos.chord], &lp.overviews[pos.next], pos.morph);
+    let w = r.width as usize;
+    let h = r.height - 1;
+    let peak = a.iter().chain(b.iter()).fold(1e-6f32, |m, v| m.max(*v)) as f64;
+    let len = lp.len as u64;
+    let head = ((s.clock % len) as f64 / len as f64 * w as f64) as usize;
+    let xf = ((lp.xfade as f64 / len as f64) * w as f64).ceil() as usize;
+    for c in 0..w {
+        let i = c * a.len() / w;
+        let v = (a[i] as f64 * (1.0 - x) + b.get(i).copied().unwrap_or(0.0) as f64 * x) / peak;
+        let color = if c < xf { mix(LOOPS, ECHO, 0.6) } else { LOOPS };
+        let st = fg(if c <= head { color } else { lit(color, 0.4) });
+        vbar(buf, r, c as u16, h - 1, h, v, st);
+        if c < xf {
+            put_char(buf, r, c as u16, h, '░', fg(mix(LOOPS, ECHO, 0.6)));
+        }
+    }
+    for y in 0..h {
+        put_char(buf, r, head as u16, y, '│', fg(WHITE));
+    }
+    // The beats along the bottom.
+    for k in 0..lp.beats {
+        let c = (k as usize * w) / lp.beats as usize;
+        if c >= xf {
+            put_char(buf, r, c as u16, h, '┴', fg(DIM));
+        }
+    }
+    for c in 0..w {
+        if c >= xf && !(0..lp.beats).any(|k| (k as usize * w) / lp.beats as usize == c) {
+            put_char(buf, r, c as u16, h, '─', fg(FAINT));
+        }
     }
 }
 
