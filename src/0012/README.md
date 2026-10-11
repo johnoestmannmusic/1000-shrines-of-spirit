@@ -1,4 +1,4 @@
-# ShrineGen
+# ShrineGen v20261011
 
 A procedural isometric shrine: a single, deterministic software-art artifact.
 The visuals and the music are one coupled system — every pixel and every sample
@@ -105,9 +105,3 @@ cargo run -- --export / --import FILE.shrineseed
 cargo run -- --serve  [PORT]                serve web/ locally
 ```
 
-## Constraints
-
-See `CONSTRAINTS.md` — the artifact must have zero external dependencies, a
-300×300 logical buffer, a 1200×1200 canvas, no third-party names, and no
-`wasm-bindgen`. `scripts/naming-audit.sh`, `scripts/check-zero-deps.sh` and
-`scripts/check-wasm.sh` enforce these.
