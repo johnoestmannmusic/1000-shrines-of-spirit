@@ -6,6 +6,6 @@ _Please note I have used AI to assist with the programming of these softwares. T
 
 _Exploring tracks where I designed the music-software-architecture, but then the code itself generated the music, please read https://johnoestmannmusic.com/0009-when-we-become-discoverers_
 
-_Please note that while Claude inserted itself as a Contributor, I have also used DeepSeek in this repo (and currently am using that as my main GenAI)._
+_Please note that Claude, annoyingly, inserted itself as a Contributor. I have also used DeepSeek and other tools in this repo._
 
 For everything else, visit https://johnoestmannmusic.com
