@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShrineGen — isometric shrine</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0d0c10; color: #c9c4d0;
+    font: 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  body { overflow: hidden; }
+  main { display: flex; gap: 16px; box-sizing: border-box;
+    height: 100vh; height: 100dvh; padding: 16px; }
+  /* The stage takes the leftover space and centres the square. The frame
+     shrink-wraps the canvas so the overlay lines up with it exactly. */
+  .stage { flex: 1 1 auto; min-width: 0; min-height: 0;
+    display: flex; align-items: center; justify-content: center; }
+  .frame { position: relative; display: inline-block; max-width: 100%; max-height: 100%; line-height: 0;
+    background: #0d0c10; }
+  canvas { display: block; width: min(100%, calc(100vh - 32px)); width: min(100%, calc(100dvh - 32px));
+    height: auto; max-width: 100%; image-rendering: pixelated; border: 1px solid #2a2732;
+    background: #0d0c10; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center;
+    gap: 8px; text-align: center; background: rgba(13, 12, 16, 0.42);
+    color: #d7d3de; cursor: pointer; user-select: none; transition: opacity 0.25s; }
+  .overlay .icon { font-size: 3rem; line-height: 1; color: #96dcb4; }
+  .overlay small { font-size: 0.8rem; color: #8a8596; }
+  .frame.playing .overlay { opacity: 0; pointer-events: none; }
+  aside.info { flex: 0 0 300px; min-width: 0; max-height: 100%;
+    display: flex; flex-direction: column; min-height: 0; }
+  aside.info h2 { font-size: 0.8rem; font-weight: 400; letter-spacing: 0.12em;
+    text-transform: uppercase; color: #8a8596; margin: 4px 0 8px; }
+  aside.info h1 { font-size: 1.05rem; font-weight: 400; letter-spacing: 0.16em;
+    text-transform: uppercase; color: #e6e2ec; margin: 2px 0 10px; }
+  /* The recipe scrolls on its own so the buttons below it always fit. */
+  aside.info pre { flex: 1 1 auto; min-height: 0; overflow: auto; }
+  aside.info .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; flex: 0 0 auto; }
+  aside.info .button { display: inline-block; padding: 6px 12px; font-size: 0.82rem; letter-spacing: 0.04em;
+    color: #d7f2e3; text-decoration: none; border: 1px solid #2f5a45; border-radius: 4px;
+    background: #121a16; cursor: pointer; }
+  aside.info .button:hover { border-color: #96dcb4; color: #ffffff; }
+  aside.info .button[hidden] { display: none; }
+  pre { margin: 0; padding: 12px; border: 1px solid #2a2732; background: #100f14;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #c2bfca; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Narrow screens: stack, and let the panel scroll below the shrine. */
+  @media (max-width: 780px) {
+    main { flex-direction: column; }
+    canvas { width: min(100%, calc(60dvh - 32px)); }
+    aside.info { flex: 0 0 auto; max-height: 34%; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="stage" id="stage">
+    <div class="frame" id="frame">
+      <canvas id="screen" width="1200" height="1200" aria-label="Procedural isometric shrine"></canvas>
+      <div class="overlay" id="overlay">
+        <span class="icon" id="icon">▶</span>
+        <small id="hint">click to begin</small>
+      </div>
+    </div>
+  </div>
+  <aside class="info">
+    <h1 id="track">ShrineGen</h1>
+    <h2>Recipe</h2>
+    <pre id="info">loading…</pre>
+    <div class="actions">
+      <a id="download-wav" class="button" href="wav/track.wav" download hidden>Download WAV</a>
+      <a class="button" href="https://github.com/johnoestmannmusic/1000-shrines-of-spirit" target="_blank" rel="noopener noreferrer">View Source</a>
+    </div>
+  </aside>
+</main>
+<script type="module">
+  // Self-contained: no external scripts, styles, fonts or CDNs (HC010).
+  const SAMPLE_RATE = 48000;
+  const LOGICAL = 300;
+  const stage = document.getElementById("stage");
+  const frameEl = document.getElementById("frame");
+  const canvas = document.getElementById("screen");
+  const screen = canvas.getContext("2d");
+  screen.imageSmoothingEnabled = false;
+  const off = document.createElement("canvas");
+  off.width = LOGICAL;
+  off.height = LOGICAL;
+  const offCtx = off.getContext("2d");
+  const image = offCtx.createImageData(LOGICAL, LOGICAL);
+  const overlay = document.getElementById("overlay");
+  const icon = document.getElementById("icon");
+  const hint = document.getElementById("hint");
+
+  const wasmBytes = await fetch("shrine.wasm").then((r) => {
+    if (!r.ok) throw new Error("shrine.wasm: " + r.status);
+    return r.arrayBuffer();
+  });
+  const { instance } = await WebAssembly.instantiate(wasmBytes, {});
+  const shr = instance.exports;
+
+  // The recipe panel: the artifact bakes a human-readable card plus its build
+  // date. A module built straight from the engine carries neither.
+  (function showInfo() {
+    const info = document.getElementById("info");
+    // The heading is the track name the setup chose (falling back to the
+    // product name when the artifact carries none).
+    const track = document.getElementById("track");
+    let trackName = "";
+    if (typeof shr.shrine_name_ptr === "function" && shr.shrine_name_len() > 0) {
+      trackName = new TextDecoder()
+        .decode(new Uint8Array(shr.memory.buffer, shr.shrine_name_ptr(), shr.shrine_name_len()))
+        .trim();
+      if (trackName) track.textContent = trackName;
+    }
+    // Offer the bundled render. Candidates are tried in order and the button is
+    // only revealed for one that really exists, so a statically hosted folder
+    // works with no server to list the directory: the manifest first (written
+    // beside the artifact), then a file named after the track, then track.wav.
+    const wav = document.getElementById("download-wav");
+    (async () => {
+      const names = [];
+      try {
+        const list = await (await fetch("wav/manifest.json", { cache: "no-store" })).json();
+        if (Array.isArray(list)) names.push(...list.filter((n) => typeof n === "string"));
+      } catch {}
+      if (trackName) names.push(trackName + ".wav");
+      names.push("track.wav");
+      for (const name of names) {
+        try {
+          const head = await fetch("wav/" + encodeURIComponent(name), { method: "HEAD" });
+          if (head.ok) {
+            wav.setAttribute("href", "wav/" + encodeURIComponent(name));
+            wav.hidden = false;
+            return;
+          }
+        } catch {}
+      }
+    })();
+    if (typeof shr.shrine_info_ptr === "function") {
+      const ptr = shr.shrine_info_ptr();
+      const len = shr.shrine_info_len();
+      info.textContent = new TextDecoder().decode(new Uint8Array(shr.memory.buffer, ptr, len));
+    } else {
+      info.textContent =
+        "ShrineGen (development build)\n\nThis module was built from the engine directly, so it carries no baked recipe.\n\nUse the setup menu's Compile WASM action to emit a self-describing artifact.";
+    }
+  })();
+
+  // Visual instance: mode 2 (no audio engine).
+  const visual = shr.shrine_new(0, 0, 2);
+
+  // The exported source is drawn into the sky, behind the shrine: the engine
+  // leaves the sky unfilled, we paint the lit sky gradient ourselves, then draw
+  // the frame over it so the shrine occludes the text. Reading starts at the
+  // top of the file and the text moves upward, wrapping seamlessly.
+  const overlayWord = typeof shr.shrine_code_overlay === "function" ? shr.shrine_code_overlay() : 0;
+  const skyOverlay = (overlayWord & 1) !== 0;
+  const overlayAlpha = Math.min(1, Math.max(0, ((overlayWord >> 8) & 0xff) / 100));
+  const overlaySpeed = ((overlayWord >> 16) & 0xff) || 45;
+  const overlayScale = ((overlayWord >>> 24) & 0xff) || 200;    // percent (100 = normal)
+  const overlayAngle = typeof shr.shrine_code_angle === "function" ? shr.shrine_code_angle() : 0;
+  const overlayOffset = typeof shr.shrine_code_offset === "function" ? shr.shrine_code_offset() : 0;
+  const BASE_LINE_H = 13;                                       // px per source line at 100%
+  const LINE_H = Math.max(8, Math.round((BASE_LINE_H * overlayScale) / 100));
+  // Keep the reading rate steady: bigger text scrolls proportionally faster.
+  const CODE_PX_PER_S = (20 + overlaySpeed * 3.8) * (overlayScale / 100);
+  let codeLines = [];
+  let codeScroll = 0;                             // px advanced through the file
+  if (skyOverlay) {
+    // Let the sky show through the canvas; the shrine stays opaque over it.
+    if (typeof shr.shrine_set_sky_transparent === "function") {
+      shr.shrine_set_sky_transparent(visual, 1);
+    }
+    fetch("shrine.rs")
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error("no shrine.rs"))))
+      .then((text) => { codeLines = text.split("\n"); })
+      .catch(() => {});
+  }
+
+  // Paint the lit sky (as reported by the last engine frame) plus the scrolling
+  // source. Kept inside the canvas: no DOM blend layers over a transparent
+  // canvas, so nothing smears or leaves copies when the camera moves.
+  function drawSkyAndSource(lit) {
+    // Sky colours arrive packed 0xRRGGBB, top in the low 24 bits.
+    const rgb = (v) => `rgb(${(v >> 16) & 0xff},${(v >> 8) & 0xff},${v & 0xff})`;
+    const grad = screen.createLinearGradient(0, 0, 0, 1200);
+    grad.addColorStop(0, rgb(Number(lit & 0xffffffn)));
+    grad.addColorStop(1, rgb(Number((lit >> 24n) & 0xffffffn)));
+    screen.fillStyle = grad;
+    screen.fillRect(0, 0, 1200, 1200);
+    if (codeLines.length === 0) return;
+    const n = codeLines.length;
+    const total = n * LINE_H;
+    codeScroll = total > 0 ? codeScroll % total : 0;
+    const first = Math.floor(codeScroll / LINE_H);
+    const offset = codeScroll - first * LINE_H;
+    // The drift is tilted by `overlayAngle` (positive leans left) and advances
+    // along that tilted axis. Rotating about the centre means the drawn block
+    // must be a square of `span` centred on the canvas, and the vertical shift
+    // grows it again, or bare sky would show at the edges.
+    const rad = (-overlayAngle * Math.PI) / 180;
+    const shift = (overlayOffset / 100) * 1200;
+    const span = 1200 * (Math.abs(Math.cos(rad)) + Math.abs(Math.sin(rad))) + 2 * Math.abs(shift);
+    const from = 600 - span / 2;
+    const kStart = Math.floor((from + offset) / LINE_H) - 1;
+    const kEnd = Math.ceil((from + span + offset) / LINE_H) + 1;
+    screen.save();
+    screen.globalCompositeOperation = "screen";
+    screen.globalAlpha = overlayAlpha;
+    screen.fillStyle = "#8fe0b0";
+    screen.font = `${LINE_H - 2}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    screen.textBaseline = "top";
+    screen.translate(0, shift);
+    screen.translate(600, 600);
+    screen.rotate(rad);
+    screen.translate(-600, -600);
+    // One column, drawn exactly like the file: each line starts at the same x
+    // and keeps its own line break, so the source stays human-readable. Raise
+    // the text size or the vertical offset to cover more of the sky.
+    for (let k = kStart; k < kEnd; k++) {
+      const line = codeLines[(((first + k) % n) + n) % n];
+      if (line.length > 0) screen.fillText(line, 8, k * LINE_H - offset);
+    }
+    screen.restore();
+  }
+
+  let clock = 0;            // sample clock driving the visuals (frozen when paused)
+  let clockBase = 0;        // last sample count reported by the worklet
+  let clockBaseAt = 0;      // performance.now() when it arrived
+  let haveClockBase = false;
+  let audioStartedAt = 0;
+  let playing = false;
+  let audio = null;
+  let node = null;
+  let gain = null;
+  let last = performance.now();
+
+  // Camera: eased toward the pointer, bounded.
+  let camYaw = 0, camPitch = 0, targetYaw = 0, targetPitch = 0;
+
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (playing) {
+      clock = haveClockBase
+        ? clockBase + ((now - clockBaseAt) * SAMPLE_RATE) / 1000
+        : ((now - audioStartedAt) * SAMPLE_RATE) / 1000;
+    }
+    camYaw += (targetYaw - camYaw) * 0.12;
+    camPitch += (targetPitch - camPitch) * 0.12;
+    if (typeof shr.shrine_set_camera === "function") {
+      shr.shrine_set_camera(visual, camYaw, camPitch);
+    }
+    const ptr = shr.shrine_render_visual(visual, BigInt(Math.floor(clock)));
+    const src = new Uint8ClampedArray(shr.memory.buffer, ptr, LOGICAL * LOGICAL * 4);
+    image.data.set(src);
+    offCtx.putImageData(image, 0, 0);
+    if (skyOverlay) {
+      codeScroll += CODE_PX_PER_S * dt;
+      const lit = typeof shr.shrine_sky_colors === "function" ? shr.shrine_sky_colors(visual) : 0n;
+      drawSkyAndSource(lit);
+    } else {
+      screen.clearRect(0, 0, 1200, 1200);
+    }
+    screen.drawImage(off, 0, 0, LOGICAL, LOGICAL, 0, 0, 1200, 1200);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  function setPlaying(on) {
+    playing = on;
+    frameEl.classList.toggle("playing", on);
+    icon.textContent = on ? "❚❚" : "▶";
+    hint.textContent = on ? "" : "click to pause";
+  }
+
+  async function startAudio() {
+    audio = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: "playback" });
+    await audio.audioWorklet.addModule("shrine.worklet.js");
+    node = new AudioWorkletNode(audio, "shrinegen", {
+      numberOfInputs: 0,
+      outputChannelCount: [2],
+      processorOptions: { wasm: wasmBytes },
+    });
+    let readySeen = false;
+    let readyResolve = null;
+    node.port.onmessage = (e) => {
+      if (e.data === "ready") {
+        readySeen = true;
+        if (readyResolve) readyResolve();
+      } else if (typeof e.data === "number") {
+        clockBase = e.data;
+        clockBaseAt = performance.now();
+        haveClockBase = true;
+      }
+    };
+    gain = new GainNode(audio, { gain: 1 });
+    node.connect(gain).connect(audio.destination);
+    await new Promise((resolve) => {
+      readyResolve = resolve;
+      if (readySeen) resolve();
+    });
+  }
+
+  async function toggle() {
+    try {
+      if (!audio) {
+        hint.textContent = "starting…";
+        await startAudio();
+        audioStartedAt = performance.now();
+        clockBaseAt = performance.now();
+        await audio.resume();
+        setPlaying(true);
+        return;
+      }
+      if (playing) {
+        gain.gain.setTargetAtTime(0, audio.currentTime, 0.3);
+        await new Promise((r) => setTimeout(r, 900));
+        await audio.suspend();
+        setPlaying(false);
+      } else {
+        gain.gain.cancelScheduledValues(audio.currentTime);
+        gain.gain.setTargetAtTime(1, audio.currentTime, 0.3);
+        await audio.resume();
+        audioStartedAt = performance.now();
+        clockBaseAt = performance.now();
+        setPlaying(true);
+      }
+    } catch (e) {
+      hint.textContent = "audio failed: " + e.message;
+    }
+  }
+
+  stage.addEventListener("click", toggle);
+
+  function aim(clientX, clientY) {
+    const r = canvas.getBoundingClientRect();
+    targetYaw = Math.max(-1, Math.min(1, ((clientX - r.left) / r.width) * 2 - 1));
+    targetPitch = Math.max(-1, Math.min(1, ((clientY - r.top) / r.height) * 2 - 1));
+  }
+  stage.addEventListener("mousemove", (e) => aim(e.clientX, e.clientY));
+  stage.addEventListener("mouseleave", () => { targetYaw = 0; targetPitch = 0; });
+  stage.addEventListener("touchmove", (e) => {
+    const t = e.touches[0];
+    if (t) aim(t.clientX, t.clientY);
+  }, { passive: true });
+</script>
+</body>
+</html>
