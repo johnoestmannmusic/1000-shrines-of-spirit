@@ -159,6 +159,9 @@
   const overlayScale = ((overlayWord >>> 24) & 0xff) || 200;    // percent (100 = normal)
   const overlayAngle = typeof shr.shrine_code_angle === "function" ? shr.shrine_code_angle() : 0;
   const overlayOffset = typeof shr.shrine_code_offset === "function" ? shr.shrine_code_offset() : 0;
+  // 0 static, 1 flat, 2 sphere. Bits 1-3 of the overlay word.
+  const overlayPlane = (overlayWord >> 1) & 0x7;
+  const cameraSpeed = typeof shr.shrine_camera_speed === "function" ? shr.shrine_camera_speed() : 0;
   const BASE_LINE_H = 13;                                       // px per source line at 100%
   const LINE_H = Math.max(8, Math.round((BASE_LINE_H * overlayScale) / 100));
   // Keep the reading rate steady: bigger text scrolls proportionally faster.
@@ -203,9 +206,19 @@
     const from = 600 - span / 2;
     const kStart = Math.floor((from + offset) / LINE_H) - 1;
     const kEnd = Math.ceil((from + span + offset) / LINE_H) + 1;
+    // The code plane: how the drift answers the camera orbit.
+    //   static — pinned to the frame; the camera does not move it
+    //   flat   — a flat band that slides across as the camera turns
+    //   sphere — the same slide wrapped around the viewer, repeated so it is
+    //            visible whichever way the camera points, and fading out
+    //            towards the top where the seam sits out of frame
+    const orbit = cameraSpeed === 0 || overlayPlane === 0 ? 0 : ((cameraSpeed * (clock / SAMPLE_RATE)) / 360) % 1;
+    const period = overlayPlane === 2 ? 600 : 1200;
+    const slide = overlayPlane === 0 ? 0 : -orbit * period;
+    const repeats = overlayPlane === 0 ? [0] : [-1, 0, 1];
+
     screen.save();
     screen.globalCompositeOperation = "screen";
-    screen.globalAlpha = overlayAlpha;
     screen.fillStyle = "#8fe0b0";
     screen.font = `${LINE_H - 2}px ui-monospace, SFMono-Regular, Menlo, monospace`;
     screen.textBaseline = "top";
@@ -218,7 +231,22 @@
     // the text size or the vertical offset to cover more of the sky.
     for (let k = kStart; k < kEnd; k++) {
       const line = codeLines[(((first + k) % n) + n) % n];
-      if (line.length > 0) screen.fillText(line, 8, k * LINE_H - offset);
+      if (line.length === 0) continue;
+      const y = k * LINE_H - offset;
+      // On the sphere the code curls away from the viewer, so it dissolves as
+      // it approaches the top of the sky — which is also where the last line
+      // meets the first, keeping that seam out of sight.
+      let alpha = overlayAlpha;
+      if (overlayPlane === 2) {
+        const lift = Math.min(1, Math.max(0, (y + 260) / 420));
+        const sink = Math.min(1, Math.max(0, (1100 - y) / 320));
+        alpha *= lift * sink;
+        if (alpha <= 0.001) continue;
+      }
+      screen.globalAlpha = alpha;
+      for (const rep of repeats) {
+        screen.fillText(line, 8 + slide + rep * period, y);
+      }
     }
     screen.restore();
   }

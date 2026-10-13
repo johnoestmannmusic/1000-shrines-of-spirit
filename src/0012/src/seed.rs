@@ -18,6 +18,58 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+/// `glitch<layer>_<field>`, one line per control. `kinds` is a six-digit 1/0
+/// mask in `glitch::KINDS` order; `repeats` is `min,max`.
+fn parse_glitch(config: &mut SimConfig, key: &str, value: &str) -> bool {
+    let Some(rest) = key.strip_prefix("glitch") else {
+        return false;
+    };
+    let Some((layer, field)) = rest.split_once('_') else {
+        return false;
+    };
+    let Ok(layer) = layer.parse::<usize>() else {
+        return false;
+    };
+    if layer < 1 || layer > config.settings.glitch.len() {
+        return false;
+    }
+    let g = &mut config.settings.glitch[layer - 1];
+    match field {
+        "enabled" => {
+            g.enabled = parse_bool(value);
+            true
+        }
+        "kinds" => {
+            let bits: Vec<bool> = value.chars().filter_map(|c| match c {
+                '0' => Some(false),
+                '1' => Some(true),
+                _ => None,
+            }).collect();
+            if bits.len() != g.kinds.len() {
+                return false;
+            }
+            g.kinds.copy_from_slice(&bits);
+            true
+        }
+        "fill" => value.parse::<u8>().map(|v| g.fill = v.min(100)).is_ok(),
+        "rate" => value.parse::<u8>().map(|v| g.rate = v.min(3)).is_ok(),
+        "gain" => value.parse::<u8>().map(|v| g.gain = v.min(200)).is_ok(),
+        "steps" => value.parse::<u8>().map(|v| g.steps = v.clamp(1, 24)).is_ok(),
+        "ratchet" => value.parse::<u8>().map(|v| g.ratchet = v.clamp(1, 8)).is_ok(),
+        "repeats" => {
+            let nums: Vec<u8> = value.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+            if nums.len() != 2 {
+                return false;
+            }
+            let (a, b) = (nums[0].clamp(1, 24), nums[1].clamp(1, 24));
+            g.repeats_min = a.min(b);
+            g.repeats_max = a.max(b);
+            true
+        }
+        _ => false,
+    }
+}
+
 fn key_label(key: KeyChoice) -> String {
     match key {
         KeyChoice::Seed => "seed".to_string(),
@@ -63,8 +115,33 @@ pub fn to_text(config: &SimConfig) -> String {
     out.push_str(&format!("code_opacity={}\n", s.code.opacity));
     out.push_str(&format!("code_speed={}\n", s.code.speed));
     out.push_str(&format!("code_scale={}\n", s.code.scale));
+    out.push_str(&format!("camera_speed={}\n", s.camera_speed));
+    out.push_str(&format!("code_plane={}\n", shrine0012::overlay::CodeOverlay::PLANES[(s.code.plane as usize).min(2)]));
     out.push_str(&format!("code_angle={}\n", s.code.angle));
     out.push_str(&format!("code_offset={}\n", s.code.offset));
+    out.push_str(&format!("arch_rot_x={}\n", s.arch.rot_x));
+    out.push_str(&format!("arch_rot_y={}\n", s.arch.rot_y));
+    out.push_str(&format!("arch_rot_z={}\n", s.arch.rot_z));
+    out.push_str(&format!("arch_off_x={}\n", s.arch.off_x));
+    out.push_str(&format!("arch_off_y={}\n", s.arch.off_y));
+    out.push_str(&format!("arch_off_z={}\n", s.arch.off_z));
+    // An authored architecture is 256 bytes of nothing-but-source; write it as
+    // hex so a shared seed carries the whole shrine.
+    if s.model.is_authored() {
+        out.push_str("# model: an authored 16x16 architecture (256 bytes, hex)\n");
+        out.push_str(&format!("model={}\n", s.model.to_hex()));
+    }
+    for (i, g) in s.glitch.iter().enumerate() {
+        let n = i + 1;
+        out.push_str(&format!("glitch{n}_enabled={}\n", if g.enabled { "on" } else { "off" }));
+        out.push_str(&format!("glitch{n}_kinds={}\n", g.kinds.iter().map(|k| if *k { '1' } else { '0' }).collect::<String>()));
+        out.push_str(&format!("glitch{n}_fill={}\n", g.fill));
+        out.push_str(&format!("glitch{n}_rate={}\n", g.rate));
+        out.push_str(&format!("glitch{n}_gain={}\n", g.gain));
+        out.push_str(&format!("glitch{n}_steps={}\n", g.steps));
+        out.push_str(&format!("glitch{n}_repeats={},{}\n", g.repeats_min, g.repeats_max));
+        out.push_str(&format!("glitch{n}_ratchet={}\n", g.ratchet));
+    }
     for (name, on) in [
         ("fx_tape", s.master.tape),
         ("fx_cd", s.master.cd),
@@ -205,6 +282,18 @@ pub fn from_text(text: &str) -> Option<SimConfig> {
                     found = true;
                 }
             }
+            "camera_speed" => {
+                if let Ok(n) = value.parse::<i16>() {
+                    config.settings.camera_speed = n.clamp(-180, 180);
+                    found = true;
+                }
+            }
+            "code_plane" => {
+                if let Some(i) = shrine0012::overlay::CodeOverlay::PLANES.iter().position(|p| eq(p, value)) {
+                    config.settings.code.plane = i as u8;
+                    found = true;
+                }
+            }
             "code_angle" => {
                 if let Ok(n) = value.parse::<i16>() {
                     config.settings.code.angle = n.clamp(
@@ -214,12 +303,39 @@ pub fn from_text(text: &str) -> Option<SimConfig> {
                     found = true;
                 }
             }
+            "model" => match shrine0012::shrine_model::ShrineModel::from_hex(value) {
+                Some(m) => {
+                    config.settings.model = m;
+                    found = true;
+                }
+                None => {}
+            },
             "code_offset" => {
                 if let Ok(n) = value.parse::<i16>() {
                     config.settings.code.offset = n.clamp(
                         shrine0012::overlay::CodeOverlay::MIN_OFFSET,
                         shrine0012::overlay::CodeOverlay::MAX_OFFSET,
                     );
+                    found = true;
+                }
+            }
+            "arch_rot_x" | "arch_rot_y" | "arch_rot_z" | "arch_off_x" | "arch_off_y" | "arch_off_z" => {
+                if let Ok(n) = value.parse::<i16>() {
+                    let arch = &mut config.settings.arch;
+                    let (lo, hi) = if key.starts_with("arch_rot") {
+                        (shrine0012::arch::ArchTransform::MIN_ROT, shrine0012::arch::ArchTransform::MAX_ROT)
+                    } else {
+                        (shrine0012::arch::ArchTransform::MIN_OFF, shrine0012::arch::ArchTransform::MAX_OFF)
+                    };
+                    let v = n.clamp(lo, hi);
+                    match key.as_str() {
+                        "arch_rot_x" => arch.rot_x = v,
+                        "arch_rot_y" => arch.rot_y = v,
+                        "arch_rot_z" => arch.rot_z = v,
+                        "arch_off_x" => arch.off_x = v,
+                        "arch_off_y" => arch.off_y = v,
+                        _ => arch.off_z = v,
+                    }
                     found = true;
                 }
             }
@@ -274,6 +390,11 @@ pub fn from_text(text: &str) -> Option<SimConfig> {
             "drone_tone" => {
                 if let Ok(n) = value.parse::<u16>() {
                     config.settings.drone_tone = n;
+                    found = true;
+                }
+            }
+            k if k.starts_with("glitch") => {
+                if parse_glitch(&mut config, k, value) {
                     found = true;
                 }
             }
@@ -480,5 +601,45 @@ mod tests {
     fn missing_or_empty_is_none() {
         assert!(from_text("").is_none());
         assert!(from_text("# only a comment").is_none());
+    }
+
+    #[test]
+    fn glitch_settings_round_trip_through_text() {
+        let mut config = SimConfig::default();
+        config.settings.glitch[0].fill = 20;
+        config.settings.glitch[0].kinds = [true, false, true, false, true, false];
+        config.settings.glitch[0].rate = 3;
+        config.settings.glitch[0].gain = 140;
+        config.settings.glitch[0].steps = 5;
+        config.settings.glitch[0].repeats_min = 2;
+        config.settings.glitch[0].repeats_max = 5;
+        config.settings.glitch[0].ratchet = 6;
+        config.settings.glitch[1].enabled = false;
+        let text = to_text(&config);
+        assert!(text.contains("glitch1_kinds=101010"), "kinds mask missing");
+        let back = from_text(&text).unwrap();
+        assert_eq!(back.settings.glitch, config.settings.glitch);
+    }
+
+    #[test]
+    fn an_authored_architecture_survives_export_and_import() {
+        let mut config = SimConfig::default();
+        config.settings.model.set(4, 6, 5, 3, 2);
+        let text = to_text(&config);
+        assert!(text.contains("model="), "the model line is missing");
+        let back = from_text(&text).unwrap();
+        assert_eq!(back.settings.model, config.settings.model);
+        // A procedural shrine writes no model line at all.
+        assert!(!to_text(&SimConfig::default()).contains("\nmodel="));
+    }
+
+    #[test]
+    fn corrupt_glitch_lines_are_ignored_not_fatal() {
+        let mut config = SimConfig::default();
+        config.settings.glitch[0].fill = 55;
+        let text = to_text(&config).replace("glitch1_fill=55", "glitch1_fill=loud\nglitch7_fill=9\nglitch1_kinds=111");
+        let back = from_text(&text).unwrap();
+        assert_eq!(back.settings.glitch[0].fill, 55, "a bad value must not change anything");
+        assert_eq!(back.settings.glitch[0].kinds, [true; 6], "a short mask is ignored");
     }
 }

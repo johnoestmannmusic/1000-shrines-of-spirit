@@ -22,6 +22,7 @@ pub mod fft;
 pub mod filter;
 pub mod fm;
 pub mod glitch;
+pub mod glitch_setup;
 pub mod harmony;
 pub mod kits;
 pub mod master;

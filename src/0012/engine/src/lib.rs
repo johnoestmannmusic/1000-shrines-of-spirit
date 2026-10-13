@@ -29,6 +29,7 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 pub mod audio;
+pub mod arch;
 pub mod budget;
 pub mod framebuffer;
 pub mod grid;
@@ -44,6 +45,7 @@ pub mod recipe;
 pub mod rng;
 pub mod scene;
 pub mod shrine;
+pub mod shrine_model;
 pub mod sim;
 pub mod wasm;
 pub mod weather;

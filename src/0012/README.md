@@ -1,4 +1,4 @@
-# ShrineGen v20261011
+# ShrineGen
 
 A procedural isometric shrine: a single, deterministic software-art artifact.
 The visuals and the music are one coupled system — every pixel and every sample
@@ -27,11 +27,25 @@ The menu has a live visual preview on the right. Keys: `↑↓` move, `←→` c
 seed, biome, weather, and every part of the music; set a **Track name** (it heads
 the page and titles the WAV); toggle **Audition** to hear it live; **Master FX**
 opens a screen of end-of-chain glitch effects (Tape, CD artifacts, pitch drift,
-radio, crush, dropouts) you can combine freely; the **Overlay** settings drift the
+radio, crush, dropouts) you can combine freely; the **Glitches** opens a per-layer screen (kind on/off, how often, step rate, level,
+pattern length, mutation cadence, retriggers) for the two glitch layers;
+**Architecture editor** paints the 16x16 shrine — plan grid beside the live
+preview, height/kind/variation per cell, undo, and a key to hand it back to the
+seed; **Reset to defaults** starts a fresh project. **Camera · Rotation speed** orbits
+the whole viewport around the shrine, in degrees per second (default 0); the
+**Code plane** setting puts the scrolling source on a *static* plane, a *flat*
+one that slides with the camera, or a *sphere* that wraps around the viewer so
+panning reveals it on both sides. Every numeric row can be
+nudged with the arrows *or* typed exactly with Enter. The
+**Overlay** settings drift the
 exported source (`shrine.rs`) up through the sky behind the shrine — *Code
 text size* scales it (100% = normal, 200% = double), *Code angle* tilts the
 drift (positive leans left) so it travels along that tilted axis, and *Code
-vertical* shifts the whole drift up or down to re-centre it. The engine can
+vertical* shifts the whole drift up or down to re-centre it. The **Architecture**
+controls turn the shrine about x, y and z (any angle, so it can be tipped onto
+its side or pushed through the ground) and offset it in x, y and z; the default
+is centred and upright, and the *model* stays the centred 16x16 footprint
+whatever the transform says. The engine can
 leave the sky unfilled and reports the lit sky colours it would have used; the
 page paints that sky plus the scrolling source into the canvas itself, then
 draws the frame over
@@ -105,3 +119,9 @@ cargo run -- --export / --import FILE.shrineseed
 cargo run -- --serve  [PORT]                serve web/ locally
 ```
 
+## Constraints
+
+See `CONSTRAINTS.md` — the artifact must have zero external dependencies, a
+300×300 logical buffer, a 1200×1200 canvas, no third-party names, and no
+`wasm-bindgen`. `scripts/naming-audit.sh`, `scripts/check-zero-deps.sh` and
+`scripts/check-wasm.sh` enforce these.

@@ -31,12 +31,17 @@ fn hash_bytes(bytes: &[u8]) -> u64 {
 
 const AUDIO_SECONDS: usize = 5;
 const AUDIO_GOLDEN: u64 = 0xddb4_7280_5251_6eb7;
+/// A deliberately turned architecture, locked so a change to the transform
+/// maths cannot pass silently (`HC004`).
+const ARCH_ROTATED_GOLDEN: [u64; 3] = [15091846030116639487, 12992143712555696799, 12703277274131942356];
 const VISUAL_GOLDEN: [u64; 5] = [
-    16372517786461568741,
-    9300958290172192542,
-    3436581339193562279,
-    3770431886702531045,
-    7701800233315402307,
+    // Re-locked when `raster::fill_face` was fixed: it had called the horizontal
+    // `fill_span`, drawing every column's side faces with x and y swapped.
+    8079878040143304953,
+    3435403895262894872,
+    13197474975392812766,
+    412205298506576578,
+    4611702382427217164,
 ];
 
 #[test]
@@ -50,6 +55,22 @@ fn coupled_audio_golden() {
     let h = hash_f32(&out);
     println!("COUPLED_AUDIO_GOLDEN = {h:#018x}");
     assert_eq!(h, AUDIO_GOLDEN, "the coupled audio changed (got {h:#018x})");
+}
+
+#[test]
+fn rotated_architecture_golden() {
+    let mut config = SimConfig::default();
+    config.settings.arch =
+        shrine0012::arch::ArchTransform { rot_x: 12, rot_y: 0, rot_z: 35, off_x: 0, off_y: 0, off_z: 0 };
+    let sim = Sim::new_visual(config);
+    let mut hashes = [0u64; 3];
+    for (i, t) in [0.0, 1.0, 2.0].into_iter().enumerate() {
+        let mut fb = Framebuffer::logical();
+        sim.render_visual(&mut fb, t, Quality::High);
+        hashes[i] = hash_bytes(fb.as_bytes());
+    }
+    println!("ARCH_ROTATED_GOLDEN = {hashes:?}");
+    assert_eq!(hashes, ARCH_ROTATED_GOLDEN, "the rotated architecture changed");
 }
 
 #[test]

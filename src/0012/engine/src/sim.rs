@@ -41,6 +41,17 @@ pub const COUPLING: [(&str, &str); 4] = [
     ("pulse", "detail flicker"),
 ];
 
+/// The camera orbit at `t` seconds, in turns. Wrapped so a long performance
+/// keeps full precision, which is safe because the projection is periodic in a
+/// whole turn. Built from `* / rem_euclid` only, so it is bit-identical
+/// everywhere (`HC004`).
+pub fn camera_orbit_turns(speed_deg_per_s: i16, t: f64) -> f64 {
+    if speed_deg_per_s == 0 {
+        return 0.0;
+    }
+    (speed_deg_per_s as f64 * t / 360.0).rem_euclid(1.0)
+}
+
 /// A shrine: its generated scene and its music, on one clock.
 pub struct Sim {
     pub config: SimConfig,
@@ -52,7 +63,8 @@ pub struct Sim {
 
 impl Sim {
     pub fn new(config: SimConfig) -> Self {
-        let scene = Scene::new(config.seed, config.biome, config.weather);
+        let mut scene = Scene::new(config.seed, config.biome, config.weather);
+        scene.author(&config.settings.model);
         let track = Some(Track::new(config.seeds, config.settings));
         let weather_bed = Some(WeatherBed::new(config.seed));
         Sim { config, scene, track, weather_bed, audio_time: 0.0 }
@@ -61,7 +73,8 @@ impl Sim {
     /// A visuals-only instance: same scene, generated from the same recipe,
     /// without paying to synthesise the music. Used by the page's render thread.
     pub fn new_visual(config: SimConfig) -> Self {
-        let scene = Scene::new(config.seed, config.biome, config.weather);
+        let mut scene = Scene::new(config.seed, config.biome, config.weather);
+        scene.author(&config.settings.model);
         Sim { config, scene, track: None, weather_bed: None, audio_time: 0.0 }
     }
 
@@ -85,6 +98,8 @@ impl Sim {
             instruments: Instruments { drone, loops, pulse },
             camera: Camera::default(),
             draw_sky: true,
+            arch: self.config.settings.arch,
+            orbit_turns: camera_orbit_turns(self.config.settings.camera_speed, t),
         }
     }
 

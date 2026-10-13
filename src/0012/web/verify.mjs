@@ -10,12 +10,14 @@
 import { readFile } from "node:fs/promises";
 
 const AUDIO_GOLDEN = 0xddb4728052516eb7n;
+// Re-locked when `raster::fill_face` was fixed (side faces had been drawn with
+// x and y swapped). These mirror VISUAL_GOLDEN in engine/tests/parity_golden.rs.
 const VISUAL_GOLDEN = [
-	16372517786461568741n,
-	9300958290172192542n,
-	3436581339193562279n,
-	3770431886702531045n,
-	7701800233315402307n,
+	0x70217e44bb3898f9n,
+	0x2fad01a425235b18n,
+	0xb726d99120654eden,
+	0x05b87288f804b2c2n,
+	0x40000ee20a659d0cn,
 ];
 const SR = 48000;
 const LOGICAL = 300;

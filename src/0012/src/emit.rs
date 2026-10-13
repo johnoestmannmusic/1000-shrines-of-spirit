@@ -81,6 +81,10 @@ pub fn emit(config: &SimConfig, out: &str) -> io::Result<()> {
         config.settings.code.offset
     ));
     a.push_str(&format!(
+        "\n/// Camera rotation speed, degrees per second.\nconst CAMERA_SPEED: i32 = {};\n",
+        config.settings.camera_speed
+    ));
+    a.push_str(&format!(
         "\n/// The track name, shown at the head of the page and used as the WAV title.\nconst NAME: &str = {:?};\n",
         config.settings.name.as_str()
     ));
@@ -246,6 +250,13 @@ pub fn info(config: &SimConfig, build: u32) -> String {
         format!("drum rev   {}", if s.drum_reverse { "on" } else { "off" }),
         format!("master fx  {fx}"),
         format!("code over  {}", s.code.summary()),
+        format!("arch       {}", s.arch.summary()),
+        format!(
+            "camera     {}",
+            if s.camera_speed == 0 { "still".to_string() } else { format!("{:+}°/s", s.camera_speed) }
+        ),
+        format!("glitch 1   {}", s.glitch[0].summary()),
+        format!("glitch 2   {}", s.glitch[1].summary()),
         format!("transpose  {} semitones", s.loop_transpose),
         String::new(),
         format!("drone arc  {}", arc(s.drone)),
@@ -329,6 +340,13 @@ pub extern "C" fn shrine_code_angle() -> i32 {
 #[no_mangle]
 pub extern "C" fn shrine_code_offset() -> i32 {
     CODE_OFFSET
+}
+
+/// The camera rotation speed in degrees per second, so the page can orbit its
+/// own sky in step with the engine.
+#[no_mangle]
+pub extern "C" fn shrine_camera_speed() -> i32 {
+    CAMERA_SPEED
 }
 
 /// Pointer to the UTF-8 info card (`shrine_info_len` bytes).

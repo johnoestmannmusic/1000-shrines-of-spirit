@@ -29,7 +29,7 @@ use crate::rng::Rng;
 use crate::filter::{DcBlock, OnePole, Svf};
 use crate::glitch::History;
 use crate::modulate::Mods;
-use crate::pattern::{Layer, LayerConfig};
+use crate::pattern::Layer;
 use crate::reverb::Reverb;
 use crate::telemetry::Meters;
 use crate::tempo::Tempo;
@@ -212,6 +212,17 @@ pub struct Settings {
     /// The track's name: shown at the head of the page and used as the WAV
     /// title. Empty falls back to the product name.
     pub name: crate::name::Name,
+    /// How the architecture is turned and placed. Identity by default, so the
+    /// shrine is exactly the centred 16x16 model (`HC005`).
+    pub arch: crate::arch::ArchTransform,
+    /// The two glitch layers: which kinds play, and how often. The defaults
+    /// reproduce the originally hard-coded layers exactly.
+    pub glitch: [crate::glitch_setup::GlitchSetup; 2],
+    /// An authored architecture. Empty means the seed's generator decides.
+    pub model: crate::shrine_model::ShrineModel,
+    /// Constant camera rotation, in degrees per second; the whole viewport
+    /// orbits the shrine. Negative goes the other way, 0 holds still.
+    pub camera_speed: i16,
 }
 
 pub const DEFAULT_SETTINGS: Settings =
@@ -237,6 +248,10 @@ pub const DEFAULT_SETTINGS: Settings =
         master: MasterFx::OFF,
         code: CodeOverlay::DEFAULT,
         name: crate::name::Name::EMPTY,
+        arch: crate::arch::ArchTransform::IDENTITY,
+        glitch: crate::glitch_setup::GlitchSetup::DEFAULT,
+        model: crate::shrine_model::ShrineModel::EMPTY,
+        camera_speed: 0,
     };
 
 /// 0010's sound: the default settings with no atmosphere loops.
@@ -299,35 +314,8 @@ const FADE_IN_SECONDS: u64 = 10;
 pub const DRONE_CUTOFF_MIN: f64 = 400.0;
 pub const DRONE_CUTOFF_OCTAVES: f64 = 4.2;
 
-/// Glitch layer 1; pitched kinds use the scale's notes from D6 up (for D lydian: 0009's list).
-pub fn layer1(h: &Harmony, t: Tempo) -> LayerConfig {
-    LayerConfig {
-        steps: 7,
-        step_len: t.glitch16(),
-        //        Blip Tick Stut Ping Click Crush
-        weights: [1.0, 3.0, 2.0, 0.3, 2.0, 1.5],
-        notes: h.scale_notes(84.0 + h.key as f64, 97.0),
-        fill: 0.55,
-        gain: (0.25, 0.6),
-        pan_width: 0.9,
-        repeats: (4, 9),
-        max_ratchet: 4,
-    }
-}
-
-pub fn layer2(h: &Harmony, t: Tempo) -> LayerConfig {
-    LayerConfig {
-        steps: 11,
-        step_len: t.glitch16() * 2,
-        weights: [3.0, 0.5, 2.0, 2.5, 0.5, 0.5],
-        notes: h.scale_notes(60.0 + h.key as f64, 81.0),
-        fill: 0.45,
-        gain: (0.18, 0.45),
-        pan_width: 0.6,
-        repeats: (3, 7),
-        max_ratchet: 3,
-    }
-}
+// The two glitch layers are built from `glitch_setup::GlitchSetup`, whose
+// defaults reproduce the values that used to be hard-coded here.
 
 /// A layer to hear on its own. Soloing changes only the *monitor* output
 /// (`render_split`); the mix, and so every recording, is never touched.
@@ -482,8 +470,8 @@ impl Track {
             drums,
             clock: 0,
             mods: Mods::new(seeds.s1),
-            glitch1: Layer::new(layer1(&harmony, tempo), seeds.s2, 0x61),
-            glitch2: Layer::new(layer2(&harmony, tempo), seeds.s3, 0x62),
+            glitch1: Layer::new(settings.glitch[0].layer_config(0, &harmony, tempo), seeds.s2, 0x61),
+            glitch2: Layer::new(settings.glitch[1].layer_config(1, &harmony, tempo), seeds.s3, 0x62),
             loops: std::array::from_fn(|i| {
                 AtmosLoop::new(
                     settings.loops[i],
@@ -608,9 +596,13 @@ impl Track {
         self.duck_gain = duck;
         let others = 1.0 - GLITCH_DUCK * presence;
 
-        // 2 & 3: glitch layers.
-        let g1 = self.glitch1.next(clock, m.density1, &self.history);
-        let g2 = self.glitch2.next(clock, m.density2, &self.history);
+        // 2 & 3: glitch layers. A muted layer keeps ticking, so its pattern
+        // evolution stays deterministic, but its density is zero and it is
+        // silent.
+        let d1 = if self.settings.glitch[0].enabled { m.density1 } else { 0.0 };
+        let d2 = if self.settings.glitch[1].enabled { m.density2 } else { 0.0 };
+        let g1 = self.glitch1.next(clock, d1, &self.history);
+        let g2 = self.glitch2.next(clock, d2, &self.history);
         let (el, er) = self.echo.process(
             g1.0 * GLITCH1_ECHO + g2.0 * GLITCH2_ECHO,
             g1.1 * GLITCH1_ECHO + g2.1 * GLITCH2_ECHO,

@@ -85,6 +85,40 @@ impl Shrine {
         Shrine { layers, seed, origin, height }
     }
 
+    /// Build the shrine from an authored model instead of the generator.
+    ///
+    /// The footprint is unchanged — still exactly 16x16, still centred — so
+    /// `HC005` keeps its meaning; only the tiles inside it come from the model.
+    pub fn from_model(seed: u64, model: &crate::shrine_model::ShrineModel) -> Self {
+        let origin = (
+            (GRID_W as i32 - SHRINE_W as i32) / 2,
+            (GRID_H as i32 - SHRINE_H as i32) / 2,
+        );
+        let mut height = [[1u8; SW]; SH];
+        let mut layers = Layers::new(MAX_HEIGHT as u32);
+        for lx in 0..SW {
+            for ly in 0..SH {
+                let h = model.height(lx, ly).min(MAX_HEIGHT);
+                height[lx][ly] = h;
+                if h == 0 {
+                    // A hole: no column at all, so the ground shows through.
+                    continue;
+                }
+                let top = model.kind(lx, ly).min(kind::STONE).max(kind::FLOOR);
+                let top_variant = model.variant(lx, ly);
+                for z in 0..h {
+                    let kind = if z == h - 1 { top } else { kind::STONE };
+                    // Body tiles keep the generator's per-level variation, so a
+                    // model read from the generated shrine rebuilds it exactly;
+                    // the model's own variant drives the visible top tile.
+                    let v = if z == h - 1 { top_variant } else { variant(seed, lx, ly, z) };
+                    layers.set(origin.0 + lx as i32, origin.1 + ly as i32, z as i32, Tile::new(kind, v));
+                }
+            }
+        }
+        Shrine { layers, seed, origin, height }
+    }
+
     /// Top-left cell of the footprint in grid coordinates.
     pub fn origin(&self) -> (i32, i32) {
         self.origin

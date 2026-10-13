@@ -125,6 +125,12 @@ pub extern "C" fn shrine_code_angle() -> i32 {
     crate::overlay::CodeOverlay::DEFAULT.angle as i32
 }
 
+/// The camera rotation speed, for the dev page (always still).
+#[no_mangle]
+pub extern "C" fn shrine_camera_speed() -> i32 {
+    0
+}
+
 /// The overlay's vertical shift, for the dev page.
 #[no_mangle]
 pub extern "C" fn shrine_code_offset() -> i32 {

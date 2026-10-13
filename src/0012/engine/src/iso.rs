@@ -113,6 +113,48 @@ impl Iso {
     pub const fn depth_key(&self, gx: i32, gy: i32, gz: i32) -> u32 {
         ((gx + gy) as u32) << 8 | (gz as u32 & 0xff)
     }
+
+    /// The plane shift caused by a world-space grid offset. Because the
+    /// projection is linear, moving a whole-cell offset into the origin is
+    /// exactly equivalent to moving every coordinate — so an unrotated shrine
+    /// can be offset without leaving the pixel-exact axis-aligned path.
+    pub fn offset_shift(&self, ox: i32, oy: i32, oz: i32) -> Point {
+        let depth = (ox + oy) as f64;
+        let shear = (self.cam_yaw * depth * 1.4) as i32;
+        let y_scale = 1.0 + self.cam_pitch * 0.12;
+        Point {
+            x: (ox - oy) * self.half_w() + shear,
+            y: (depth * self.half_h() as f64 * y_scale) as i32 - oz * self.level_h,
+        }
+    }
+
+    /// Project a point of the *rotated architecture*: the model point is turned
+    /// by `rot` (a row-major 3x3), shifted by `off` in world space, then run
+    /// through this same isometric projection. `off` is folded in after the
+    /// rotation, so offsets move along the grid's own axes.
+    ///
+    /// Used only when the architecture is actually rotated; every unrotated
+    /// path keeps using [`project`], so their pixels cannot drift.
+    pub fn project_rotated(
+        &self,
+        x: f64,
+        y: f64,
+        z: f64,
+        rot: &[[f64; 3]; 3],
+        off: (f64, f64, f64),
+    ) -> Point {
+        let wx = rot[0][0] * x + rot[0][1] * y + rot[0][2] * z + off.0;
+        let wy = rot[1][0] * x + rot[1][1] * y + rot[1][2] * z + off.1;
+        let wz = rot[2][0] * x + rot[2][1] * y + rot[2][2] * z + off.2;
+        let depth = wx + wy;
+        let shear = (self.cam_yaw * depth * 1.4) as i32;
+        let y_scale = 1.0 + self.cam_pitch * 0.12;
+        Point {
+            x: self.origin_x + ((wx - wy) * self.half_w() as f64).round() as i32 + shear,
+            y: self.origin_y + (depth * self.half_h() as f64 * y_scale).round() as i32
+                - (wz * self.level_h as f64).round() as i32,
+        }
+    }
 }
 
 /// Logical pixels -> fixed-point units.

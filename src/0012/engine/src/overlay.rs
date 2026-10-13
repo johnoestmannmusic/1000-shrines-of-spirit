@@ -20,6 +20,8 @@ pub struct CodeOverlay {
     /// Vertical shift of the whole drift, percent of the canvas height
     /// (negative lifts it). Useful for re-centring a tilted block.
     pub offset: i16,
+    /// How the drift behaves as the camera orbits: see [`PLANES`].
+    pub plane: u8,
 }
 
 impl CodeOverlay {
@@ -32,11 +34,14 @@ impl CodeOverlay {
     /// Smallest and largest vertical shift, in percent of the canvas height.
     pub const MIN_OFFSET: i16 = -100;
     pub const MAX_OFFSET: i16 = 100;
+    /// Plane modes, in menu order.
+    pub const PLANES: [&'static str; 3] = ["static", "flat", "sphere"];
     pub const OFF: CodeOverlay =
-        CodeOverlay { enabled: false, opacity: 0, speed: 50, scale: 200, angle: 0, offset: 0 };
-    /// The default: on, very transparent, moderate speed, double size, level.
+        CodeOverlay { enabled: false, opacity: 0, speed: 50, scale: 200, angle: 0, offset: 0, plane: 0 };
+    /// The default: on, very transparent, moderate speed, double size, level,
+    /// and a static code plane — the flat and sphere modes are opt-in.
     pub const DEFAULT: CodeOverlay =
-        CodeOverlay { enabled: true, opacity: 14, speed: 45, scale: 200, angle: 0, offset: 0 };
+        CodeOverlay { enabled: true, opacity: 14, speed: 45, scale: 200, angle: 0, offset: 0, plane: 0 };
 
     /// Pack for the recipe and the C ABI: bit 0 enabled, then opacity, speed,
     /// and the text scale in the top byte.
@@ -45,6 +50,7 @@ impl CodeOverlay {
             | ((self.opacity.min(100) as u32) << 8)
             | ((self.speed.min(100) as u32) << 16)
             | ((self.scale.clamp(Self::MIN_SCALE, Self::MAX_SCALE) as u32) << 24)
+            | (((self.plane as u32) & 0x7) << 1)
     }
 
     pub fn from_word(word: u32) -> Self {
@@ -58,6 +64,7 @@ impl CodeOverlay {
             scale,
             angle: 0,
             offset: 0,
+            plane: ((word >> 1) & 0x7).min((Self::PLANES.len() - 1) as u32) as u8,
         }
     }
 
@@ -83,7 +90,8 @@ impl CodeOverlay {
         if self.enabled {
             let tilt = if self.angle == 0 { String::new() } else { format!(" · {angle}°", angle = self.angle) };
             let shift = if self.offset == 0 { String::new() } else { format!(" · {off}%", off = self.offset) };
-            format!("on · {}% · speed {} · text {}%{tilt}{shift}", self.opacity, self.speed, self.scale)
+            let plane = if self.plane == 0 { String::new() } else { format!(" · {}", Self::PLANES[(self.plane as usize).min(2)]) };
+            format!("on · {}% · speed {} · text {}%{tilt}{shift}{plane}", self.opacity, self.speed, self.scale)
         } else {
             "off".to_string()
         }
@@ -100,7 +108,7 @@ mod tests {
         for fx in [
             CodeOverlay::DEFAULT,
             CodeOverlay::OFF,
-            CodeOverlay { enabled: true, opacity: 100, speed: 1, scale: 50, angle: 0, offset: 0 },
+            CodeOverlay { enabled: true, opacity: 100, speed: 1, scale: 50, angle: 0, offset: 0, plane: 2 },
         ] {
             assert_eq!(CodeOverlay::from_word(fx.word()), fx);
         }
@@ -133,18 +141,18 @@ mod tests {
     #[test]
     fn a_recipe_without_a_scale_gets_the_default() {
         // Version 4 words left the top byte zero; they must not read as 0%.
-        let old = CodeOverlay { enabled: true, opacity: 20, speed: 30, scale: 100, angle: 0, offset: 0 }.word() & 0x00ff_ffff;
+        let old = CodeOverlay { enabled: true, opacity: 20, speed: 30, scale: 100, angle: 0, offset: 0, plane: 0 }.word() & 0x00ff_ffff;
         assert_eq!(CodeOverlay::from_word(old).scale, CodeOverlay::DEFAULT.scale);
     }
 
     #[test]
     fn extremes_are_clamped() {
-        let high = CodeOverlay { enabled: true, opacity: 255, speed: 255, scale: 255, angle: 0, offset: 0 };
+        let high = CodeOverlay { enabled: true, opacity: 255, speed: 255, scale: 255, angle: 0, offset: 0, plane: 0 };
         assert_eq!(
             CodeOverlay::from_word(high.word()),
-            CodeOverlay { enabled: true, opacity: 100, speed: 100, scale: CodeOverlay::MAX_SCALE, angle: 0, offset: 0 }
+            CodeOverlay { enabled: true, opacity: 100, speed: 100, scale: CodeOverlay::MAX_SCALE, angle: 0, offset: 0, plane: 0 }
         );
-        let tiny = CodeOverlay { enabled: true, opacity: 0, speed: 0, scale: 1, angle: 0, offset: 0 };
+        let tiny = CodeOverlay { enabled: true, opacity: 0, speed: 0, scale: 1, angle: 0, offset: 0, plane: 0 };
         assert_eq!(CodeOverlay::from_word(tiny.word()).scale, CodeOverlay::MIN_SCALE);
     }
 }

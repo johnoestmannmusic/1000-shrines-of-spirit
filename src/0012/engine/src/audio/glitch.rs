@@ -48,6 +48,20 @@ pub enum Kind {
 pub const KINDS: [Kind; 6] =
     [Kind::Blip, Kind::Tick, Kind::Stutter, Kind::Ping, Kind::Click, Kind::Crush];
 
+impl Kind {
+    /// Display name for the setup menu.
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Blip => "Blip",
+            Kind::Tick => "Tick",
+            Kind::Stutter => "Stutter",
+            Kind::Ping => "Ping",
+            Kind::Click => "Click",
+            Kind::Crush => "Crush",
+        }
+    }
+}
+
 /// What a pattern step plays.
 #[derive(Clone, Copy, Debug)]
 pub struct Event {

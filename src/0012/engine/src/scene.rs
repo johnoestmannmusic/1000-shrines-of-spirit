@@ -8,8 +8,9 @@
 //! logical buffer never changes size (`HC003`); under load the [`Quality`] level
 //! drops *effects*, not resolution.
 
+use crate::arch::ArchTransform;
 use crate::framebuffer::{blend, shade, Framebuffer, Rgba};
-use crate::iso::{to_px_round, Iso};
+use crate::iso::{to_px_round, Iso, Point};
 use crate::math::sin_turns;
 use crate::palette::Palette;
 use crate::plants::{role, Biome, Plant, Plants};
@@ -88,6 +89,11 @@ pub struct SimState {
     /// Whether to fill the sky. The page clears this so its own sky (and the
     /// source waterfall behind the shrine) can show through.
     pub draw_sky: bool,
+    /// How the architecture is turned and placed (`arch::ArchTransform`).
+    pub arch: ArchTransform,
+    /// Camera orbit, in turns: the whole scene turning about the shrine. Driven
+    /// by the camera rotation speed and the clock.
+    pub orbit_turns: f64,
 }
 
 impl SimState {
@@ -105,6 +111,8 @@ impl SimState {
             instruments: Instruments { drone: 1.0, loops: [1.0; 4], pulse: 0.0 },
             camera: Camera::default(),
             draw_sky: true,
+            arch: ArchTransform::IDENTITY,
+            orbit_turns: 0.0,
         }
     }
 }
@@ -161,6 +169,19 @@ impl Scene {
         (self.palette.sky_top, self.palette.sky_bottom)
     }
 
+    /// Use an authored architecture instead of the generated one.
+    ///
+    /// A no-op for an empty model, so the generator stays authoritative by
+    /// default and nothing about today's output moves (`HC004`). Plants are
+    /// regenerated against the new structure, so they still grow on it.
+    pub fn author(&mut self, model: &crate::shrine_model::ShrineModel) {
+        if !model.is_authored() {
+            return;
+        }
+        self.shrine = Shrine::from_model(self.seed, model);
+        self.plants = Plants::generate(self.seed, &self.shrine, self.biome);
+    }
+
     /// The weather at `t` seconds, from this scene's own weather.
     pub fn weather_state(&self, t: f64) -> WeatherState {
         self.weather.state(t)
@@ -201,11 +222,26 @@ impl Scene {
             fb.clear([0, 0, 0, 0]);
         }
 
-        // Ground plane.
+        // Camera orbit, if the shrine is being turned under the viewer. The
+        // world vertical is untouched, so plants still stand up and only the
+        // horizontal plane turns.
+        let arch = state.arch;
+        let orbit = state.orbit_turns;
+        let general = !arch.is_unrotated() || orbit != 0.0;
+        let (rot, off) = arch.world(orbit);
+        let (ground_rot, ground_off) = ArchTransform::IDENTITY.world(orbit);
+
+        // Ground plane. When the camera orbits, the cells are turned with it, so
+        // they go through the general quad path; otherwise they keep the exact
+        // axis-aligned diamonds.
         let ground = self.lit(self.palette.ground_dark, &w);
         for gy in 0..GRID_H as i32 {
             for gx in 0..GRID_W as i32 {
-                raster::fill_cell(fb, &iso, gx, gy, 0, ground);
+                if general {
+                    raster::fill_box(fb, &iso, &ground_rot, ground_off, gx, gy, 1, ground, ground, ground);
+                } else {
+                    raster::fill_cell(fb, &iso, gx, gy, 0, ground);
+                }
             }
         }
 
@@ -215,7 +251,23 @@ impl Scene {
         for (i, p) in self.plants.items.iter().enumerate() {
             buckets[(p.gy * GRID_W as i32 + p.gx) as usize].push(i);
         }
-        let mut cells: Vec<(u32, i32, i32, u32)> = Vec::new();
+        // Painter's key. A turned column can overlap its neighbours, so the
+        // order has to follow the *rotated* position, not the grid's.
+        let key = |gx: i32, gy: i32, height: u32| -> f64 {
+            if !general {
+                // Exactly the old `depth_key` order: by (gx + gy) only, with a
+                // stable sort keeping the scan order for ties. Adding anything
+                // else here would reorder columns within a diagonal.
+                return (gx + gy) as f64;
+            }
+            let (x, y) = (gx as f64, gy as f64);
+            let z = height.saturating_sub(1) as f64 / 2.0;
+            let wx = rot[0][0] * x + rot[0][1] * y + rot[0][2] * z + off.0;
+            let wy = rot[1][0] * x + rot[1][1] * y + rot[1][2] * z + off.1;
+            let wz = rot[2][0] * x + rot[2][1] * y + rot[2][2] * z + off.2;
+            (wx + wy) * 1024.0 + wz
+        };
+        let mut cells: Vec<(f64, i32, i32, u32)> = Vec::new();
         for gy in 0..GRID_H as i32 {
             for gx in 0..GRID_W as i32 {
                 let inside = gx >= ox && gx < ox + SHRINE_W as i32 && gy >= oy && gy < oy + SHRINE_H as i32;
@@ -224,10 +276,17 @@ impl Scene {
                 if height == 0 && !has_plants {
                     continue;
                 }
-                cells.push((iso.depth_key(gx, gy, 0), gx, gy, height));
+                cells.push((key(gx, gy, height), gx, gy, height));
             }
         }
-        cells.sort_by_key(|c| c.0);
+        cells.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal));
+
+        // A whole-cell world offset is just a moved projection origin, so the
+        // unrotated path below stays pixel-exact however far the shrine moves.
+        let shrine_iso = {
+            let shift = iso.offset_shift(arch.off_x as i32, arch.off_y as i32, arch.off_z as i32);
+            Iso { origin_x: iso.origin_x + shift.x, origin_y: iso.origin_y + shift.y, ..iso }
+        };
 
         // The altar glows with the drone's slow arc — the one instrument the
         // visuals always show.
@@ -239,13 +298,23 @@ impl Scene {
                 let base = top_colour(tile.kind, &self.palette);
                 let base = if tile.kind == kind::ALTAR { blend(base, [255, 255, 255, 255], glow, 100) } else { base };
                 let top = self.lit(base, &w);
-                raster::fill_column(fb, &iso, gx, gy, height, top, shade(top, 3, 5), shade(top, 2, 5));
+                if general {
+                    raster::fill_box(fb, &iso, &rot, off, gx, gy, height, top, shade(top, 3, 5), shade(top, 2, 5));
+                } else {
+                    raster::fill_column(fb, &shrine_iso, gx, gy, height, top, shade(top, 3, 5), shade(top, 2, 5));
+                }
             }
             for (n, &i) in buckets[(gy * GRID_W as i32 + gx) as usize].iter().enumerate() {
                 if n % stride != 0 {
                     continue;
                 }
-                self.draw_plant(fb, &iso, &self.plants.items[i], state);
+                let plant = &self.plants.items[i];
+                let base = if general {
+                    iso.project_rotated(plant.gx as f64, plant.gy as f64, plant.z as f64, &ground_rot, ground_off)
+                } else {
+                    iso.project(plant.gx, plant.gy, plant.z)
+                };
+                self.draw_plant(fb, plant, state, base);
             }
         }
 
@@ -276,8 +345,7 @@ impl Scene {
         blend(shade(c, brightness, 100), self.palette.fog, fog, 100)
     }
 
-    fn draw_plant(&self, fb: &mut Framebuffer, iso: &Iso, plant: &Plant, state: &SimState) {
-        let base = iso.project(plant.gx, plant.gy, plant.z);
+    fn draw_plant(&self, fb: &mut Framebuffer, plant: &Plant, state: &SimState, base: Point) {
         let (bx, by) = (base.x + plant.offset.0, base.y + plant.offset.1);
         let w = state.weather;
         let colour = |r: u8| {

@@ -2,8 +2,8 @@
 //! drawable shapes.
 
 use shrine0012::framebuffer::{rgb, rgba, Framebuffer, Rgba};
-use shrine0012::iso::Iso;
-use shrine0012::raster::{ceil_div, fill_cell, fill_diamond_at, floor_div, line};
+use shrine0012::iso::{to_units, Iso};
+use shrine0012::raster::{ceil_div, fill_cell, fill_diamond_at, fill_face, floor_div, line};
 use shrine0012::{ART_PX, CANVAS_W, LOGICAL_H, LOGICAL_W};
 
 const BG: Rgba = [0, 0, 0, 255];
@@ -14,6 +14,27 @@ fn fresh(c: Rgba) -> Framebuffer {
     let mut fb = Framebuffer::logical();
     fb.clear(c);
     fb
+}
+
+#[test]
+fn a_vertical_face_drops_down_its_own_columns() {
+    // Regression: `fill_face` called the *horizontal* `fill_span`, so every side
+    // face was painted as a sideways band — rows taken from an x coordinate and
+    // columns from a y bound — which made the whole architecture look skewed.
+    let mut fb = fresh(BG);
+    fill_face(&mut fb, to_units(100), to_units(140), to_units(50), to_units(50), to_units(30), FG);
+
+    assert_eq!(fb.get(120, 65), FG, "the face is not filled where it should be");
+    // The transposed call painted rows 100..140 across columns 50..80.
+    assert_eq!(fb.get(60, 120), BG, "a sideways band was drawn");
+    assert_eq!(fb.get(150, 65), BG, "filled past the face's right edge");
+    assert_eq!(fb.get(120, 40), BG, "filled above the face");
+    assert_eq!(fb.get(120, 85), BG, "filled below the face");
+    // Every column across the face carries the full drop.
+    for x in 101..140 {
+        assert_eq!(fb.get(x, 55), FG, "column {x} is short at the top");
+        assert_eq!(fb.get(x, 79), FG, "column {x} is short at the bottom");
+    }
 }
 
 #[test]

@@ -117,6 +117,22 @@ impl Framebuffer {
         }
     }
 
+    /// Fill a vertical run `y0..=y1` in column `x`, clipped to the buffer.
+    pub fn fill_vertical(&mut self, x: i32, y0: i32, y1: i32, colour: Rgba) {
+        if x < 0 || x as u32 >= self.width {
+            return;
+        }
+        let y0 = y0.max(0);
+        let y1 = y1.min(self.height as i32 - 1);
+        if y0 > y1 {
+            return;
+        }
+        for y in y0..=y1 {
+            let i = self.offset(x, y);
+            self.pixels[i..i + 4].copy_from_slice(&colour);
+        }
+    }
+
     /// Fill an axis-aligned rectangle `x0..=x1`, `y0..=y1`, clipped.
     pub fn fill_rect(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, colour: Rgba) {
         for y in y0..=y1 {

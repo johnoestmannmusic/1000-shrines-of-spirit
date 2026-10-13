@@ -35,8 +35,27 @@ fn custom() -> SimConfig {
             drone: DroneArc { cycle_s: 300, hold_s: 90 },
             drone_tone: 1500,
             master: MasterFx { enabled: true, tape: true, radio: true, crush: true, ..MasterFx::OFF },
-            code: shrine0012::overlay::CodeOverlay { enabled: true, opacity: 40, speed: 80, scale: 250, angle: -25, offset: 40 },
+            code: shrine0012::overlay::CodeOverlay { enabled: true, opacity: 40, speed: 80, scale: 250, angle: -25, offset: 40, plane: 2 },
             name: shrine0012::name::Name::from_str("Glass Garden"),
+            arch: shrine0012::arch::ArchTransform { rot_x: 25, rot_y: 0, rot_z: -90, off_x: 3, off_y: -2, off_z: 1 },
+            glitch: [
+                shrine0012::glitch_setup::GlitchSetup {
+                    fill: 20,
+                    rate: 2,
+                    gain: 150,
+                    steps: 5,
+                    ratchet: 2,
+                    ..shrine0012::glitch_setup::GlitchSetup::DEFAULT_0
+                },
+                shrine0012::glitch_setup::GlitchSetup { enabled: false, kinds: [true, false, true, false, true, false], ..shrine0012::glitch_setup::GlitchSetup::DEFAULT_1 },
+            ],
+            camera_speed: -45,
+            model: {
+                let mut m = shrine0012::shrine_model::ShrineModel::EMPTY;
+                m.set(2, 3, 5, 3, 1);
+                m.set(15, 15, 1, 1, 0);
+                m
+            },
             ..DEFAULT_SETTINGS
         },
         biome: Biome::Fungal,
@@ -64,6 +83,10 @@ fn a_recipe_round_trips_exactly() {
         assert_eq!(back.settings.master, config.settings.master);
         assert_eq!(back.settings.code, config.settings.code);
         assert_eq!(back.settings.name, config.settings.name);
+        assert_eq!(back.settings.arch, config.settings.arch);
+        assert_eq!(back.settings.glitch, config.settings.glitch);
+        assert_eq!(back.settings.model, config.settings.model);
+        assert_eq!(back.settings.camera_speed, config.settings.camera_speed);
     }
 }
 
@@ -72,7 +95,7 @@ fn encoding_twice_is_stable() {
     let a = recipe::encode(&custom());
     let b = recipe::encode(&custom());
     assert_eq!(a, b);
-    assert_eq!(a.len(), 68);
+    assert_eq!(a.len(), 140);
 }
 
 #[test]

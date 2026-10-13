@@ -23,7 +23,7 @@ use crate::track::{DroneArc, KeyChoice, LoopDesign, Seeds, Settings};
 use crate::weather::WeatherKind;
 use crate::{DEFAULT_SEEDS, DEFAULT_SETTINGS};
 
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 13;
 
 /// Encode a configuration.
 pub fn encode(config: &SimConfig) -> Vec<u32> {
@@ -72,6 +72,16 @@ pub fn encode(config: &SimConfig) -> Vec<u32> {
     w.push(s.master.bits());
     w.push(s.code.word());
     w.push(s.code.angle_word());
+    w.push(s.arch.rot_word());
+    w.push(s.arch.off_word());
+    for layer in s.glitch {
+        w.push(layer.word_a());
+        w.push(layer.word_b());
+    }
+    w.push((s.camera_speed + 180).clamp(0, 360) as u32);
+    for word in s.model.words() {
+        w.push(word);
+    }
     for word in s.name.words() {
         w.push(word);
     }
@@ -128,7 +138,8 @@ pub fn decode(words: &[u32]) -> SimConfig {
     // Version 4 added the source-code overlay; version 5 added its text scale
     // (older words leave the top byte zero and read as the default scale);
     // version 6 added the track name; version 7 added the overlay's tilt;
-    // version 8 packed its vertical shift into the same word.
+    // version 8 packed its vertical shift into the same word; version 9 added
+    // the architecture transform; version 10 added the glitch layers.
     let mut code = if version < 4 { CodeOverlay::DEFAULT } else { CodeOverlay::from_word(c.next()) };
     if version >= 7 {
         let layout = c.next();
@@ -137,6 +148,38 @@ pub fn decode(words: &[u32]) -> SimConfig {
             code.offset = CodeOverlay::offset_from_word(layout);
         }
     }
+    let arch = if version >= 9 {
+        let (rot_x, rot_y, rot_z) = crate::arch::ArchTransform::rot_from_word(c.next());
+        let (off_x, off_y, off_z) = crate::arch::ArchTransform::off_from_word(c.next());
+        crate::arch::ArchTransform { rot_x, rot_y, rot_z, off_x, off_y, off_z }
+    } else {
+        crate::arch::ArchTransform::IDENTITY
+    };
+    let glitch = if version >= 10 {
+        core::array::from_fn(|_| {
+            let a = c.next();
+            let b = c.next();
+            crate::glitch_setup::GlitchSetup::from_words(a, b)
+        })
+    } else {
+        crate::glitch_setup::GlitchSetup::DEFAULT
+    };
+    // Version 11 added the authored architecture: 64 words, absent (and so
+    // procedural) in every earlier recipe.
+    let camera_speed = if version >= 12 {
+        (c.next().min(360) as i16) - 180
+    } else {
+        0
+    };
+    let model = if version >= 13 {
+        let words: Vec<u32> = (0..crate::shrine_model::WORDS as u32).map(|_| c.next()).collect();
+        crate::shrine_model::ShrineModel::from_words(&words)
+    } else if version >= 11 {
+        let words: Vec<u32> = (0..crate::shrine_model::CELLS as u32 / 4).map(|_| c.next()).collect();
+        crate::shrine_model::ShrineModel::from_legacy_words(&words)
+    } else {
+        crate::shrine_model::ShrineModel::EMPTY
+    };
     let name = if version < 6 {
         crate::name::Name::EMPTY
     } else {
@@ -167,6 +210,10 @@ pub fn decode(words: &[u32]) -> SimConfig {
             master,
             code,
             name,
+            arch,
+            glitch,
+            model,
+            camera_speed,
         },
         biome,
         weather,

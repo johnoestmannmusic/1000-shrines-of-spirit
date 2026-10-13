@@ -5,6 +5,7 @@
 //! bakes (`recipe.rs`), so what you see here is what ships.
 
 use crate::{audition::Audition, emit, preview, seed, state, wav};
+use shrine0012::arch::ArchTransform;
 use shrine0012::master::MasterFx;
 use shrine0012::overlay::CodeOverlay;
 use ratatui::buffer::Buffer;
@@ -13,6 +14,10 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::{DefaultTerminal, Frame};
 use shrine0012::atmos::LOOP_TIMBRES;
+use shrine0012::glitch::KINDS;
+use shrine0012::shrine::kind as tile_kind;
+use shrine0012::shrine_model::ShrineModel;
+use shrine0012::glitch_setup::{GlitchSetup, RATES};
 use shrine0012::framebuffer::Framebuffer;
 use shrine0012::harmony::{key_name, Pace, SCALES};
 use shrine0012::kits::{KITS, SPACES};
@@ -91,6 +96,14 @@ enum Kind {
     CodeScale,
     CodeAngle,
     CodeOffset,
+    CodePlane,
+    CameraSpeed,
+    ArchRotX,
+    ArchRotY,
+    ArchRotZ,
+    ArchOffX,
+    ArchOffY,
+    ArchOffZ,
     Name,
     SeedN(usize),
     SavePng,
@@ -98,6 +111,9 @@ enum Kind {
     WavExport,
     ExportSeed,
     ImportSeed,
+    Reset,
+    Glitch(usize),
+    EditArch,
     Compile,
     Quit,
 }
@@ -107,6 +123,10 @@ enum PromptAction {
     ImportSeed,
     ExportSeed,
     Name,
+    /// Type an exact value for a numeric row.
+    Number(Kind),
+    /// Type an exact value on a glitch layer screen.
+    GlitchNumber(GlitchRow),
 }
 
 struct Prompt {
@@ -120,6 +140,8 @@ enum Screen {
     Main,
     Wav,
     Fx,
+    Glitch,
+    Editor,
 }
 
 /// The master-effects toggles live in the settings; this only tracks the cursor.
@@ -216,6 +238,70 @@ fn parse_seconds(text: &str) -> Option<f64> {
     Some(total)
 }
 
+/// The rows of a glitch layer screen, in order: what plays, then how often.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum GlitchRow {
+    Enabled,
+    Kind(usize),
+    Fill,
+    Rate,
+    Gain,
+    Steps,
+    RepeatsMin,
+    RepeatsMax,
+    Ratchet,
+    Back,
+}
+
+const GLITCH_ROWS: [GlitchRow; 15] = [
+    GlitchRow::Enabled,
+    GlitchRow::Kind(0),
+    GlitchRow::Kind(1),
+    GlitchRow::Kind(2),
+    GlitchRow::Kind(3),
+    GlitchRow::Kind(4),
+    GlitchRow::Kind(5),
+    GlitchRow::Fill,
+    GlitchRow::Rate,
+    GlitchRow::Gain,
+    GlitchRow::Steps,
+    GlitchRow::RepeatsMin,
+    GlitchRow::RepeatsMax,
+    GlitchRow::Ratchet,
+    GlitchRow::Back,
+];
+
+/// The architecture editor: where the cursor is, the working model, and a
+/// small undo stack. The working copy starts from whatever the seed produced,
+/// so editing continues from the generated shrine.
+struct EditForm {
+    cx: usize,
+    cy: usize,
+    /// What the seed's generator produces: the model returns to procedural
+    /// whenever the working copy matches it, so the recipe stays lean.
+    baseline: ShrineModel,
+    working: ShrineModel,
+    undo: Vec<ShrineModel>,
+}
+
+impl EditForm {
+    fn new() -> Self {
+        EditForm { cx: 8, cy: 8, baseline: ShrineModel::EMPTY, working: ShrineModel::EMPTY, undo: Vec::new() }
+    }
+}
+
+/// Which glitch layer the screen is editing, and where the cursor is.
+struct GlitchForm {
+    layer: usize,
+    sel: usize,
+}
+
+impl GlitchForm {
+    fn new() -> Self {
+        GlitchForm { layer: 0, sel: 0 }
+    }
+}
+
 struct Row {
     label: String,
     value: String,
@@ -255,8 +341,55 @@ fn step_u16(values: &[u16], current: u16, forward: bool) -> u16 {
     }
 }
 
-fn key_label(key: KeyChoice) -> String {
-    match key {
+/// A colour per tile kind, so the plan grid reads at a glance.
+fn kind_colour(kind: u8) -> Rgb {
+    match kind {
+        tile_kind::FLOOR => (120, 120, 130),
+        tile_kind::WALL => (170, 170, 180),
+        tile_kind::PILLAR => (220, 220, 230),
+        tile_kind::ROOF => (140, 180, 220),
+        tile_kind::RUBBLE => (200, 150, 140),
+        tile_kind::ALTAR => (245, 205, 120),
+        tile_kind::STONE => (90, 90, 100),
+        _ => FAINT,
+    }
+}
+
+fn tile_name(kind: u8) -> &'static str {
+    match kind {
+        tile_kind::FLOOR => "floor",
+        tile_kind::WALL => "wall",
+        tile_kind::PILLAR => "pillar",
+        tile_kind::ROOF => "roof",
+        tile_kind::RUBBLE => "rubble",
+        tile_kind::ALTAR => "altar",
+        tile_kind::STONE => "stone",
+        _ => "empty",
+    }
+}
+
+fn on_off(on: bool) -> String {
+    if on {
+        "on".to_string()
+    } else {
+        "off".to_string()
+    }
+}
+
+/// Typed values are clamped to exactly the range the arrow keys nudge within.
+fn clamp_arc(n: i64) -> u16 {
+    n.clamp(ARCS[0] as i64, ARCS[ARCS.len() - 1] as i64) as u16
+}
+
+fn clamp_rot(n: i64) -> i16 {
+    n.clamp(ArchTransform::MIN_ROT as i64, ArchTransform::MAX_ROT as i64) as i16
+}
+
+fn clamp_off(n: i64) -> i16 {
+    n.clamp(ArchTransform::MIN_OFF as i64, ArchTransform::MAX_OFF as i64) as i16
+}
+
+fn key_label(key: KeyChoice) -> String {    match key {
         KeyChoice::Seed => "seed picks".to_string(),
         KeyChoice::Note(n) => key_name(n).to_string(),
     }
@@ -329,6 +462,8 @@ struct App {
     screen: Screen,
     wav: WavForm,
     fx: FxForm,
+    gform: GlitchForm,
+    edit: EditForm,
     quit: bool,
 }
 
@@ -352,6 +487,8 @@ impl App {
             audition: None,
             screen: Screen::Main,
             wav: WavForm::new(seed),
+            gform: GlitchForm::new(),
+            edit: EditForm::new(),
             fx: FxForm::new(),
             quit: false,
         }
@@ -428,6 +565,11 @@ impl App {
         head("Master", &mut rows);
         field("Master FX".into(), fx_summary(s.master), Kind::OpenFx, &mut rows);
 
+        head("Glitches", &mut rows);
+        for i in 0..2 {
+            field(format!("Glitch layer {}", i + 1), s.glitch[i].summary(), Kind::Glitch(i), &mut rows);
+        }
+
         head("Overlay", &mut rows);
         field("Code overlay".into(), if s.code.enabled { "on".into() } else { "off".into() }, Kind::CodeEnabled, &mut rows);
         field("Code opacity".into(), format!("{}%", s.code.opacity), Kind::CodeOpacity, &mut rows);
@@ -435,6 +577,23 @@ impl App {
         field("Code text size".into(), format!("{}%", s.code.scale), Kind::CodeScale, &mut rows);
         field("Code angle".into(), format!("{}°", s.code.angle), Kind::CodeAngle, &mut rows);
         field("Code vertical".into(), format!("{}%", s.code.offset), Kind::CodeOffset, &mut rows);
+        field("Code plane".into(), CodeOverlay::PLANES[(s.code.plane as usize).min(2)].to_string(), Kind::CodePlane, &mut rows);
+
+        head("Camera", &mut rows);
+        field(
+            "Rotation speed".into(),
+            if s.camera_speed == 0 { "still".into() } else { format!("{:+}°/s", s.camera_speed) },
+            Kind::CameraSpeed,
+            &mut rows,
+        );
+
+        head("Architecture", &mut rows);
+        field("Rotate X".into(), format!("{}°", s.arch.rot_x), Kind::ArchRotX, &mut rows);
+        field("Rotate Y".into(), format!("{}°", s.arch.rot_y), Kind::ArchRotY, &mut rows);
+        field("Rotate Z".into(), format!("{}°", s.arch.rot_z), Kind::ArchRotZ, &mut rows);
+        field("Offset X".into(), format!("{:+} cells", s.arch.off_x), Kind::ArchOffX, &mut rows);
+        field("Offset Y".into(), format!("{:+} cells", s.arch.off_y), Kind::ArchOffY, &mut rows);
+        field("Offset Z".into(), format!("{:+} levels", s.arch.off_z), Kind::ArchOffZ, &mut rows);
 
         head("Seeds", &mut rows);
         for i in 0..6 {
@@ -447,6 +606,13 @@ impl App {
         field("Export WAV".into(), "metadata + cover art".into(), Kind::WavExport, &mut rows);
         field("Export seed".into(), format!("artifacts/ShrineGen-{}.shrineseed", c.seed), Kind::ExportSeed, &mut rows);
         field("Import seed".into(), "load a .shrineseed file".into(), Kind::ImportSeed, &mut rows);
+        field("Reset to defaults".into(), "a fresh project".into(), Kind::Reset, &mut rows);
+        field(
+            "Architecture editor".into(),
+            if s.model.is_authored() { "hand-authored".into() } else { "from the seed".into() },
+            Kind::EditArch,
+            &mut rows,
+        );
         field("Compile WASM".into(), "emit → rustc → web/shrine.wasm".into(), Kind::Compile, &mut rows);
         field("Quit".into(), String::new(), Kind::Quit, &mut rows);
         rows
@@ -556,12 +722,53 @@ impl App {
                 self.config.settings.code.offset =
                     v.clamp(CodeOverlay::MIN_OFFSET as i32, CodeOverlay::MAX_OFFSET as i32) as i16;
             }
+            Kind::CodePlane => {
+                let n = CodeOverlay::PLANES.len() as i32;
+                let i = self.config.settings.code.plane as i32 + if forward { 1 } else { -1 };
+                self.config.settings.code.plane = i.rem_euclid(n) as u8;
+            }
+            Kind::CameraSpeed => {
+                let step = if shift { 15 } else { 5 };
+                let v = self.config.settings.camera_speed as i32 + if forward { step } else { -step };
+                self.config.settings.camera_speed = v.clamp(-180, 180) as i16;
+            }
+            Kind::ArchRotX | Kind::ArchRotY | Kind::ArchRotZ => {
+                let step = if shift { 15 } else { 5 };
+                let d = if forward { step } else { -step };
+                let rot = &mut self.config.settings.arch;
+                let field = match kind {
+                    Kind::ArchRotX => &mut rot.rot_x,
+                    Kind::ArchRotY => &mut rot.rot_y,
+                    _ => &mut rot.rot_z,
+                };
+                let v = *field as i32 + d;
+                *field = v.clamp(ArchTransform::MIN_ROT as i32, ArchTransform::MAX_ROT as i32) as i16;
+            }
+            Kind::ArchOffX | Kind::ArchOffY | Kind::ArchOffZ => {
+                let step = if shift { 4 } else { 1 };
+                let d = if forward { step } else { -step };
+                let arch = &mut self.config.settings.arch;
+                let field = match kind {
+                    Kind::ArchOffX => &mut arch.off_x,
+                    Kind::ArchOffY => &mut arch.off_y,
+                    _ => &mut arch.off_z,
+                };
+                let v = *field as i32 + d;
+                *field = v.clamp(ArchTransform::MIN_OFF as i32, ArchTransform::MAX_OFF as i32) as i16;
+            }
             Kind::SeedN(i) => {
                 let step = if shift { 100 } else { 1 };
                 let v = seed_value(&self.config, i);
                 set_seed(&mut self.config, i, if forward { v.wrapping_add(step) } else { v.wrapping_sub(step) });
             }
             Kind::Header => return,
+            Kind::Reset => {}
+            Kind::EditArch => {}
+            Kind::Glitch(i) => {
+                self.gform.layer = i.min(1);
+                self.screen = Screen::Glitch;
+                return;
+            }
             Kind::SavePng | Kind::CoverPng | Kind::WavExport | Kind::ExportSeed | Kind::ImportSeed | Kind::Compile | Kind::Quit => {
                 self.activate();
                 return;
@@ -571,7 +778,17 @@ impl App {
     }
 
     fn activate(&mut self) {
-        match self.rows()[self.sel].kind {
+        let (kind, label) = {
+            let row = &self.rows()[self.sel];
+            (row.kind, row.label.clone())
+        };
+        // Every plain number can be typed exactly, as well as nudged with the
+        // arrows; both go through the same clamp, so they can never disagree.
+        if let Some(value) = self.number_text(kind) {
+            self.prompt = Some(Prompt { label, value, action: PromptAction::Number(kind) });
+            return;
+        }
+        match kind {
             Kind::SavePng => self.save_png(),
             Kind::CoverPng => self.cover_png(),
             Kind::WavExport => {
@@ -592,6 +809,13 @@ impl App {
                 });
             }
             Kind::Compile => self.start_compile(),
+            Kind::Reset => self.reset_to_defaults(),
+            Kind::Glitch(i) => {
+                self.gform.layer = i.min(1);
+                self.gform.sel = 0;
+                self.screen = Screen::Glitch;
+            }
+            Kind::EditArch => self.open_editor(),
             Kind::Name => {
                 self.prompt = Some(Prompt {
                     label: "Track name".into(),
@@ -603,6 +827,88 @@ impl App {
             Kind::Header => {}
             _ => self.adjust(true, false),
         }
+    }
+
+    /// The current value of a numeric row, for pre-filling the editor. `None`
+    /// means the row is not a plain number and keeps its cycle/toggle action.
+    fn number_text(&self, kind: Kind) -> Option<String> {
+        let s = &self.config.settings;
+        Some(match kind {
+            Kind::Seed => self.config.seed.to_string(),
+            Kind::SeedN(i) => seed_value(&self.config, i).to_string(),
+            Kind::Chords => s.chords.to_string(),
+            Kind::Bpm => s.bpm.to_string(),
+            Kind::Transpose => s.loop_transpose.to_string(),
+            Kind::LayerArc(i) => s.loop_arcs[i].cycle_s.to_string(),
+            Kind::LayerHold(i) => s.loop_arcs[i].hold_s.to_string(),
+            Kind::DroneArc => s.drone.cycle_s.to_string(),
+            Kind::DroneHold => s.drone.hold_s.to_string(),
+            Kind::DroneTone => s.drone_tone.to_string(),
+            Kind::CodeOpacity => s.code.opacity.to_string(),
+            Kind::CodeSpeed => s.code.speed.to_string(),
+            Kind::CodeScale => s.code.scale.to_string(),
+            Kind::CodeAngle => s.code.angle.to_string(),
+            Kind::CodeOffset => s.code.offset.to_string(),
+            Kind::CameraSpeed => s.camera_speed.to_string(),
+            Kind::ArchRotX => s.arch.rot_x.to_string(),
+            Kind::ArchRotY => s.arch.rot_y.to_string(),
+            Kind::ArchRotZ => s.arch.rot_z.to_string(),
+            Kind::ArchOffX => s.arch.off_x.to_string(),
+            Kind::ArchOffY => s.arch.off_y.to_string(),
+            Kind::ArchOffZ => s.arch.off_z.to_string(),
+            _ => return None,
+        })
+    }
+
+    /// Apply a typed value to a numeric row. A trailing degree or percent sign
+    /// is accepted, and every limit matches the arrow-key nudge exactly.
+    fn set_number(&mut self, kind: Kind, label: &str, text: &str) -> Result<(), String> {
+        let t = text.trim();
+        let digits = t.trim_end_matches(['°', '%']).trim();
+        let n: i64 = digits.parse().map_err(|_| format!("{label}: \"{t}\" is not a number"))?;
+        let c = &mut self.config;
+        match kind {
+            Kind::Seed => c.seed = n.max(0) as u64,
+            Kind::SeedN(i) => set_seed(c, i, n.max(0) as u64),
+            Kind::Chords => c.settings.chords = n.clamp(1, 4) as u8,
+            Kind::Bpm => c.settings.bpm = n.clamp(70, 180) as u16,
+            Kind::Transpose => c.settings.loop_transpose = n.clamp(-12, 12) as i8,
+            Kind::LayerArc(i) => c.settings.loop_arcs[i].cycle_s = clamp_arc(n),
+            Kind::LayerHold(i) => {
+                let cycle = c.settings.loop_arcs[i].cycle_s;
+                c.settings.loop_arcs[i].hold_s = n.clamp(0, cycle as i64) as u16;
+            }
+            Kind::DroneArc => c.settings.drone.cycle_s = clamp_arc(n),
+            Kind::DroneHold => {
+                let cycle = c.settings.drone.cycle_s;
+                c.settings.drone.hold_s = n.clamp(0, cycle as i64) as u16;
+            }
+            Kind::DroneTone => c.settings.drone_tone = n.clamp(0, TONES[TONES.len() - 1] as i64) as u16,
+            Kind::CodeOpacity => c.settings.code.opacity = n.clamp(0, 100) as u8,
+            Kind::CodeSpeed => c.settings.code.speed = n.clamp(0, 100) as u8,
+            Kind::CodeScale => {
+                c.settings.code.scale =
+                    n.clamp(CodeOverlay::MIN_SCALE as i64, CodeOverlay::MAX_SCALE as i64) as u8;
+            }
+            Kind::CodeAngle => {
+                c.settings.code.angle =
+                    n.clamp(CodeOverlay::MIN_ANGLE as i64, CodeOverlay::MAX_ANGLE as i64) as i16;
+            }
+            Kind::CodeOffset => {
+                c.settings.code.offset =
+                    n.clamp(CodeOverlay::MIN_OFFSET as i64, CodeOverlay::MAX_OFFSET as i64) as i16;
+            }
+            Kind::CameraSpeed => c.settings.camera_speed = n.clamp(-180, 180) as i16,
+            Kind::ArchRotX => c.settings.arch.rot_x = clamp_rot(n),
+            Kind::ArchRotY => c.settings.arch.rot_y = clamp_rot(n),
+            Kind::ArchRotZ => c.settings.arch.rot_z = clamp_rot(n),
+            Kind::ArchOffX => c.settings.arch.off_x = clamp_off(n),
+            Kind::ArchOffY => c.settings.arch.off_y = clamp_off(n),
+            Kind::ArchOffZ => c.settings.arch.off_z = clamp_off(n),
+            _ => return Err(format!("{label}: not a number")),
+        }
+        self.rebuild();
+        Ok(())
     }
 
     fn commit_prompt(&mut self) {
@@ -631,6 +937,14 @@ impl App {
                     Err(e) => self.status = format!("import failed: {e}"),
                 }
             }
+            PromptAction::GlitchNumber(row) => match self.set_glitch_number(row, &prompt.label, &text) {
+                Ok(()) => self.status = format!("{}: {}", prompt.label, text),
+                Err(e) => self.status = e,
+            },
+            PromptAction::Number(kind) => match self.set_number(kind, &prompt.label, &text) {
+                Ok(()) => self.status = format!("{}: {}", prompt.label, text),
+                Err(e) => self.status = e,
+            },
             PromptAction::ExportSeed => {
                 if text.is_empty() {
                     self.status = "no path given".to_string();
@@ -720,6 +1034,319 @@ impl App {
         put(buf, area, 0, help_y, "↑↓ move · enter toggle · esc back   (any combination)", style(FAINT));
     }
 
+    fn gsetup(&self) -> GlitchSetup {
+        self.config.settings.glitch[self.gform.layer.min(1)]
+    }
+
+    fn gsetup_mut(&mut self) -> &mut GlitchSetup {
+        let layer = self.gform.layer.min(1);
+        &mut self.config.settings.glitch[layer]
+    }
+
+    /// Every row of the open glitch layer, in order.
+    fn glitch_rows(&self) -> Vec<(String, String)> {
+        let s = self.gsetup();
+        GLITCH_ROWS
+            .iter()
+            .map(|row| match row {
+                GlitchRow::Enabled => ("Layer".to_string(), on_off(s.enabled)),
+                GlitchRow::Kind(i) => (format!("  {}", KINDS[*i].name()), on_off(s.kinds[*i])),
+                GlitchRow::Fill => ("How often".to_string(), format!("{}%", s.fill)),
+                GlitchRow::Rate => ("Step rate".to_string(), format!("×{}", RATES[(s.rate as usize).min(RATES.len() - 1)])),
+                GlitchRow::Gain => ("Level".to_string(), format!("{}%", s.gain)),
+                GlitchRow::Steps => ("Pattern steps".to_string(), s.steps.to_string()),
+                GlitchRow::RepeatsMin => ("Loops before a change".to_string(), s.repeats_min.to_string()),
+                GlitchRow::RepeatsMax => ("  … at most".to_string(), s.repeats_max.to_string()),
+                GlitchRow::Ratchet => ("Max retriggers".to_string(), s.ratchet.to_string()),
+                GlitchRow::Back => ("Back".to_string(), String::new()),
+            })
+            .collect()
+    }
+
+    fn adjust_glitch(&mut self, forward: bool, shift: bool) {
+        let row = GLITCH_ROWS[self.gform.sel.min(GLITCH_ROWS.len() - 1)];
+        let dir = if forward { 1 } else { -1 };
+        match row {
+            GlitchRow::Enabled => {
+                let s = self.gsetup_mut();
+                s.enabled = !s.enabled;
+            }
+            GlitchRow::Kind(i) => {
+                let s = self.gsetup_mut();
+                s.kinds[i] = !s.kinds[i];
+            }
+            GlitchRow::Fill => {
+                let step = if shift { 10 } else { 5 };
+                let s = self.gsetup_mut();
+                s.fill = (s.fill as i32 + dir * step).clamp(0, 100) as u8;
+            }
+            GlitchRow::Rate => {
+                let n = RATES.len() as i32;
+                let s = self.gsetup_mut();
+                s.rate = (s.rate as i32 + dir).rem_euclid(n) as u8;
+            }
+            GlitchRow::Gain => {
+                let step = if shift { 25 } else { 10 };
+                let s = self.gsetup_mut();
+                s.gain = (s.gain as i32 + dir * step).clamp(0, 200) as u8;
+            }
+            GlitchRow::Steps => {
+                let step = if shift { 4 } else { 1 };
+                let s = self.gsetup_mut();
+                s.steps = (s.steps as i32 + dir * step).clamp(1, 24) as u8;
+            }
+            GlitchRow::RepeatsMin | GlitchRow::RepeatsMax => {
+                let step = if shift { 4 } else { 1 };
+                let s = self.gsetup_mut();
+                if row == GlitchRow::RepeatsMin {
+                    s.repeats_min = ((s.repeats_min as i32 + dir * step).clamp(1, 24) as u8).min(s.repeats_max);
+                } else {
+                    s.repeats_max = ((s.repeats_max as i32 + dir * step).clamp(1, 24) as u8).max(s.repeats_min);
+                }
+            }
+            GlitchRow::Ratchet => {
+                let s = self.gsetup_mut();
+                s.ratchet = (s.ratchet as i32 + dir).clamp(1, 8) as u8;
+            }
+            GlitchRow::Back => {}
+        }
+        self.rebuild();
+    }
+
+    fn activate_glitch(&mut self) {
+        let idx = self.gform.sel.min(GLITCH_ROWS.len() - 1);
+        let row = GLITCH_ROWS[idx];
+        if let Some(value) = self.glitch_number(row) {
+            let label = self.glitch_rows()[idx].0.trim().to_string();
+            self.prompt = Some(Prompt { label, value, action: PromptAction::GlitchNumber(row) });
+            return;
+        }
+        match row {
+            GlitchRow::Back => self.screen = Screen::Main,
+            _ => self.adjust_glitch(true, false),
+        }
+    }
+
+    fn glitch_number(&self, row: GlitchRow) -> Option<String> {
+        let s = self.gsetup();
+        Some(match row {
+            GlitchRow::Fill => s.fill.to_string(),
+            GlitchRow::Gain => s.gain.to_string(),
+            GlitchRow::Steps => s.steps.to_string(),
+            GlitchRow::RepeatsMin => s.repeats_min.to_string(),
+            GlitchRow::RepeatsMax => s.repeats_max.to_string(),
+            GlitchRow::Ratchet => s.ratchet.to_string(),
+            _ => return None,
+        })
+    }
+
+    fn set_glitch_number(&mut self, row: GlitchRow, label: &str, text: &str) -> Result<(), String> {
+        let t = text.trim();
+        let digits = t.trim_end_matches(['°', '%', '×', 'x']).trim();
+        let n: i64 = digits.parse().map_err(|_| format!("{label}: \"{t}\" is not a number"))?;
+        let s = self.gsetup_mut();
+        match row {
+            GlitchRow::Fill => s.fill = n.clamp(0, 100) as u8,
+            GlitchRow::Gain => s.gain = n.clamp(0, 200) as u8,
+            GlitchRow::Steps => s.steps = n.clamp(1, 24) as u8,
+            GlitchRow::RepeatsMin => s.repeats_min = (n.clamp(1, 24) as u8).min(s.repeats_max),
+            GlitchRow::RepeatsMax => s.repeats_max = (n.clamp(1, 24) as u8).max(s.repeats_min),
+            GlitchRow::Ratchet => s.ratchet = n.clamp(1, 8) as u8,
+            _ => return Err(format!("{label}: not a number")),
+        }
+        self.rebuild();
+        Ok(())
+    }
+
+    fn handle_glitch_key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Esc => self.screen = Screen::Main,
+            KeyCode::Up => {
+                self.gform.sel = if self.gform.sel == 0 { GLITCH_ROWS.len() - 1 } else { self.gform.sel - 1 };
+            }
+            KeyCode::Down => self.gform.sel = (self.gform.sel + 1) % GLITCH_ROWS.len(),
+            KeyCode::Left => self.adjust_glitch(false, false),
+            KeyCode::Right => self.adjust_glitch(true, false),
+            KeyCode::Enter | KeyCode::Char(' ') => self.activate_glitch(),
+            _ => {}
+        }
+        false
+    }
+
+    fn draw_glitch(&self, f: &mut Frame) {
+        let area = f.area();
+        let buf = f.buffer_mut();
+        if area.width < 30 || area.height < 12 {
+            put(buf, area, 0, 0, "terminal too small", style(TEXT));
+            return;
+        }
+        let list_w = (area.width / 2).clamp(24, 46);
+        let help_y = area.height - 1;
+        let head = format!("ShrineGen · glitches · layer {} · v{}", self.gform.layer.min(1) + 1, env!("BUILD_DATE"));
+        put(buf, area, 0, 0, &head, style(ACCENT).add_modifier(Modifier::BOLD));
+        let status_x = area.width.saturating_sub(self.status.chars().count() as u16 + 1);
+        put(buf, area, status_x, 0, &self.status, style(DIM));
+
+        let rows = self.glitch_rows();
+        for (i, (label, value)) in rows.iter().enumerate() {
+            let y = 1 + i as u16;
+            if y >= help_y {
+                break;
+            }
+            let selected = i == self.gform.sel;
+            let marker = if selected { "›" } else { " " };
+            let label_style = if selected { style(SELECT).add_modifier(Modifier::BOLD) } else { style(TEXT) };
+            put(buf, area, 0, y, &format!("{marker} {label:<22}"), label_style);
+            put(buf, area, 24, y, value, style(if selected { SELECT } else { TEXT }));
+        }
+
+        let preview = Rect::new(list_w, 0, area.width - list_w, help_y);
+        draw_preview(buf, preview, &self.frame);
+        put(buf, area, 0, help_y, "↑↓ move · ←→ change · enter type · esc back", style(FAINT));
+    }
+
+    /// Open the architecture editor, seeded from whatever the generator made.
+    fn open_editor(&mut self) {
+        // The baseline is what the generator makes with no model at all.
+        let mut bare = self.config.clone();
+        bare.settings.model = ShrineModel::EMPTY;
+        self.edit.baseline = ShrineModel::from_shrine(&Sim::new_visual(bare).scene.shrine);
+        if !self.edit.working.is_authored() {
+            self.edit.working = self.edit.baseline;
+        }
+        self.edit.cx = self.edit.cx.min(15);
+        self.edit.cy = self.edit.cy.min(15);
+        self.edit.undo.clear();
+        self.screen = Screen::Editor;
+        self.status = "editing the architecture".to_string();
+    }
+
+    /// Change one cell, with undo. The first real edit is what makes the model
+    /// authored; until then the recipe stays procedural.
+    fn mutate_cell(&mut self, f: impl FnOnce(&mut ShrineModel)) {
+        let mut model = self.edit.working;
+        f(&mut model);
+        if model == self.edit.working {
+            return;
+        }
+        self.edit.undo.push(self.edit.working);
+        if self.edit.undo.len() > 64 {
+            self.edit.undo.remove(0);
+        }
+        self.edit.working = model;
+        self.config.settings.model = if model == self.edit.baseline { ShrineModel::EMPTY } else { model };
+        self.rebuild();
+    }
+
+    fn handle_editor_key(&mut self, code: KeyCode) -> bool {
+        let (x, y) = (self.edit.cx, self.edit.cy);
+        let m = self.edit.working;
+        match code {
+            KeyCode::Esc => self.screen = Screen::Main,
+            KeyCode::Up | KeyCode::Char('k') => self.edit.cy = if y == 0 { 15 } else { y - 1 },
+            KeyCode::Down | KeyCode::Char('j') => self.edit.cy = (y + 1) % 16,
+            KeyCode::Left | KeyCode::Char('h') => self.edit.cx = if x == 0 { 15 } else { x - 1 },
+            KeyCode::Right | KeyCode::Char('l') => self.edit.cx = (x + 1) % 16,
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                let h = (m.height(x, y) + 1).min(6);
+                self.mutate_cell(|mo| mo.set(x, y, h, m.kind(x, y), m.variant(x, y)));
+            }
+            KeyCode::Char('-') | KeyCode::Char('_') => {
+                // Lower the column; at zero it stops being a column at all.
+                let h = m.height(x, y).saturating_sub(1);
+                self.mutate_cell(|mo| mo.set(x, y, h, m.kind(x, y).max(1), m.variant(x, y)));
+            }
+            // A digit sets the height of the square under the cursor, and 0
+            // removes the column entirely so the ground shows through.
+            KeyCode::Char(c) if c.is_ascii_digit() && c <= '6' => {
+                let h = c as u8 - b'0';
+                self.mutate_cell(|mo| mo.set(x, y, h, m.kind(x, y).max(1), m.variant(x, y)));
+            }
+            // Same thing from the keyboard: delete the base of this square.
+            KeyCode::Backspace | KeyCode::Delete => {
+                self.mutate_cell(|mo| mo.set(x, y, 0, m.kind(x, y).max(1), m.variant(x, y)));
+            }
+            KeyCode::Char(' ') | KeyCode::Char(']') => {
+                let k = (m.kind(x, y) % 7) + 1;
+                self.mutate_cell(|mo| mo.set(x, y, m.height(x, y), k, m.variant(x, y)));
+            }
+            KeyCode::Char('[') => {
+                let k = ((m.kind(x, y) + 5) % 7) + 1;
+                self.mutate_cell(|mo| mo.set(x, y, m.height(x, y), k, m.variant(x, y)));
+            }
+            KeyCode::Char('v') => {
+                let v = (m.variant(x, y) + 1) % 4;
+                self.mutate_cell(|mo| mo.set(x, y, m.height(x, y), m.kind(x, y), v));
+            }
+            KeyCode::Char('u') => {
+                if let Some(prev) = self.edit.undo.pop() {
+                    self.edit.working = prev;
+                    self.config.settings.model = if prev == self.edit.baseline { ShrineModel::EMPTY } else { prev };
+                    self.rebuild();
+                    self.status = "undo".to_string();
+                }
+            }
+            KeyCode::Char('r') => {
+                // Back to the generator: the recipe carries no model again.
+                self.edit.working = self.edit.baseline;
+                self.config.settings.model = ShrineModel::EMPTY;
+                self.rebuild();
+                self.status = "regenerated from the seed".to_string();
+            }
+            KeyCode::Char('c') => {
+                // Blank the plan: every square becomes a hole. `r` brings the
+                // seed's shrine back.
+                self.mutate_cell(|mo| {
+                    for cy in 0..16 {
+                        for cx in 0..16 {
+                            mo.set(cx, cy, 0, 1, 0);
+                        }
+                    }
+                });
+                self.status = "cleared — every square is a hole (r regenerates)".to_string();
+            }
+            _ => {}
+        }
+        false
+    }
+
+    fn draw_editor(&self, f: &mut Frame) {
+        let area = f.area();
+        let buf = f.buffer_mut();
+        if area.width < 84 || area.height < 22 {
+            put(buf, area, 0, 0, "terminal too small for the editor (need 84x22)", style(TEXT));
+            return;
+        }
+        let help_y = area.height - 1;
+        put(buf, area, 0, 0, concat!("ShrineGen · architecture · v", env!("BUILD_DATE")), style(ACCENT).add_modifier(Modifier::BOLD));
+        put(buf, area, 34, 0, "0-6 height · space/[ ] kind · v variant · del removes · u undo · r regenerate · c blank", style(DIM));
+
+        // Plan grid: one glyph per cell, coloured by kind, reversed on the cursor.
+        let m = &self.edit.working;
+        for y in 0..16u16 {
+            for x in 0..16usize {
+                let gx = x as u16;
+                let gy = y;
+                let h = m.height(x, y as usize);
+                let k = m.kind(x, y as usize);
+                let glyph = char::from_digit(h as u32, 10).unwrap_or('?');
+                let base = kind_colour(k);
+                let selected = x == self.edit.cx && y as usize == self.edit.cy;
+                let mut st = style(if selected { SELECT } else { base });
+                if selected {
+                    st = st.add_modifier(Modifier::REVERSED).add_modifier(Modifier::BOLD);
+                }
+                put(buf, area, gx * 2, 1 + gy, &format!("{glyph} "), st);
+            }
+        }
+        put(buf, area, 0, 18, "floor  wall  pillar  roof  rubble  altar", style(FAINT));
+
+        let preview = Rect::new(34, 1, area.width - 34, help_y - 1);
+        draw_preview(buf, preview, &self.frame);
+        let y = self.edit.cy;
+        put(buf, area, 0, help_y, &format!("cell {},{y}  ·  {}  ·  height {}  kind {}  variant {}  ·  esc back", self.edit.cx, if m.height(self.edit.cx, y) == 0 { "no base" } else { "column" }, m.height(self.edit.cx, y), tile_name(m.kind(self.edit.cx, y)), m.variant(self.edit.cx, y)), style(FAINT));
+    }
+
     fn randomize(&mut self) {        let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos() as u64)
@@ -742,6 +1369,16 @@ impl App {
         std::thread::spawn(move || run_compile(config, thread_rs, thread_seed, thread_wasm, tx));
         self.job = Some(Job { rx, step: 0, total: COMPILE_STEPS, text: "starting…".to_string(), fraction: None, started: Instant::now() });
         self.status = format!("compiling → {wasm}");
+    }
+
+    /// Back to a fresh project: every choice, including the track name, the
+    /// overlay and the architecture transform. Deliberately not randomised —
+    /// `r` already does that — so a reset is always the same, testable state.
+    fn reset_to_defaults(&mut self) {
+        self.config = SimConfig::default();
+        state::save(&self.config);
+        self.rebuild();
+        self.status = "reset to defaults".to_string();
     }
 
     fn save_png(&mut self) {
@@ -874,6 +1511,12 @@ impl App {
         if self.screen == Screen::Fx {
             return self.handle_fx_key(code);
         }
+        if self.screen == Screen::Glitch {
+            return self.handle_glitch_key(code);
+        }
+        if self.screen == Screen::Editor {
+            return self.handle_editor_key(code);
+        }
         if self.prompt.is_some() {
             match code {
                 KeyCode::Esc => self.prompt = None,
@@ -915,6 +1558,14 @@ impl App {
         }
         if self.screen == Screen::Fx {
             self.draw_fx(f);
+            return;
+        }
+        if self.screen == Screen::Glitch {
+            self.draw_glitch(f);
+            return;
+        }
+        if self.screen == Screen::Editor {
+            self.draw_editor(f);
             return;
         }
         let area = f.area();
@@ -1360,6 +2011,285 @@ mod tests {
         app.handle_key(KeyCode::Down, KeyModifiers::NONE);
         app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
         assert!(app.config.settings.master.tape);
+    }
+
+    #[test]
+    fn every_numeric_row_accepts_a_typed_value_and_clamps() {
+        let mut app = App::new();
+        let kinds: Vec<Kind> = app.rows().iter().map(|r| r.kind).collect();
+        let mut checked = 0;
+        for kind in kinds {
+            let Some(current) = app.number_text(kind) else { continue };
+            // Re-entering the value that is already there must not change it.
+            app.set_number(kind, "field", &current).unwrap_or_else(|e| panic!("{kind:?}: {e}"));
+            assert_eq!(app.number_text(kind).unwrap(), current, "{kind:?} changed on re-entry");
+            // Out-of-range and suffixed input must clamp, never fail or panic.
+            app.set_number(kind, "field", "99999").unwrap_or_else(|e| panic!("{kind:?} high: {e}"));
+            app.set_number(kind, "field", "-99999").unwrap_or_else(|e| panic!("{kind:?} low: {e}"));
+            app.set_number(kind, "field", "5°").unwrap_or_else(|e| panic!("{kind:?} deg: {e}"));
+            app.set_number(kind, "field", "5%").unwrap_or_else(|e| panic!("{kind:?} pct: {e}"));
+            checked += 1;
+        }
+        assert!(checked >= 20, "expected many numeric rows, saw {checked}");
+    }
+
+    #[test]
+    fn garbage_input_is_reported_not_swallowed() {
+        let mut app = App::new();
+        assert!(app.set_number(Kind::Bpm, "Tempo", "fast").is_err());
+        assert!(app.set_number(Kind::Bpm, "Tempo", "").is_err());
+        app.set_number(Kind::Bpm, "Tempo", "123").unwrap();
+        assert_eq!(app.config.settings.bpm, 123);
+    }
+
+    #[test]
+    fn enter_opens_a_typed_editor_on_a_numeric_row() {
+        let mut app = App::new();
+        app.sel = app.rows().iter().position(|r| r.kind == Kind::Bpm).unwrap();
+        app.activate();
+        assert!(app.prompt.is_some(), "a numeric row should open an editor");
+        if let Some(prompt) = &mut app.prompt {
+            prompt.value = "150".to_string();
+        }
+        app.commit_prompt();
+        assert_eq!(app.config.settings.bpm, 150);
+    }
+
+    #[test]
+    fn a_non_numeric_row_still_cycles_rather_than_opening_an_editor() {
+        let mut app = App::new();
+        app.sel = app.rows().iter().position(|r| r.kind == Kind::Biome).unwrap();
+        app.activate();
+        assert!(app.prompt.is_none(), "biome should cycle, not prompt");
+    }
+
+    #[test]
+    fn reset_restores_defaults() {
+        let mut app = App::new();
+        app.config.seed = 42;
+        app.config.settings.bpm = 111;
+        app.config.settings.arch = ArchTransform { rot_z: 35, off_x: 3, ..ArchTransform::IDENTITY };
+        app.config.settings.name = shrine0012::name::Name::from_str("Scratch");
+        app.sel = app.rows().iter().position(|r| r.kind == Kind::Reset).unwrap();
+        app.activate();
+        // Compare the recipes: the strongest statement that the reset is exact.
+        assert_eq!(
+            shrine0012::recipe::encode(&app.config),
+            shrine0012::recipe::encode(&SimConfig::default())
+        );
+        assert!(app.config.settings.name.is_empty());
+    }
+
+    #[test]
+    fn the_glitch_screen_edits_the_open_layer() {
+        let mut app = App::new();
+        app.sel = app.rows().iter().position(|r| r.kind == Kind::Glitch(1)).unwrap();
+        app.activate();
+        assert_eq!(app.screen, Screen::Glitch);
+        assert_eq!(app.gform.layer, 1);
+        // Row 1 is the first kind.
+        app.gform.sel = 1;
+        let before = app.config.settings.glitch[1].kinds[0];
+        app.adjust_glitch(true, false);
+        assert_ne!(app.config.settings.glitch[1].kinds[0], before);
+        // Row 0 mutes the layer.
+        app.gform.sel = 0;
+        app.adjust_glitch(true, false);
+        assert!(!app.config.settings.glitch[1].enabled);
+        // Back leaves the screen.
+        app.gform.sel = GLITCH_ROWS.len() - 1;
+        app.activate_glitch();
+        assert_eq!(app.screen, Screen::Main);
+    }
+
+    #[test]
+    fn glitch_numbers_can_be_typed_and_clamp() {
+        let mut app = App::new();
+        app.gform.layer = 0;
+        app.set_glitch_number(GlitchRow::Fill, "How often", "80").unwrap();
+        assert_eq!(app.config.settings.glitch[0].fill, 80);
+        app.set_glitch_number(GlitchRow::Fill, "How often", "500").unwrap();
+        assert_eq!(app.config.settings.glitch[0].fill, 100);
+        app.set_glitch_number(GlitchRow::Fill, "How often", "35%").unwrap();
+        assert_eq!(app.config.settings.glitch[0].fill, 35);
+        assert!(app.set_glitch_number(GlitchRow::Fill, "How often", "loud").is_err());
+        app.set_glitch_number(GlitchRow::Ratchet, "Max retriggers", "3").unwrap();
+        assert_eq!(app.config.settings.glitch[0].ratchet, 3);
+    }
+
+    #[test]
+    fn the_glitch_repeats_range_cannot_invert() {
+        let mut app = App::new();
+        app.gform.layer = 0;
+        app.config.settings.glitch[0].repeats_min = 4;
+        app.config.settings.glitch[0].repeats_max = 9;
+        // Index 11 is "loops before a change": push it well past the maximum.
+        app.gform.sel = 11;
+        for _ in 0..20 {
+            app.adjust_glitch(true, false);
+        }
+        let g = app.config.settings.glitch[0];
+        assert!(g.repeats_min <= g.repeats_max, "range inverted: {g:?}");
+        // And the same from the other end.
+        app.gform.sel = 12;
+        for _ in 0..30 {
+            app.adjust_glitch(false, false);
+        }
+        let g = app.config.settings.glitch[0];
+        assert!(g.repeats_min <= g.repeats_max, "range inverted: {g:?}");
+    }
+
+    #[test]
+    fn every_glitch_row_is_reachable_and_reports_a_value() {
+        let mut app = App::new();
+        for (i, row) in GLITCH_ROWS.iter().enumerate() {
+            app.gform.sel = i;
+            let rows = app.glitch_rows();
+            assert_eq!(rows.len(), GLITCH_ROWS.len());
+            let numeric = app.glitch_number(*row);
+            if *row == GlitchRow::Back || matches!(row, GlitchRow::Enabled | GlitchRow::Kind(_) | GlitchRow::Rate) {
+                assert!(numeric.is_none(), "{row:?} should not be typed");
+            } else {
+                assert!(numeric.is_some(), "{row:?} should be typable");
+            }
+            // Every row must survive an adjust without panicking.
+            app.adjust_glitch(true, true);
+            app.adjust_glitch(false, true);
+        }
+    }
+
+    #[test]
+    fn the_editor_starts_from_the_generated_shrine() {
+        let mut app = App::new();
+        app.config.settings.model = ShrineModel::EMPTY;
+        app.sel = app.rows().iter().position(|r| r.kind == Kind::EditArch).unwrap();
+        app.activate();
+        assert_eq!(app.screen, Screen::Editor);
+        assert!(app.edit.working.is_authored(), "the working copy shows the shrine");
+        assert!(!app.config.settings.model.is_authored(), "opening must not author the model");
+    }
+
+    #[test]
+    fn editing_a_cell_authors_the_model_and_can_be_undone() {
+        let mut app = App::new();
+        app.open_editor();
+        let (x, y) = (3usize, 4usize);
+        app.edit.cx = x;
+        app.edit.cy = y;
+        let before = app.edit.working.height(x, y);
+        app.handle_editor_key(KeyCode::Char('+'));
+        assert_eq!(app.edit.working.height(x, y), (before + 1).min(6));
+        assert!(app.config.settings.model.is_authored(), "an edit must author the model");
+        app.handle_editor_key(KeyCode::Char('u'));
+        assert_eq!(app.edit.working.height(x, y), before);
+        assert!(!app.config.settings.model.is_authored(), "undoing the only edit returns to procedural");
+    }
+
+    #[test]
+    fn regenerating_hands_the_architecture_back_to_the_seed() {
+        let mut app = App::new();
+        app.open_editor();
+        app.edit.cx = 5;
+        app.edit.cy = 5;
+        app.handle_editor_key(KeyCode::Char('+'));
+        assert!(app.config.settings.model.is_authored());
+        app.handle_editor_key(KeyCode::Char('r'));
+        assert!(!app.config.settings.model.is_authored(), "r must clear the authored model");
+        assert!(app.edit.working.is_authored(), "the working copy still shows the shrine");
+    }
+
+    #[test]
+    fn a_digit_sets_the_height_of_that_square() {
+        let mut app = App::new();
+        app.open_editor();
+        app.edit.cx = 2;
+        app.edit.cy = 2;
+        for (c, want) in [('3', 3u8), ('6', 6), ('0', 0), ('1', 1)] {
+            app.handle_editor_key(KeyCode::Char(c));
+            assert_eq!(app.edit.working.height(2, 2), want, "key {c}");
+        }
+        // A hole survives: pressing 0 removes the base, not the whole model.
+        app.handle_editor_key(KeyCode::Char('0'));
+        assert!(app.config.settings.model.is_authored());
+        assert_eq!(app.edit.working.height(2, 2), 0);
+    }
+
+    #[test]
+    fn delete_and_zero_both_remove_a_base() {
+        let mut app = App::new();
+        app.open_editor();
+        app.edit.cx = 7;
+        app.edit.cy = 9;
+        app.handle_editor_key(KeyCode::Char('4'));
+        assert_eq!(app.edit.working.height(7, 9), 4);
+        app.handle_editor_key(KeyCode::Backspace);
+        assert_eq!(app.edit.working.height(7, 9), 0, "backspace should remove the base");
+        app.handle_editor_key(KeyCode::Char('5'));
+        app.handle_editor_key(KeyCode::Delete);
+        assert_eq!(app.edit.working.height(7, 9), 0, "delete should remove the base");
+        // The rest of the shrine is untouched.
+        assert!(app.edit.working.height(0, 0) > 0);
+    }
+
+    #[test]
+    fn kind_cycling_keeps_a_valid_kind() {
+        let mut app = App::new();
+        app.open_editor();
+        app.edit.cx = 1;
+        app.edit.cy = 1;
+        for _ in 0..9 {
+            app.handle_editor_key(KeyCode::Char(' '));
+            let k = app.edit.working.kind(1, 1);
+            assert!((1..=7).contains(&k), "space produced kind {k}");
+        }
+        app.handle_editor_key(KeyCode::Char('['));
+        assert!((1..=7).contains(&app.edit.working.kind(1, 1)));
+    }
+
+    #[test]
+    fn clear_blanks_every_square_and_regenerate_brings_it_back() {
+        let mut app = App::new();
+        app.open_editor();
+        app.handle_editor_key(KeyCode::Char('c'));
+        assert!(app.config.settings.model.is_authored(), "a blanked plan is still authored");
+        for y in 0..16 {
+            for x in 0..16 {
+                assert_eq!(app.edit.working.height(x, y), 0, "square {x},{y} should be a hole");
+            }
+        }
+        app.handle_editor_key(KeyCode::Char('r'));
+        assert!(!app.config.settings.model.is_authored(), "r returns to the generator");
+        assert!(app.edit.working.height(0, 0) > 0, "the seed's shrine is back");
+    }
+
+    #[test]
+    fn heights_stay_in_range_under_repeated_presses() {
+        let mut app = App::new();
+        app.open_editor();
+        app.edit.cx = 3;
+        app.edit.cy = 3;
+        for _ in 0..12 {
+            app.handle_editor_key(KeyCode::Char('+'));
+        }
+        assert!(app.edit.working.height(3, 3) <= 6);
+        for _ in 0..12 {
+            app.handle_editor_key(KeyCode::Char('-'));
+        }
+        assert_eq!(app.edit.working.height(3, 3), 0, "minus bottoms out at a hole");
+    }
+
+    #[test]
+    fn the_editor_cursor_wraps_and_editing_it_does_nothing() {
+        let mut app = App::new();
+        app.open_editor();
+        app.edit.cx = 0;
+        app.edit.cy = 0;
+        app.handle_editor_key(KeyCode::Left);
+        assert_eq!(app.edit.cx, 15, "the cursor should wrap");
+        app.handle_editor_key(KeyCode::Up);
+        assert_eq!(app.edit.cy, 15);
+        app.handle_editor_key(KeyCode::Esc);
+        assert_eq!(app.screen, Screen::Main);
     }
 
     #[test]
