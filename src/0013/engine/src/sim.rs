@@ -17,6 +17,7 @@ use crate::plants::Biome;
 use crate::scene::{Camera, Instruments, Quality, Scene, SimState, VisualCoupling};
 use crate::track::{Seeds, Settings, Track};
 use crate::weather::WeatherKind;
+use crate::wildlife::Wildlife;
 use crate::SAMPLE_RATE;
 
 /// Everything a shrine is built from, shared by audio and visuals.
@@ -66,7 +67,14 @@ impl Sim {
         let mut scene = Scene::new(config.seed, config.biome, config.weather);
         scene.author(&config.settings.model);
         let track = Some(Track::new(config.seeds, config.settings));
-        let weather_bed = Some(WeatherBed::new(config.seed));
+        // Which cells hold a column, so a splash there is heard on stone.
+        let hard = (0..crate::GRID_H as i32)
+            .flat_map(|gy| (0..crate::GRID_W as i32).map(move |gx| (gx, gy)))
+            .map(|(gx, gy)| scene.column_at(gx as f64, gy as f64).is_some())
+            .collect();
+        let wildlife = config.settings.wildlife.then(|| Wildlife::new(config.seed, config.biome));
+        scene.wildlife = wildlife.clone();
+        let weather_bed = Some(WeatherBed::new(config.seed, hard, wildlife));
         Sim { config, scene, track, weather_bed, audio_time: 0.0 }
     }
 
@@ -75,6 +83,7 @@ impl Sim {
     pub fn new_visual(config: SimConfig) -> Self {
         let mut scene = Scene::new(config.seed, config.biome, config.weather);
         scene.author(&config.settings.model);
+        scene.wildlife = config.settings.wildlife.then(|| Wildlife::new(config.seed, config.biome));
         Sim { config, scene, track: None, weather_bed: None, audio_time: 0.0 }
     }
 

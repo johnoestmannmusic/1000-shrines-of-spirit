@@ -1,36 +1,48 @@
 //! The authored architecture: an optional hand-edited 16x16 model.
 //!
-//! A cell has a height of **0 to 6**. Height 0 means there is no column there
-//! at all, so the ground shows through — the editor's "remove the base for this
-//! square". Because a cell can legitimately be all zeros, "is this model
-//! authored?" is an explicit flag rather than an all-zero sentinel.
+//! A cell's height runs from **-6 to +6**. Positive stacks tiles up from the
+//! ground; negative digs a pit the same distance *below* it; zero leaves the
+//! ground plane alone. Because a cell can legitimately be all zeros, "is this
+//! model authored?" is an explicit flag rather than an all-zero sentinel.
 //!
 //! When `authored` is false the seed's generator stays authoritative, so the
 //! default recipe carries no architecture of its own and today's output is
 //! untouched (`HC004`).
 //!
-//! Each cell is one byte: bits 0-2 the height (0..6), bits 3-5 the tile kind,
-//! bits 6-7 the cosmetic variation. That is 256 bytes plus the flag, or 65
-//! recipe words, which is what keeps the artifact self-contained (`G001`).
+//! Each cell is nine bits: a signed height biased by +8, a three-bit tile kind
+//! and two bits of cosmetic variation. Three cells fit in a recipe word, so the
+//! model is one flag word plus 86 cell words — which is what keeps the artifact
+//! self-contained (`G001`).
 
 use crate::shrine::{kind, Shrine, MAX_HEIGHT};
 use crate::{SHRINE_H, SHRINE_W};
 
 /// Cells in the footprint.
 pub const CELLS: usize = (SHRINE_W * SHRINE_H) as usize;
-/// Recipe words the model occupies: one flag, then four cells per word.
-pub const WORDS: usize = CELLS / 4 + 1;
+/// Cells packed per recipe word.
+pub const PER_WORD: usize = 3;
+/// Packed words holding the cells.
+pub const PACKED: usize = CELLS.div_ceil(PER_WORD);
+/// Recipe words the model occupies: one flag, then the packed cells.
+pub const WORDS: usize = PACKED + 1;
 
 /// A shrine's architecture, authored by hand or still procedural.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ShrineModel {
     authored: bool,
-    cells: [u8; CELLS],
+    /// Nine bits per cell, three cells per word. Kept packed rather than as a
+    /// byte array because nine bits do not fit in a byte.
+    packed: [u32; PACKED],
 }
 
 impl ShrineModel {
+    /// Deepest pit, in levels.
+    pub const MIN_HEIGHT: i8 = -6;
+    /// Tallest column, in levels.
+    pub const MAX: i8 = crate::shrine::MAX_HEIGHT as i8;
+
     /// Not authored: the generator decides.
-    pub const EMPTY: ShrineModel = ShrineModel { authored: false, cells: [0; CELLS] };
+    pub const EMPTY: ShrineModel = ShrineModel { authored: false, packed: [0; PACKED] };
 
     /// True once the editor has taken over.
     pub fn is_authored(&self) -> bool {
@@ -40,43 +52,70 @@ impl ShrineModel {
     /// Forget every edit and hand the architecture back to the generator.
     pub fn clear(&mut self) {
         self.authored = false;
-        self.cells = [0; CELLS];
+        self.packed = [0; PACKED];
     }
 
     /// Empty the plan: an authored model in which every square is a hole.
     pub fn blank(&mut self) {
         self.authored = true;
-        self.cells = [0; CELLS];
+        self.packed = [0; PACKED];
     }
 
     fn index(x: usize, y: usize) -> usize {
         (y % SHRINE_H as usize) * SHRINE_W as usize + (x % SHRINE_W as usize)
     }
 
-    /// Height of a cell, 0 (no column) to 6.
-    pub fn height(&self, x: usize, y: usize) -> u8 {
-        self.cells[Self::index(x, y)] & 0x7
+    /// The nine encoded bits of one cell.
+    fn raw(&self, i: usize) -> u16 {
+        ((self.packed[i / PER_WORD] >> (9 * (i % PER_WORD))) & 0x1ff) as u16
+    }
+
+    /// Overwrite one cell's nine bits.
+    fn set_raw(&mut self, i: usize, value: u16) {
+        let shift = 9 * (i % PER_WORD);
+        let word = &mut self.packed[i / PER_WORD];
+        *word = (*word & !(0x1ff << shift)) | ((value as u32 & 0x1ff) << shift);
+    }
+
+    /// Height of a cell: positive builds up, negative digs down, 0 is ground.
+    pub fn height(&self, x: usize, y: usize) -> i8 {
+        let raw = self.raw(Self::index(x, y));
+        if raw == 0 {
+            // Never written, so this is plain ground rather than a pit.
+            return 0;
+        }
+        decode_height(raw as u8)
     }
 
     /// Tile kind of a cell's top, see [`kind`].
     pub fn kind(&self, x: usize, y: usize) -> u8 {
-        (self.cells[Self::index(x, y)] >> 3) & 0x7
+        ((self.raw(Self::index(x, y)) >> 4) & 0x7) as u8
     }
 
     /// Cosmetic variation, 0..=3.
     pub fn variant(&self, x: usize, y: usize) -> u8 {
-        (self.cells[Self::index(x, y)] >> 6) & 0x3
+        ((self.raw(Self::index(x, y)) >> 7) & 0x3) as u8
     }
 
     /// Write one cell. Heights and kinds are clamped, so the model is always
     /// valid however it is driven.
-    pub fn set(&mut self, x: usize, y: usize, height: u8, kind: u8, variant: u8) {
+    pub fn set(&mut self, x: usize, y: usize, height: i8, kind: u8, variant: u8) {
         self.authored = true;
-        let h = height.min(MAX_HEIGHT);
-        let k = kind & 0x7;
-        let v = variant & 0x3;
+        let value = Self::encode(height, kind, variant);
         let i = Self::index(x, y);
-        self.cells[i] = (h & 0x7) | (k << 3) | (v << 6);
+        self.set_raw(i, value);
+    }
+
+    /// Nine bits: biased height, kind, variation.
+    fn encode(height: i8, kind: u8, variant: u8) -> u16 {
+        let h = height.clamp(Self::MIN_HEIGHT, Self::MAX);
+        encode_height(h) as u16 | ((kind as u16 & 0x7) << 4) | ((variant as u16 & 0x3) << 7)
+    }
+
+    /// The height, kind and variation packed into one cell.
+    fn decode(value: u16) -> (i8, u8, u8) {
+        let h = decode_height((value & 0xf) as u8).clamp(Self::MIN_HEIGHT, Self::MAX);
+        ((h), ((value >> 4) & 0x7) as u8, ((value >> 7) & 0x3) as u8)
     }
 
     /// Read the generated shrine into a model, so the editor starts from what
@@ -92,104 +131,124 @@ impl ShrineModel {
                 } else {
                     shrine.layers.get(x as i32 + ox, y as i32 + oy, h as i32 - 1)
                 };
-                model.set(x, y, h, tile.kind.max(kind::FLOOR), tile.variant);
+                model.set(x, y, h as i8, tile.kind.max(kind::FLOOR), tile.variant);
             }
         }
         model
     }
 
-    /// The model as recipe words: the authored flag, then four cells per word.
+    /// The model as recipe words: the authored flag, then the packed cells.
     pub fn words(&self) -> [u32; WORDS] {
         let mut out = [0u32; WORDS];
         out[0] = self.authored as u32;
-        for (i, w) in out.iter_mut().skip(1).enumerate() {
-            let b = i * 4;
-            *w = u32::from_le_bytes([self.cells[b], self.cells[b + 1], self.cells[b + 2], self.cells[b + 3]]);
-        }
+        out[1..].copy_from_slice(&self.packed);
         out
     }
 
-    /// Rebuild from recipe words. Short input leaves the rest unauthored.
+    /// Rebuild from recipe words. Short input leaves the model procedural.
     pub fn from_words(words: &[u32]) -> Self {
         let mut model = ShrineModel::EMPTY;
-        let Some((&flag, rest)) = words.split_first() else {
+        let Some((&flag, packed)) = words.split_first() else {
             return model;
         };
         model.authored = flag & 1 != 0;
-        for (i, w) in rest.iter().take(CELLS / 4).enumerate() {
-            model.cells[i * 4..i * 4 + 4].copy_from_slice(&w.to_le_bytes());
+        for (i, w) in packed.iter().take(PACKED).enumerate() {
+            model.packed[i] = *w;
         }
-        // Keep every cell inside the model's own valid range.
-        for c in model.cells.iter_mut() {
-            let h = (*c & 0x7).min(MAX_HEIGHT);
-            let k = ((*c >> 3) & 0x7).min(kind::STONE);
-            let v = (*c >> 6) & 0x3;
-            *c = h | (k << 3) | (v << 6);
+        model.sanitise();
+        model
+    }
+
+    /// Rebuild from the version-13 layout: one flag word, then 8-bit cells
+    /// holding height 0..6, kind and variation.
+    pub fn from_v13_words(words: &[u32]) -> Self {
+        let mut model = ShrineModel::EMPTY;
+        let Some((&flag, packed)) = words.split_first() else {
+            return model;
+        };
+        model.authored = flag & 1 != 0;
+        for (i, w) in packed.iter().take(CELLS / 4).enumerate() {
+            for (j, b) in w.to_le_bytes().iter().enumerate() {
+                // The old layout: height 0..6, kind, variation, in one byte.
+                model.set_raw(i * 4 + j, Self::encode((*b & 0x7) as i8, (*b >> 3) & 0x7, (*b >> 6) & 0x3));
+            }
         }
         model
     }
 
-    /// Rebuild from the pre-flag layout (recipe versions 11 and 12), where the
-    /// words were all cells and a non-empty model meant "authored".
+    /// Rebuild from the version-11/12 layout: 8-bit cells with the height
+    /// stored minus one, and a non-empty model meaning "authored".
     pub fn from_legacy_words(words: &[u32]) -> Self {
         let mut model = ShrineModel::EMPTY;
+        let mut any = false;
         for (i, w) in words.iter().take(CELLS / 4).enumerate() {
-            model.cells[i * 4..i * 4 + 4].copy_from_slice(&w.to_le_bytes());
+            for (j, b) in w.to_le_bytes().iter().enumerate() {
+                any |= *b != 0;
+                // The old layout stored height - 1, so every old cell is one higher.
+                let h = ((*b & 0x7) + 1).min(MAX_HEIGHT) as i8;
+                model.set_raw(i * 4 + j, Self::encode(h, (*b >> 3) & 0x7, (*b >> 6) & 0x3));
+            }
         }
-        model.authored = model.cells.iter().any(|c| *c != 0);
-        for c in model.cells.iter_mut() {
-            // The old layout held height - 1, so every old cell is one higher.
-            let h = ((*c & 0x7) + 1).min(MAX_HEIGHT);
-            let k = ((*c >> 3) & 0x7).min(kind::STONE);
-            let v = (*c >> 6) & 0x3;
-            *c = h | (k << 3) | (v << 6);
-        }
+        model.authored = any;
         model
     }
 
-    /// The raw cells as lowercase hex, for the seed file. Two hex digits per
-    /// cell, so an authored architecture survives export and import.
+    /// Clamp anything out of range back into the model's own limits.
+    fn sanitise(&mut self) {
+        for i in 0..CELLS {
+            // A zero cell is one the editor has never written: it is ground, and
+            // must stay exactly as it is or every save would invent territory.
+            if self.raw(i) == 0 {
+                continue;
+            }
+            let (h, k, v) = Self::decode(self.raw(i));
+            self.set_raw(i, Self::encode(h, k.min(kind::STONE), v));
+        }
+    }
+
+    /// The packed words as lowercase hex, for the seed file.
     pub fn to_hex(&self) -> String {
-        let mut out = String::with_capacity(CELLS * 2);
-        for &c in &self.cells {
-            out.push(char::from_digit((c >> 4) as u32, 16).unwrap_or('0'));
-            out.push(char::from_digit((c & 0xf) as u32, 16).unwrap_or('0'));
+        let mut out = String::with_capacity(WORDS * 8);
+        for w in self.words() {
+            out.push_str(&format!("{w:08x}"));
         }
         out
     }
 
-    /// Read [`to_hex`] back. Returns `None` if the text is the wrong length or
-    /// carries characters that are not hex.
+    /// Read [`to_hex`] back. Returns `None` unless the text is exactly the
+    /// expected length of hex digits.
     pub fn from_hex(text: &str) -> Option<ShrineModel> {
         let t = text.trim();
-        if t.len() != CELLS * 2 {
+        if t.len() != WORDS * 8 || !t.bytes().all(|b| (b as char).is_ascii_hexdigit()) {
             return None;
         }
-        let bytes = t.as_bytes();
-        let mut cells = [0u8; CELLS];
-        for i in 0..CELLS {
-            let hi = (bytes[i * 2] as char).to_digit(16)?;
-            let lo = (bytes[i * 2 + 1] as char).to_digit(16)?;
-            cells[i] = (hi * 16 + lo) as u8;
+        let mut words = [0u32; WORDS];
+        for (i, w) in words.iter_mut().enumerate() {
+            *w = u32::from_str_radix(&t[i * 8..i * 8 + 8], 16).ok()?;
         }
-        let mut model = ShrineModel { authored: true, cells };
-        model = ShrineModel::from_words(&{
-            let mut w = [0u32; WORDS];
-            w.copy_from_slice(&model.words());
-            w
-        });
-        Some(model)
+        Some(ShrineModel::from_words(&words))
     }
 
     /// A stable hash, for tests.
     pub fn hash(&self) -> u64 {
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for &b in &self.cells {
-            h ^= b as u64;
-            h = h.wrapping_mul(0x0100_0000_01b3);
+        for &w in self.words().iter() {
+            for b in w.to_le_bytes() {
+                h ^= b as u64;
+                h = h.wrapping_mul(0x0100_0000_01b3);
+            }
         }
         h ^ (self.authored as u64)
     }
+}
+
+/// Height bias: stored value = height + 8, so -6..=6 lands in 2..=14.
+fn encode_height(height: i8) -> u8 {
+    ((height.clamp(ShrineModel::MIN_HEIGHT, ShrineModel::MAX) + 8) as u8) & 0xf
+}
+
+fn decode_height(byte: u8) -> i8 {
+    (byte & 0xf) as i8 - 8
 }
 
 impl Default for ShrineModel {
@@ -212,45 +271,46 @@ mod tests {
     fn an_empty_model_is_not_authored() {
         assert!(!ShrineModel::EMPTY.is_authored());
         assert_eq!(ShrineModel::default(), ShrineModel::EMPTY);
+        assert_eq!(ShrineModel::EMPTY.height(4, 4), 0);
     }
 
     #[test]
-    fn a_cell_can_be_a_hole() {
+    fn a_cell_can_be_a_pit() {
         let mut model = ShrineModel::EMPTY;
-        model.set(4, 4, 0, kind::FLOOR, 0);
+        model.set(4, 4, -3, kind::FLOOR, 0);
         assert!(model.is_authored());
-        assert_eq!(model.height(4, 4), 0, "height 0 removes the base");
-        // A blanked plan is authored but empty, and distinguishable from
-        // "never edited".
-        let mut blank = ShrineModel::EMPTY;
-        blank.blank();
-        assert!(blank.is_authored());
-        assert_eq!(blank.height(4, 4), 0);
-    }
-
-    #[test]
-    fn a_written_model_round_trips_and_survives_corruption() {
-        let mut model = ShrineModel::EMPTY;
-        model.set(3, 5, 4, kind::PILLAR, 2);
-        model.set(15, 0, 6, kind::ALTAR, 3);
-        model.set(1, 1, 0, kind::FLOOR, 1);
-        assert!(model.is_authored());
-        assert_eq!(model.height(3, 5), 4);
-        assert_eq!(model.kind(3, 5), kind::PILLAR);
-        assert_eq!(model.variant(3, 5), 2);
+        assert_eq!(model.height(4, 4), -3, "a negative height digs down");
+        // And it survives the round trip, sign and all.
         assert_eq!(ShrineModel::from_words(&model.words()), model);
+    }
 
-        // Wild bytes must clamp into range, never panic.
+    #[test]
+    fn the_whole_range_round_trips() {
+        let mut model = ShrineModel::EMPTY;
+        for h in ShrineModel::MIN_HEIGHT..=ShrineModel::MAX {
+            let x = (h - ShrineModel::MIN_HEIGHT) as usize;
+            model.set(x, 0, h, kind::WALL, (x % 4) as u8);
+            assert_eq!(model.height(x, 0), h, "height {h}");
+        }
+        assert_eq!(ShrineModel::from_words(&model.words()), model);
+        // Clamping keeps out-of-range input inside the model.
+        model.set(0, 0, -99, kind::WALL, 0);
+        assert_eq!(model.height(0, 0), ShrineModel::MIN_HEIGHT);
+        model.set(0, 0, 99, kind::WALL, 0);
+        assert_eq!(model.height(0, 0), ShrineModel::MAX);
+    }
+
+    #[test]
+    fn wild_words_clamp_and_short_input_stays_procedural() {
         let wild = vec![u32::MAX; WORDS];
         let fixed = ShrineModel::from_words(&wild);
         for y in 0..SHRINE_H as usize {
             for x in 0..SHRINE_W as usize {
-                assert!(fixed.height(x, y) <= MAX_HEIGHT);
+                assert!((ShrineModel::MIN_HEIGHT..=ShrineModel::MAX).contains(&fixed.height(x, y)));
                 assert!(fixed.kind(x, y) <= kind::STONE);
                 assert!(fixed.variant(x, y) <= 3);
             }
         }
-        // Short input leaves the model procedural.
         assert!(!ShrineModel::from_words(&[]).is_authored());
     }
 
@@ -259,13 +319,32 @@ mod tests {
         let mut model = ShrineModel::EMPTY;
         model.set(0, 0, 1, kind::FLOOR, 0);
         model.set(7, 9, 6, kind::ALTAR, 3);
-        model.set(2, 2, 0, kind::FLOOR, 0);
+        model.set(2, 2, -4, kind::FLOOR, 0);
         let text = model.to_hex();
-        assert_eq!(text.len(), CELLS * 2);
+        assert_eq!(text.len(), WORDS * 8);
         assert_eq!(ShrineModel::from_hex(&text), Some(model));
-        // Junk is rejected, not guessed at.
         assert_eq!(ShrineModel::from_hex("nope"), None);
-        assert_eq!(ShrineModel::from_hex(&"z".repeat(CELLS * 2)), None);
+        assert_eq!(ShrineModel::from_hex(&"z".repeat(WORDS * 8)), None);
+    }
+
+    #[test]
+    fn earlier_layouts_still_load() {
+        // Version 13: flag word, then 8-bit cells holding height 0..6.
+        let mut v13 = vec![1u32, 0, 0, 0];
+        // Cell 0: height 3, kind WALL.
+        v13[1] = 3 | ((kind::WALL as u32) << 3);
+        let model = ShrineModel::from_v13_words(&v13);
+        assert!(model.is_authored());
+        assert_eq!(model.height(0, 0), 3);
+        assert_eq!(model.kind(0, 0), kind::WALL);
+
+        // Versions 11 and 12 stored height - 1 and had no flag.
+        let mut old = vec![0u32; CELLS / 4];
+        old[0] = 4 | ((kind::PILLAR as u32) << 3);
+        let model = ShrineModel::from_legacy_words(&old);
+        assert!(model.is_authored());
+        assert_eq!(model.height(0, 0), 5, "the old layout held height - 1");
+        assert_eq!(model.kind(0, 0), kind::PILLAR);
     }
 
     #[test]
@@ -282,7 +361,6 @@ mod tests {
         let shrine = Shrine::generate(888);
         let model = ShrineModel::from_shrine(&shrine);
         assert!(model.is_authored(), "the generator always leaves real tiles");
-        // Rebuilding from that model must give the same structure.
         let rebuilt = Shrine::from_model(888, &model);
         assert_eq!(rebuilt.hash(), shrine.hash(), "a model read from the generator must rebuild it");
     }

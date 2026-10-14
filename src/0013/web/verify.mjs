@@ -9,15 +9,17 @@
 
 import { readFile } from "node:fs/promises";
 
-const AUDIO_GOLDEN = 0xddb4728052516eb7n;
+const AUDIO_GOLDEN = 0x31c60f66e2392f4dn;
 // Re-locked when `raster::fill_face` was fixed (side faces had been drawn with
-// x and y swapped). These mirror VISUAL_GOLDEN in engine/tests/parity_golden.rs.
+// x and y swapped), for the weather rework (FEAT-40), for the textured, lit
+// architecture (FEAT-44), and for its paler palette (FEAT-45). These mirror
+// VISUAL_GOLDEN in engine/tests/parity_golden.rs.
 const VISUAL_GOLDEN = [
-	0x70217e44bb3898f9n,
-	0x2fad01a425235b18n,
-	0xb726d99120654eden,
-	0x05b87288f804b2c2n,
-	0x40000ee20a659d0cn,
+	0xba5ce76b7435b6f1n,
+	0xde72f8f08a9e529en,
+	0x060d07f0e87a200bn,
+	0xede3cdf9c0e2232cn,
+	0x61ec37f8bcc717e8n,
 ];
 const SR = 48000;
 const LOGICAL = 300;

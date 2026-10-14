@@ -234,19 +234,20 @@ impl Scene {
         // Ground plane. When the camera orbits, the cells are turned with it, so
         // they go through the general quad path; otherwise they keep the exact
         // axis-aligned diamonds.
-        let ground = self.lit(self.palette.ground_dark, &w);
-        for gy in 0..GRID_H as i32 {
-            for gx in 0..GRID_W as i32 {
-                if general {
-                    raster::fill_box(fb, &iso, &ground_rot, ground_off, gx, gy, 1, ground, ground, ground);
-                } else {
-                    raster::fill_cell(fb, &iso, gx, gy, 0, ground);
-                }
-            }
-        }
-
-        // Cells in depth order: each column, then the plants growing on it.
         let (ox, oy) = self.shrine.origin();
+        // A shrine with nothing descending renders exactly as it always has.
+        let descents = self.shrine.has_depths();
+        // Where a cell descends, the ground tile is the column's own cap.
+        let dug = |gx: i32, gy: i32| -> u32 {
+            let inside = gx >= ox && gx < ox + SHRINE_W as i32 && gy >= oy && gy < oy + SHRINE_H as i32;
+            if inside {
+                self.shrine.depth_at(gx - ox, gy - oy) as u32
+            } else {
+                0
+            }
+        };
+        let ground = self.lit(self.palette.ground_dark, &w);
+        // Cells in depth order: each column, then the plants growing on it.
         let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); (GRID_W * GRID_H) as usize];
         for (i, p) in self.plants.items.iter().enumerate() {
             buckets[(p.gy * GRID_W as i32 + p.gx) as usize].push(i);
@@ -267,16 +268,17 @@ impl Scene {
             let wz = rot[2][0] * x + rot[2][1] * y + rot[2][2] * z + off.2;
             (wx + wy) * 1024.0 + wz
         };
-        let mut cells: Vec<(f64, i32, i32, u32)> = Vec::new();
+        let mut cells: Vec<(f64, i32, i32, u32, u32)> = Vec::new();
         for gy in 0..GRID_H as i32 {
             for gx in 0..GRID_W as i32 {
                 let inside = gx >= ox && gx < ox + SHRINE_W as i32 && gy >= oy && gy < oy + SHRINE_H as i32;
                 let height = if inside { self.shrine.height_at(gx - ox, gy - oy) as u32 } else { 0 };
+                let depth = dug(gx, gy);
                 let has_plants = !buckets[(gy * GRID_W as i32 + gx) as usize].is_empty();
-                if height == 0 && !has_plants {
+                if height == 0 && depth == 0 && !has_plants {
                     continue;
                 }
-                cells.push((key(gx, gy, height), gx, gy, height));
+                cells.push((key(gx, gy, height), gx, gy, height, depth));
             }
         }
         cells.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal));
@@ -292,7 +294,43 @@ impl Scene {
         // visuals always show.
         let glow = (state.coupling.glow.clamp(0.0, 1.0) * 55.0) as u32;
         let stride = quality.plant_stride();
-        for (_, gx, gy, height) in cells {
+
+        // Columns that descend below the ground are drawn *first*. The ground
+        // plane — which is at z = 0 — is then painted over everything of theirs
+        // that spills outside their own square, so they are visible only through
+        // the square they occupy, which the ground pass leaves out.
+        if descents {
+            let mut below: Vec<(f64, i32, i32, u32)> =
+                cells.iter().filter(|c| c.4 > 0).map(|c| (c.0, c.1, c.2, c.4)).collect();
+            below.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(core::cmp::Ordering::Equal));
+            for (_, gx, gy, depth) in below {
+                let tile = self.shrine.layers.get(gx, gy, 0);
+                let base = top_colour(tile.kind, &self.palette);
+                let base = if tile.kind == kind::ALTAR { blend(base, [255, 255, 255, 255], glow, 100) } else { base };
+                let top = self.lit(base, &w);
+                let (r, o) = if general { (rot, off) } else { (ArchTransform::IDENTITY.rotation(), (0.0, 0.0, 0.0)) };
+                raster::fill_column_down(fb, &iso, &r, o, gx, gy, depth, top, shade(top, 3, 5), shade(top, 2, 5));
+            }
+        }
+
+        for gy in 0..GRID_H as i32 {
+            for gx in 0..GRID_W as i32 {
+                if dug(gx, gy) > 0 {
+                    continue;
+                }
+                let colour = ground;
+                if general {
+                    raster::fill_box(fb, &iso, &ground_rot, ground_off, gx, gy, 1, colour, colour, colour);
+                } else {
+                    raster::fill_cell(fb, &iso, gx, gy, 0, colour);
+                }
+            }
+        }
+
+        for (_, gx, gy, height, _depth) in cells {
+            // Descending columns were already drawn, before the ground plane.
+            // Nothing may be drawn for them here, or the plane's own occlusion
+            // is undone by the second pass.
             if height > 0 {
                 let tile = self.shrine.layers.get(gx, gy, height as i32 - 1);
                 let base = top_colour(tile.kind, &self.palette);

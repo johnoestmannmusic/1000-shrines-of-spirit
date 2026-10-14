@@ -102,3 +102,49 @@ fn the_orbit_is_periodic_in_a_whole_turn() {
     assert_eq!(turns(0, 12.5), 0.0);
     assert!(turns(30, 1000.0) < 1.0, "the orbit stays wrapped");
 }
+
+/// The frame for an arch transform, as a buffer.
+fn buffer(arch: ArchTransform) -> Framebuffer {
+    let mut config = SimConfig::default();
+    config.settings.arch = arch;
+    let sim = Sim::new_visual(config);
+    let mut fb = Framebuffer::logical();
+    sim.render_visual(&mut fb, 1.0, Quality::High);
+    fb
+}
+
+#[test]
+fn sinking_the_shrine_hides_it_only_under_the_plateau() {
+    use shrine0012::iso::{Iso, FP};
+    use shrine0012::{GRID_H, GRID_W};
+    // Sunk this far, nothing of the shrine is above the ground. Under the
+    // plateau the two depths must therefore be indistinguishable — the plane
+    // hides both — while past the plateau's front edge, which has no
+    // thickness, the sunk shrine still shows and the depth does matter.
+    let a = buffer(ArchTransform { off_z: -12, ..ArchTransform::IDENTITY });
+    let b = buffer(ArchTransform { off_z: -13, ..ArchTransform::IDENTITY });
+    assert_ne!(a.hash(), b.hash(), "past the plateau's edge the sunk shrine must show");
+
+    // The plateau's diamond, in fixed-point units, shrunk by a pixel so the
+    // seam along its edge is not tested.
+    let iso = Iso::grid_24();
+    let (cx, cy) = (iso.origin_x, iso.origin_y + (GRID_W as i32 + GRID_H as i32 - 2) * iso.half_h() / 2);
+    let hw = GRID_W as i32 * iso.half_w() - 2 * FP;
+    let hh = GRID_H as i32 * iso.half_h() - 2 * FP;
+    let mut inside = 0;
+    for py in 0..a.height() as i32 {
+        for px in 0..a.width() as i32 {
+            let (x, y) = (px * FP + FP / 2, py * FP + FP / 2);
+            // |dx| / hw + |dy| / hh <= 1, in integers.
+            if (x - cx).abs() as i64 * hh as i64 + (y - cy).abs() as i64 * hw as i64 > hw as i64 * hh as i64 {
+                continue;
+            }
+            inside += 1;
+            assert_eq!(a.get(px, py), b.get(px, py), "the plateau must hide the sunk shrine at {px},{py}");
+        }
+    }
+    assert!(inside > 10_000, "the plateau test covered only {inside} pixels");
+
+    // The control: sinking it by a single level still shows above the ground.
+    assert_ne!(frame(ArchTransform { off_z: -1, ..ArchTransform::IDENTITY }), frame(ArchTransform::IDENTITY));
+}

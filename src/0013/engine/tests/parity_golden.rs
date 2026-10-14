@@ -30,18 +30,30 @@ fn hash_bytes(bytes: &[u8]) -> u64 {
 }
 
 const AUDIO_SECONDS: usize = 5;
-const AUDIO_GOLDEN: u64 = 0xddb4_7280_5251_6eb7;
+// Re-locked for the weather rework (FEAT-40): the default config is Rain,
+// so its layered rain, splashes, sheen and grade change every frame, and the
+// weather bed's new wash, splash voices and gusting wind change the audio.
+const AUDIO_GOLDEN: u64 = 0x31c6_0f66_e239_2f4d;
+/// The drone rhythm switched on: locked so the LFO cannot drift silently
+/// (`HC004`). Off, the coupled audio above is unchanged.
+const DRONE_RHYTHM_GOLDEN: u64 = 0xc214_9db9_b67b_caa1;
+/// The same rhythm also shaping the atmosphere loops.
+const LOOP_RHYTHM_GOLDEN: u64 = 0x9a1a_fd56_42f7_4247;
 /// A deliberately turned architecture, locked so a change to the transform
 /// maths cannot pass silently (`HC004`).
-const ARCH_ROTATED_GOLDEN: [u64; 3] = [15091846030116639487, 12992143712555696799, 12703277274131942356];
+// Re-locked for the textured, lit architecture (FEAT-44), its paler
+// palette with the white altar (FEAT-45), and the depth test on the turned
+// path (BUG-11).
+const ARCH_ROTATED_GOLDEN: [u64; 3] = [5606981425953137516, 190012420838077787, 17860756258834833913];
 const VISUAL_GOLDEN: [u64; 5] = [
-    // Re-locked when `raster::fill_face` was fixed: it had called the horizontal
-    // `fill_span`, drawing every column's side faces with x and y swapped.
-    8079878040143304953,
-    3435403895262894872,
-    13197474975392812766,
-    412205298506576578,
-    4611702382427217164,
+    // Re-locked when `raster::fill_face` was fixed (it drew side faces with x
+    // and y swapped), for the weather rework (FEAT-40), for the textured, lit
+    // architecture (FEAT-44), and for its paler palette (FEAT-45).
+    13428862637609170673,
+    16029147735766487710,
+    436013470198669323,
+    17141771079268836140,
+    7056076257641306088,
 ];
 
 #[test]
@@ -55,6 +67,39 @@ fn coupled_audio_golden() {
     let h = hash_f32(&out);
     println!("COUPLED_AUDIO_GOLDEN = {h:#018x}");
     assert_eq!(h, AUDIO_GOLDEN, "the coupled audio changed (got {h:#018x})");
+}
+
+#[test]
+fn drone_rhythm_golden() {
+    let mut config = SimConfig::default();
+    config.settings.drone_rhythm = true;
+    let mut sim = Sim::new(config);
+    let frames = AUDIO_SECONDS * SAMPLE_RATE as usize;
+    let mut out = vec![0f32; frames * 2];
+    for chunk in out.chunks_mut(4096 * 2) {
+        sim.render_audio(chunk);
+    }
+    let h = hash_f32(&out);
+    println!("DRONE_RHYTHM_GOLDEN = {h:#018x}");
+    assert_ne!(h, AUDIO_GOLDEN, "the rhythm must actually reach the drone");
+    assert_eq!(h, DRONE_RHYTHM_GOLDEN, "the drone rhythm changed");
+}
+
+#[test]
+fn loop_rhythm_golden() {
+    let mut config = SimConfig::default();
+    config.settings.loop_rhythm = true;
+    let mut sim = Sim::new(config);
+    let frames = AUDIO_SECONDS * SAMPLE_RATE as usize;
+    let mut out = vec![0f32; frames * 2];
+    for chunk in out.chunks_mut(4096 * 2) {
+        sim.render_audio(chunk);
+    }
+    let h = hash_f32(&out);
+    println!("LOOP_RHYTHM_GOLDEN = {h:#018x}");
+    assert_ne!(h, AUDIO_GOLDEN, "the rhythm must reach the loops");
+    assert_ne!(h, DRONE_RHYTHM_GOLDEN, "and must differ from the drone-only case");
+    assert_eq!(h, LOOP_RHYTHM_GOLDEN, "the loop rhythm changed");
 }
 
 #[test]

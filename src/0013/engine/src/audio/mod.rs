@@ -13,10 +13,13 @@
 //! The port is complete and the 0011 golden hashes still match bit-for-bit
 //! (`engine/tests/audio_golden.rs`).
 
+pub mod ambience;
 pub mod atmos;
 pub mod bass;
+pub mod creatures;
 pub mod delay;
 pub mod drone;
+pub mod drone_rhythm;
 pub mod drums;
 pub mod fft;
 pub mod filter;
@@ -33,6 +36,7 @@ pub mod reverb;
 pub mod telemetry;
 pub mod tempo;
 pub mod texture;
+pub mod thunder;
 pub mod track;
 pub mod weather_bed;
 pub mod wind;

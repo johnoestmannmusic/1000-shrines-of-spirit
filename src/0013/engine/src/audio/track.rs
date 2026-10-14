@@ -45,10 +45,12 @@ pub struct Seeds {
     pub s5: u64,
     /// Shapes the atmosphere loops (their timbres are settings).
     pub s6: u64,
+    /// Decides the drone's rhythmic amplitude LFO (off by default).
+    pub s7: u64,
 }
 
 /// The canonical version of the track.
-pub const DEFAULT_SEEDS: Seeds = Seeds { s1: 1000, s2: 9, s3: 1009, s4: 2026, s5: 168, s6: 11 };
+pub const DEFAULT_SEEDS: Seeds = Seeds { s1: 1000, s2: 9, s3: 1009, s4: 2026, s5: 168, s6: 11, s7: 7 };
 
 /// How one atmosphere layer is made: one of the sustained timbres, or an
 /// editable event grid of physical-texture grains (fire, water, stones, wood).
@@ -223,6 +225,14 @@ pub struct Settings {
     /// Constant camera rotation, in degrees per second; the whole viewport
     /// orbits the shrine. Negative goes the other way, 0 holds still.
     pub camera_speed: i16,
+    /// Whether the drone's rhythmic amplitude LFO runs. Off by default, so the
+    /// drone sound is exactly as it always was.
+    pub drone_rhythm: bool,
+    /// Whether that same rhythm also shapes the atmosphere loops.
+    pub loop_rhythm: bool,
+    /// Whether the shrine's wildlife (chosen by the seed and biome) is heard
+    /// and seen. Off by default.
+    pub wildlife: bool,
 }
 
 pub const DEFAULT_SETTINGS: Settings =
@@ -252,6 +262,9 @@ pub const DEFAULT_SETTINGS: Settings =
         glitch: crate::glitch_setup::GlitchSetup::DEFAULT,
         model: crate::shrine_model::ShrineModel::EMPTY,
         camera_speed: 0,
+        drone_rhythm: false,
+        loop_rhythm: false,
+        wildlife: false,
     };
 
 /// 0010's sound: the default settings with no atmosphere loops.
@@ -408,6 +421,8 @@ pub struct Track {
     pub(crate) clock: u64,
     pub(crate) mods: Mods,
     pub(crate) drone: Drone,
+    /// The drone's rhythmic amplitude LFO, if it is switched on.
+    drone_rhythm: crate::drone_rhythm::DroneRhythm,
     pub(crate) drone_filter: [Svf; 2],
     /// End-of-chain drone character filter (a chosen low-pass).
     pub(crate) drone_tone_filter: [Svf; 2],
@@ -486,6 +501,7 @@ impl Track {
             }),
             loop_windows: [1.0; 4],
             drone: Drone::new(seeds.s1, harmony, first, rest),
+            drone_rhythm: crate::drone_rhythm::DroneRhythm::new(seeds.s7, settings.bpm),
             drone_filter: [Svf::new(1000.0, 0.7, sr), Svf::new(1000.0, 0.7, sr)],
             drone_tone_filter: [Svf::new(8_000.0, 0.7, sr), Svf::new(8_000.0, 0.7, sr)],
             drone_window: 1.0,
@@ -554,9 +570,19 @@ impl Track {
             }
             self.drone_cutoff = cutoff;
             self.drone_q = q;
-            self.drone_window = self.settings.drone.gain(clock);
+            // The arc, times the rhythmic LFO if it is switched on. Off, the
+            // multiplier is exactly 1.0, so the sound is unchanged.
+            let rhythm = if self.settings.drone_rhythm || self.settings.loop_rhythm {
+                self.drone_rhythm.level(clock)
+            } else {
+                1.0
+            };
+            self.drone_window = self.settings.drone.gain(clock)
+                * if self.settings.drone_rhythm { rhythm } else { 1.0 };
             for k in 0..4 {
-                self.loop_windows[k] = self.settings.loop_arcs[k].gain(clock);
+                // The loops can breathe with the same rhythm, on their own arc.
+                self.loop_windows[k] = self.settings.loop_arcs[k].gain(clock)
+                    * if self.settings.loop_rhythm { rhythm } else { 1.0 };
             }
             if self.settings.drone_tone > 0 {
                 for f in self.drone_tone_filter.iter_mut() {

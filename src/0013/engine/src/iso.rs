@@ -143,9 +143,14 @@ impl Iso {
         rot: &[[f64; 3]; 3],
         off: (f64, f64, f64),
     ) -> Point {
-        let wx = rot[0][0] * x + rot[0][1] * y + rot[0][2] * z + off.0;
-        let wy = rot[1][0] * x + rot[1][1] * y + rot[1][2] * z + off.1;
-        let wz = rot[2][0] * x + rot[2][1] * y + rot[2][2] * z + off.2;
+        let (wx, wy, wz) = to_world(x, y, z, rot, off);
+        self.project_world(wx, wy, wz)
+    }
+
+    /// Project a point already in world space (see [`to_world`]). Split out of
+    /// [`project_rotated`] so geometry can be clipped against the ground plane
+    /// in world space before it is projected; the arithmetic is unchanged.
+    pub fn project_world(&self, wx: f64, wy: f64, wz: f64) -> Point {
         let depth = wx + wy;
         let shear = (self.cam_yaw * depth * 1.4) as i32;
         let y_scale = 1.0 + self.cam_pitch * 0.12;
@@ -155,6 +160,16 @@ impl Iso {
                 - (wz * self.level_h as f64).round() as i32,
         }
     }
+}
+
+/// A model point turned by `rot` (row-major 3x3) and shifted by `off`: its
+/// world position, where `wz = 0` is the ground plane.
+pub fn to_world(x: f64, y: f64, z: f64, rot: &[[f64; 3]; 3], off: (f64, f64, f64)) -> (f64, f64, f64) {
+    (
+        rot[0][0] * x + rot[0][1] * y + rot[0][2] * z + off.0,
+        rot[1][0] * x + rot[1][1] * y + rot[1][2] * z + off.1,
+        rot[2][0] * x + rot[2][1] * y + rot[2][2] * z + off.2,
+    )
 }
 
 /// Logical pixels -> fixed-point units.

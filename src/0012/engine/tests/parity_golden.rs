@@ -31,6 +31,11 @@ fn hash_bytes(bytes: &[u8]) -> u64 {
 
 const AUDIO_SECONDS: usize = 5;
 const AUDIO_GOLDEN: u64 = 0xddb4_7280_5251_6eb7;
+/// The drone rhythm switched on: locked so the LFO cannot drift silently
+/// (`HC004`). Off, the coupled audio above is unchanged.
+const DRONE_RHYTHM_GOLDEN: u64 = 0xcbc3_d7a7_dda6_25e1;
+/// The same rhythm also shaping the atmosphere loops.
+const LOOP_RHYTHM_GOLDEN: u64 = 0x2f7f_7134_86c0_ac44;
 /// A deliberately turned architecture, locked so a change to the transform
 /// maths cannot pass silently (`HC004`).
 const ARCH_ROTATED_GOLDEN: [u64; 3] = [15091846030116639487, 12992143712555696799, 12703277274131942356];
@@ -55,6 +60,39 @@ fn coupled_audio_golden() {
     let h = hash_f32(&out);
     println!("COUPLED_AUDIO_GOLDEN = {h:#018x}");
     assert_eq!(h, AUDIO_GOLDEN, "the coupled audio changed (got {h:#018x})");
+}
+
+#[test]
+fn drone_rhythm_golden() {
+    let mut config = SimConfig::default();
+    config.settings.drone_rhythm = true;
+    let mut sim = Sim::new(config);
+    let frames = AUDIO_SECONDS * SAMPLE_RATE as usize;
+    let mut out = vec![0f32; frames * 2];
+    for chunk in out.chunks_mut(4096 * 2) {
+        sim.render_audio(chunk);
+    }
+    let h = hash_f32(&out);
+    println!("DRONE_RHYTHM_GOLDEN = {h:#018x}");
+    assert_ne!(h, AUDIO_GOLDEN, "the rhythm must actually reach the drone");
+    assert_eq!(h, DRONE_RHYTHM_GOLDEN, "the drone rhythm changed");
+}
+
+#[test]
+fn loop_rhythm_golden() {
+    let mut config = SimConfig::default();
+    config.settings.loop_rhythm = true;
+    let mut sim = Sim::new(config);
+    let frames = AUDIO_SECONDS * SAMPLE_RATE as usize;
+    let mut out = vec![0f32; frames * 2];
+    for chunk in out.chunks_mut(4096 * 2) {
+        sim.render_audio(chunk);
+    }
+    let h = hash_f32(&out);
+    println!("LOOP_RHYTHM_GOLDEN = {h:#018x}");
+    assert_ne!(h, AUDIO_GOLDEN, "the rhythm must reach the loops");
+    assert_ne!(h, DRONE_RHYTHM_GOLDEN, "and must differ from the drone-only case");
+    assert_eq!(h, LOOP_RHYTHM_GOLDEN, "the loop rhythm changed");
 }
 
 #[test]

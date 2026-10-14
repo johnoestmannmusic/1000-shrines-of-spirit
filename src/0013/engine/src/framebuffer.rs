@@ -100,6 +100,30 @@ impl Framebuffer {
         [self.pixels[i], self.pixels[i + 1], self.pixels[i + 2], self.pixels[i + 3]]
     }
 
+    /// Composite `colour` over one pixel with coverage `alpha` (0-255),
+    /// respecting the pixel's own alpha: over a transparent pixel (a sky the
+    /// page paints itself) the result is `colour` at `alpha`, so the page's
+    /// compositing finishes the job. Integer-only, so it is deterministic.
+    #[inline]
+    pub fn blend_over(&mut self, x: i32, y: i32, colour: Rgba, alpha: u32) {
+        let a = alpha.min(255);
+        if a == 0 || !self.in_bounds(x, y) {
+            return;
+        }
+        let i = self.offset(x, y);
+        let d = [self.pixels[i] as u32, self.pixels[i + 1] as u32, self.pixels[i + 2] as u32, self.pixels[i + 3] as u32];
+        // Destination weight, in 255ths of the result.
+        let dw = d[3] * (255 - a) / 255;
+        let out_a = a + dw;
+        if out_a == 0 {
+            return;
+        }
+        for k in 0..3 {
+            self.pixels[i + k] = ((colour[k] as u32 * a + d[k] * dw) / out_a) as u8;
+        }
+        self.pixels[i + 3] = out_a.min(255) as u8;
+    }
+
     /// Fill a horizontal run `x0..=x1` on row `y`, clipped to the buffer.
     pub fn fill_span(&mut self, y: i32, x0: i32, x1: i32, colour: Rgba) {
         if y < 0 || y as u32 >= self.height {

@@ -34,6 +34,8 @@ pub mod budget;
 pub mod framebuffer;
 pub mod grid;
 pub mod iso;
+pub mod light;
+pub mod material;
 pub mod math;
 pub mod name;
 pub mod overlay;
@@ -49,6 +51,8 @@ pub mod shrine_model;
 pub mod sim;
 pub mod wasm;
 pub mod weather;
+pub mod weather_fx;
+pub mod wildlife;
 
 // The music engine is organised under `audio`, but its modules are re-exported
 // at the crate root so they share the same paths the ported DSP expects

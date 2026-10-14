@@ -239,6 +239,14 @@ pub fn info(config: &SimConfig, build: u32) -> String {
         format!("seed       {}", config.seed),
         format!("biome      {}", config.biome.name()),
         format!("weather    {}", config.weather.name()),
+        format!(
+            "wildlife   {}",
+            if config.settings.wildlife {
+                shrine0012::wildlife::Wildlife::new(config.seed, config.biome).summary()
+            } else {
+                "off".to_string()
+            }
+        ),
         String::new(),
         format!("scale      {}", s.scale.name()),
         format!("root note  {key}"),
@@ -268,10 +276,21 @@ pub fn info(config: &SimConfig, build: u32) -> String {
     }
     lines.push(String::new());
     lines.push(format!(
-        "seeds      {} {} {} {} {} {}",
-        config.seeds.s1, config.seeds.s2, config.seeds.s3, config.seeds.s4, config.seeds.s5, config.seeds.s6
+        "seeds      {} {} {} {} {} {} {}",
+        config.seeds.s1,
+        config.seeds.s2,
+        config.seeds.s3,
+        config.seeds.s4,
+        config.seeds.s5,
+        config.seeds.s6,
+        config.seeds.s7
     ));
-    lines.push("           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere".to_string());
+    lines.push("           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm".to_string());
+    lines.push(format!(
+        "rhythm     drone {} · loops {}",
+        if config.settings.drone_rhythm { "on" } else { "off" },
+        if config.settings.loop_rhythm { "on" } else { "off" }
+    ));
     lines.push(String::new());
     lines.push("Music License: CC0 / Public Domain".to_string());
     lines.push("Code License: MIT".to_string());

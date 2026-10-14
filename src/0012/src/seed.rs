@@ -97,10 +97,10 @@ pub fn to_text(config: &SimConfig) -> String {
     out.push_str(&format!("seed={}\n", config.seed));
     out.push_str(&format!("name={}\n", s.name.as_str()));
     out.push_str(&format!(
-        "seeds={},{},{},{},{},{}\n",
-        config.seeds.s1, config.seeds.s2, config.seeds.s3, config.seeds.s4, config.seeds.s5, config.seeds.s6
+        "seeds={},{},{},{},{},{},{}\n",
+        config.seeds.s1, config.seeds.s2, config.seeds.s3, config.seeds.s4, config.seeds.s5, config.seeds.s6, config.seeds.s7
     ));
-    out.push_str("# seeds shape: 1 keys & chords, 2 glitch 1, 3 glitch 2, 4 bass, 5 drums, 6 atmosphere\n");
+    out.push_str("# seeds: 1 keys & chords, 2 glitch 1, 3 glitch 2, 4 bass, 5 drums, 6 atmosphere, 7 drone rhythm\n");
     out.push_str(&format!("biome={}\n", config.biome.name()));
     out.push_str(&format!("weather={}\n", config.weather.name()));
     out.push_str(&format!("scale={}\n", s.scale.name()));
@@ -116,6 +116,8 @@ pub fn to_text(config: &SimConfig) -> String {
     out.push_str(&format!("code_speed={}\n", s.code.speed));
     out.push_str(&format!("code_scale={}\n", s.code.scale));
     out.push_str(&format!("camera_speed={}\n", s.camera_speed));
+    out.push_str(&format!("drone_rhythm={}\n", if s.drone_rhythm { "on" } else { "off" }));
+    out.push_str(&format!("loop_rhythm={}\n", if s.loop_rhythm { "on" } else { "off" }));
     out.push_str(&format!("code_plane={}\n", shrine0012::overlay::CodeOverlay::PLANES[(s.code.plane as usize).min(2)]));
     out.push_str(&format!("code_angle={}\n", s.code.angle));
     out.push_str(&format!("code_offset={}\n", s.code.offset));
@@ -198,8 +200,17 @@ pub fn from_text(text: &str) -> Option<SimConfig> {
             }
             "seeds" => {
                 let nums: Vec<u64> = value.split(',').filter_map(|p| p.trim().parse().ok()).collect();
-                if nums.len() == 6 {
-                    config.seeds = Seeds { s1: nums[0], s2: nums[1], s3: nums[2], s4: nums[3], s5: nums[4], s6: nums[5] };
+                // Six values is the older shape; the seventh is the drone rhythm.
+                if nums.len() == 6 || nums.len() == 7 {
+                    config.seeds = Seeds {
+                        s1: nums[0],
+                        s2: nums[1],
+                        s3: nums[2],
+                        s4: nums[3],
+                        s5: nums[4],
+                        s6: nums[5],
+                        s7: nums.get(6).copied().unwrap_or(config.seeds.s7),
+                    };
                     found = true;
                 }
             }
@@ -281,6 +292,14 @@ pub fn from_text(text: &str) -> Option<SimConfig> {
                     );
                     found = true;
                 }
+            }
+            "drone_rhythm" => {
+                config.settings.drone_rhythm = parse_bool(value);
+                found = true;
+            }
+            "loop_rhythm" => {
+                config.settings.loop_rhythm = parse_bool(value);
+                found = true;
             }
             "camera_speed" => {
                 if let Ok(n) = value.parse::<i16>() {
@@ -539,7 +558,7 @@ mod tests {
     fn custom() -> SimConfig {
         let mut c = SimConfig {
             seed: 57306,
-            seeds: Seeds { s1: 1, s2: 2, s3: 3, s4: 4, s5: 5, s6: 6 },
+            seeds: Seeds { s1: 1, s2: 2, s3: 3, s4: 4, s5: 5, s6: 6, s7: 7 },
             biome: Biome::Fungal,
             weather: WeatherKind::Storm,
             ..SimConfig::default()
@@ -592,7 +611,7 @@ mod tests {
     fn text_is_human_readable() {
         let text = to_text(&SimConfig::default());
         assert!(text.contains("scale=Lydian"));
-        assert!(text.contains("seeds=1000,9,1009,2026,168,11"));
+        assert!(text.contains("seeds=1000,9,1009,2026,168,11,7"));
         assert!(text.contains("kit=Sub & clicks"));
         assert!(text.contains("layer1=Voices"));
     }

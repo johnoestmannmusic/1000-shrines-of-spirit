@@ -56,6 +56,11 @@ impl OnePole {
         OnePole { a: one_pole_coef(cutoff, sample_rate), y: 0.0 }
     }
 
+    /// Move the cutoff, keeping the filter's state (no click).
+    pub fn set_cutoff(&mut self, cutoff: f64, sample_rate: f64) {
+        self.a = one_pole_coef(cutoff, sample_rate);
+    }
+
     pub fn process(&mut self, x: f64) -> f64 {
         self.y = sanitize(self.y + self.a * (x - self.y));
         self.y

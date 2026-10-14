@@ -14,7 +14,7 @@ use shrine0012::{DEFAULT_SEEDS, DEFAULT_SETTINGS};
 fn custom() -> SimConfig {
     SimConfig {
         seed: 4242,
-        seeds: shrine0012::Seeds { s1: 1, s2: 2, s3: 3, s4: 4, s5: 5, s6: 6 },
+        seeds: shrine0012::Seeds { s1: 1, s2: 2, s3: 3, s4: 4, s5: 5, s6: 6, s7: 7 },
         settings: shrine0012::Settings {
             chords: 4,
             bpm: 99,
@@ -50,6 +50,8 @@ fn custom() -> SimConfig {
                 shrine0012::glitch_setup::GlitchSetup { enabled: false, kinds: [true, false, true, false, true, false], ..shrine0012::glitch_setup::GlitchSetup::DEFAULT_1 },
             ],
             camera_speed: -45,
+            drone_rhythm: true,
+            loop_rhythm: true,
             model: {
                 let mut m = shrine0012::shrine_model::ShrineModel::EMPTY;
                 m.set(2, 3, 5, 3, 1);
@@ -87,6 +89,9 @@ fn a_recipe_round_trips_exactly() {
         assert_eq!(back.settings.glitch, config.settings.glitch);
         assert_eq!(back.settings.model, config.settings.model);
         assert_eq!(back.settings.camera_speed, config.settings.camera_speed);
+        assert_eq!(back.seeds, config.seeds);
+        assert_eq!(back.settings.drone_rhythm, config.settings.drone_rhythm);
+        assert_eq!(back.settings.loop_rhythm, config.settings.loop_rhythm);
     }
 }
 
@@ -95,7 +100,7 @@ fn encoding_twice_is_stable() {
     let a = recipe::encode(&custom());
     let b = recipe::encode(&custom());
     assert_eq!(a, b);
-    assert_eq!(a.len(), 140);
+    assert_eq!(a.len(), 165);
 }
 
 #[test]

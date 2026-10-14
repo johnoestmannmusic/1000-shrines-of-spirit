@@ -182,7 +182,88 @@ pub fn fill_box(
     }
 }
 
-/// Draw a full column: the two visible side faces between the ground and the
+/// Draw a column that descends *below* the ground plane — the mirror of
+/// [`fill_box`], for a negative height.
+///
+/// The block spans `z` from `-depth` up to 0, so its cap sits flush with the
+/// ground (which is why the caller leaves the ground plane out on this cell)
+/// and its sides drop away underneath. The faces are the same two the raised
+/// box shows, with the same shading, so the pair read as one material.
+pub fn fill_column_down(
+    fb: &mut Framebuffer,
+    iso: &Iso,
+    rot: &[[f64; 3]; 3],
+    off: (f64, f64, f64),
+    gx: i32,
+    gy: i32,
+    depth: u32,
+    top: Rgba,
+    side_x: Rgba,
+    side_y: Rgba,
+) {
+    if depth == 0 {
+        return;
+    }
+    let d = depth as f64;
+    let p = |x: f64, y: f64, z: f64| iso.project_rotated(x, y, z, rot, off);
+    let (cx, cy) = (gx as f64, gy as f64);
+    let h = 0.5;
+
+    // A face shows when its rotated normal points at the viewer, which for this
+    // projection is the direction (1, 1, 1).
+    let facing = |n: [f64; 3]| {
+        let w = [
+            rot[0][0] * n[0] + rot[0][1] * n[1] + rot[0][2] * n[2],
+            rot[1][0] * n[0] + rot[1][1] * n[1] + rot[1][2] * n[2],
+            rot[2][0] * n[0] + rot[2][1] * n[1] + rot[2][2] * n[2],
+        ];
+        w[0] + w[1] + w[2] > 0.0
+    };
+
+    let sides: [([f64; 3], (f64, f64), (f64, f64), Rgba); 4] = [
+        ([1.0, 0.0, 0.0], (h, -h), (h, h), side_x),
+        ([-1.0, 0.0, 0.0], (-h, -h), (-h, h), side_x),
+        ([0.0, 1.0, 0.0], (-h, h), (h, h), side_y),
+        ([0.0, -1.0, 0.0], (-h, -h), (h, -h), side_y),
+    ];
+    for (normal, (ax, ay), (bx, by), colour) in sides {
+        if !facing(normal) {
+            continue;
+        }
+        fill_quad(
+            fb,
+            [
+                p(cx + ax, cy + ay, 0.0),
+                p(cx + bx, cy + by, 0.0),
+                p(cx + bx, cy + by, -d),
+                p(cx + ax, cy + ay, -d),
+            ],
+            colour,
+        );
+    }
+
+    // The cap, flush with the ground; the underside only if the view is from
+    // below, which the isometric camera never is.
+    let z_face = if facing([0.0, 0.0, 1.0]) {
+        0.0
+    } else if facing([0.0, 0.0, -1.0]) {
+        -d
+    } else {
+        return;
+    };
+    fill_quad(
+        fb,
+        [
+            p(cx - h, cy - h, z_face),
+            p(cx + h, cy - h, z_face),
+            p(cx + h, cy + h, z_face),
+            p(cx - h, cy + h, z_face),
+        ],
+        top,
+    );
+}
+
+/// Draw a full column: the two visible side faces between the ground and the/// Draw a full column: the two visible side faces between the ground and the
 /// column's top, then its top face. `height` is the number of stacked tiles.
 pub fn fill_column(fb: &mut Framebuffer, iso: &Iso, gx: i32, gy: i32, height: u32, top: Rgba, left: Rgba, right: Rgba) {
     if height == 0 {

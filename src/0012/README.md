@@ -31,7 +31,12 @@ radio, crush, dropouts) you can combine freely; the **Glitches** opens a per-lay
 pattern length, mutation cadence, retriggers) for the two glitch layers;
 **Architecture editor** paints the 16x16 shrine — plan grid beside the live
 preview, height/kind/variation per cell, undo, and a key to hand it back to the
-seed; **Reset to defaults** starts a fresh project. **Camera · Rotation speed** orbits
+seed; **Reset to defaults** starts a fresh project. **Drone rhythm** switches on a
+rhythmic amplitude LFO for the drone, shaped by **Seed 7** (off by default).
+Cells in the architecture editor run from **-6 to +6**: positive stacks tiles up,
+negative stacks the same blocks *downwards* below the ground plane, and a height
+can be typed exactly. The drone rhythm can also be applied to the atmosphere
+loops (**Loop rhythm**). **Camera · Rotation speed** orbits
 the whole viewport around the shrine, in degrees per second (default 0); the
 **Code plane** setting puts the scrolling source on a *static* plane, a *flat*
 one that slides with the camera, or a *sphere* that wraps around the viewer so

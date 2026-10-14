@@ -11,6 +11,12 @@ fn mix(mut z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
+/// A well-mixed hash of three words: for stateless schedules, where "the
+/// n-th cycle of slot k" has to give the same numbers whenever it is asked.
+pub fn hash3(a: u64, b: u64, c: u64) -> u64 {
+    mix(mix(mix(a) ^ b.wrapping_mul(0x9E37_79B9_7F4A_7C15)) ^ c.wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
+}
+
 #[derive(Clone)]
 pub struct Rng {
     state: u64,

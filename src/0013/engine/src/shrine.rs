@@ -49,6 +49,8 @@ pub struct Shrine {
     pub seed: u64,
     origin: (i32, i32),
     height: [[u8; SW]; SH],
+    /// How far a cell is dug *below* the ground plane; 0 means none.
+    depths: [[u8; SW]; SH],
 }
 
 impl Shrine {
@@ -82,7 +84,7 @@ impl Shrine {
             }
         }
 
-        Shrine { layers, seed, origin, height }
+        Shrine { layers, seed, origin, height, depths: [[0u8; SW]; SH] }
     }
 
     /// Build the shrine from an authored model instead of the generator.
@@ -95,10 +97,27 @@ impl Shrine {
             (GRID_H as i32 - SHRINE_H as i32) / 2,
         );
         let mut height = [[1u8; SW]; SH];
+        let mut depths = [[0u8; SW]; SH];
         let mut layers = Layers::new(MAX_HEIGHT as u32);
         for lx in 0..SW {
             for ly in 0..SH {
-                let h = model.height(lx, ly).min(MAX_HEIGHT);
+                let signed = model.height(lx, ly);
+                if signed < 0 {
+                    // Blocks descending below the ground: no column above, but
+                    // the top tile still caps the cell so the ground plane reads
+                    // as continuous where the structure drops away.
+                    let top = model.kind(lx, ly).min(kind::STONE).max(kind::FLOOR);
+                    height[lx][ly] = 0;
+                    depths[lx][ly] = signed.unsigned_abs().min(MAX_HEIGHT);
+                    layers.set(
+                        origin.0 + lx as i32,
+                        origin.1 + ly as i32,
+                        0,
+                        Tile::new(top, model.variant(lx, ly)),
+                    );
+                    continue;
+                }
+                let h = signed.min(MAX_HEIGHT as i8) as u8;
                 height[lx][ly] = h;
                 if h == 0 {
                     // A hole: no column at all, so the ground shows through.
@@ -116,7 +135,7 @@ impl Shrine {
                 }
             }
         }
-        Shrine { layers, seed, origin, height }
+        Shrine { layers, seed, origin, height, depths }
     }
 
     /// Top-left cell of the footprint in grid coordinates.
@@ -132,9 +151,30 @@ impl Shrine {
         self.height[lx as usize][ly as usize]
     }
 
+    /// How far this cell is dug below the ground plane, 0 for none.
+    pub fn depth_at(&self, lx: i32, ly: i32) -> u8 {
+        if lx < 0 || ly < 0 || lx as usize >= SW || ly as usize >= SH {
+            return 0;
+        }
+        self.depths[lx as usize][ly as usize]
+    }
+
+    /// Whether any cell descends below the ground plane. When none do, the
+    /// renderer keeps its original order exactly.
+    pub fn has_depths(&self) -> bool {
+        self.depths.iter().any(|row| row.iter().any(|d| *d > 0))
+    }
+
     /// A stable hash of the generated structure, for golden tests.
     pub fn hash(&self) -> u64 {
-        self.layers.hash()
+        let mut h = self.layers.hash();
+        for row in self.depths.iter() {
+            for &d in row.iter() {
+                h ^= d as u64;
+                h = h.wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        h
     }
 }
 

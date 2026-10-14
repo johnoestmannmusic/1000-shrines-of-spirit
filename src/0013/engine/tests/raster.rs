@@ -135,3 +135,37 @@ fn division_helpers_are_exact_at_edges() {
     assert_eq!(ceil_div(17, 16), 2);
     assert_eq!(ceil_div(-16, 16), -1);
 }
+
+#[test]
+fn a_turned_face_knows_how_near_each_pixel_is() {
+    // On the turned path the scene keeps the nearest surface per pixel, so
+    // the depth a face reports must be the true nearness (wx + wy + wz) of
+    // the world point it shows, even right at the face's edges.
+    use shrine0012::arch::ArchTransform;
+    use shrine0012::iso::{to_world, Iso};
+    use shrine0012::raster::{fill_box_shaded, Bounds, Half, Surface};
+    let iso = Iso::grid_24();
+    let arch = ArchTransform { rot_x: 23, rot_y: -11, rot_z: 37, ..ArchTransform::IDENTITY };
+    let (rot, off) = arch.world(0.13);
+    let mut seen = 0;
+    let mut sink = |s: &Surface| {
+        let w = to_world(s.x, s.y, s.z, &rot, off);
+        let true_depth = w.0 + w.1 + w.2;
+        // Texture coordinates are clamped to the face at its edges, so only
+        // compare where the point is well inside it, on the face's own axes.
+        use shrine0012::raster::Face;
+        let (fx, fy, fz) = ((s.x - 10.0).abs() < 0.45, (s.y - 9.0).abs() < 0.45, s.z > 0.05 && s.z < 2.95);
+        let inside = match s.face {
+            Face::Top | Face::Bottom => fx && fy,
+            Face::PosX | Face::NegX => fy && fz,
+            Face::PosY | Face::NegY => fx && fz,
+        };
+        if inside {
+            assert!((s.depth - true_depth).abs() < 0.02, "{} vs {true_depth} at {s:?}", s.depth);
+            seen += 1;
+        }
+    };
+    fill_box_shaded(Bounds { w: 300, h: 300 }, &iso, &rot, off, 10, 9, (0.0, 3.0), Half::All, &mut sink);
+    assert!(seen > 50, "only {seen} pixels checked");
+}
+

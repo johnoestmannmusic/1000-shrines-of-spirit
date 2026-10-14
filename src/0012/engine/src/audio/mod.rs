@@ -17,6 +17,7 @@ pub mod atmos;
 pub mod bass;
 pub mod delay;
 pub mod drone;
+pub mod drone_rhythm;
 pub mod drums;
 pub mod fft;
 pub mod filter;

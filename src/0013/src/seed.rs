@@ -97,10 +97,10 @@ pub fn to_text(config: &SimConfig) -> String {
     out.push_str(&format!("seed={}\n", config.seed));
     out.push_str(&format!("name={}\n", s.name.as_str()));
     out.push_str(&format!(
-        "seeds={},{},{},{},{},{}\n",
-        config.seeds.s1, config.seeds.s2, config.seeds.s3, config.seeds.s4, config.seeds.s5, config.seeds.s6
+        "seeds={},{},{},{},{},{},{}\n",
+        config.seeds.s1, config.seeds.s2, config.seeds.s3, config.seeds.s4, config.seeds.s5, config.seeds.s6, config.seeds.s7
     ));
-    out.push_str("# seeds shape: 1 keys & chords, 2 glitch 1, 3 glitch 2, 4 bass, 5 drums, 6 atmosphere\n");
+    out.push_str("# seeds: 1 keys & chords, 2 glitch 1, 3 glitch 2, 4 bass, 5 drums, 6 atmosphere, 7 drone rhythm\n");
     out.push_str(&format!("biome={}\n", config.biome.name()));
     out.push_str(&format!("weather={}\n", config.weather.name()));
     out.push_str(&format!("scale={}\n", s.scale.name()));
@@ -116,6 +116,9 @@ pub fn to_text(config: &SimConfig) -> String {
     out.push_str(&format!("code_speed={}\n", s.code.speed));
     out.push_str(&format!("code_scale={}\n", s.code.scale));
     out.push_str(&format!("camera_speed={}\n", s.camera_speed));
+    out.push_str(&format!("drone_rhythm={}\n", if s.drone_rhythm { "on" } else { "off" }));
+    out.push_str(&format!("loop_rhythm={}\n", if s.loop_rhythm { "on" } else { "off" }));
+    out.push_str(&format!("wildlife={}\n", if s.wildlife { "on" } else { "off" }));
     out.push_str(&format!("code_plane={}\n", shrine0012::overlay::CodeOverlay::PLANES[(s.code.plane as usize).min(2)]));
     out.push_str(&format!("code_angle={}\n", s.code.angle));
     out.push_str(&format!("code_offset={}\n", s.code.offset));
@@ -128,7 +131,7 @@ pub fn to_text(config: &SimConfig) -> String {
     // An authored architecture is 256 bytes of nothing-but-source; write it as
     // hex so a shared seed carries the whole shrine.
     if s.model.is_authored() {
-        out.push_str("# model: an authored 16x16 architecture (256 bytes, hex)\n");
+        out.push_str("# model: an authored 16x16 architecture (hex: a flag word, then nine bits a cell)\n");
         out.push_str(&format!("model={}\n", s.model.to_hex()));
     }
     for (i, g) in s.glitch.iter().enumerate() {
@@ -198,8 +201,17 @@ pub fn from_text(text: &str) -> Option<SimConfig> {
             }
             "seeds" => {
                 let nums: Vec<u64> = value.split(',').filter_map(|p| p.trim().parse().ok()).collect();
-                if nums.len() == 6 {
-                    config.seeds = Seeds { s1: nums[0], s2: nums[1], s3: nums[2], s4: nums[3], s5: nums[4], s6: nums[5] };
+                // Six values is the older shape; the seventh is the drone rhythm.
+                if nums.len() == 6 || nums.len() == 7 {
+                    config.seeds = Seeds {
+                        s1: nums[0],
+                        s2: nums[1],
+                        s3: nums[2],
+                        s4: nums[3],
+                        s5: nums[4],
+                        s6: nums[5],
+                        s7: nums.get(6).copied().unwrap_or(config.seeds.s7),
+                    };
                     found = true;
                 }
             }
@@ -281,6 +293,18 @@ pub fn from_text(text: &str) -> Option<SimConfig> {
                     );
                     found = true;
                 }
+            }
+            "drone_rhythm" => {
+                config.settings.drone_rhythm = parse_bool(value);
+                found = true;
+            }
+            "loop_rhythm" => {
+                config.settings.loop_rhythm = parse_bool(value);
+                found = true;
+            }
+            "wildlife" => {
+                config.settings.wildlife = parse_bool(value);
+                found = true;
             }
             "camera_speed" => {
                 if let Ok(n) = value.parse::<i16>() {
@@ -539,7 +563,7 @@ mod tests {
     fn custom() -> SimConfig {
         let mut c = SimConfig {
             seed: 57306,
-            seeds: Seeds { s1: 1, s2: 2, s3: 3, s4: 4, s5: 5, s6: 6 },
+            seeds: Seeds { s1: 1, s2: 2, s3: 3, s4: 4, s5: 5, s6: 6, s7: 7 },
             biome: Biome::Fungal,
             weather: WeatherKind::Storm,
             ..SimConfig::default()
@@ -592,7 +616,7 @@ mod tests {
     fn text_is_human_readable() {
         let text = to_text(&SimConfig::default());
         assert!(text.contains("scale=Lydian"));
-        assert!(text.contains("seeds=1000,9,1009,2026,168,11"));
+        assert!(text.contains("seeds=1000,9,1009,2026,168,11,7"));
         assert!(text.contains("kit=Sub & clicks"));
         assert!(text.contains("layer1=Voices"));
     }
@@ -642,4 +666,198 @@ mod tests {
         assert_eq!(back.settings.glitch[0].fill, 55, "a bad value must not change anything");
         assert_eq!(back.settings.glitch[0].kinds, [true; 6], "a short mask is ignored");
     }
+
+    // ---------------------------------------------------------------------
+    // Every parameter, exported and imported. These build configurations with
+    // *every* field set at random within its valid range and compare the
+    // whole `Settings` struct after a round trip, so a setting added later
+    // without a seed line fails here rather than going missing in a file.
+    // ---------------------------------------------------------------------
+
+    use shrine0012::arch::ArchTransform;
+    use shrine0012::glitch_setup::GlitchSetup;
+    use shrine0012::overlay::CodeOverlay;
+    use shrine0012::rng::Rng;
+    use shrine0012::shrine_model::ShrineModel;
+    use shrine0012::tempo::{MAX_BPM, MIN_BPM};
+
+    fn signed(r: &mut Rng, lo: i64, hi: i64) -> i64 {
+        lo + r.int(0, (hi - lo) as u64) as i64
+    }
+
+    fn arc(r: &mut Rng) -> DroneArc {
+        let cycle = if r.chance(0.3) { 0 } else { r.int(1, 900) as u16 };
+        let hold = if cycle == 0 { 0 } else { r.int(0, cycle as u64) as u16 };
+        DroneArc { cycle_s: cycle, hold_s: hold }
+    }
+
+    /// A configuration with every field chosen at random from its range.
+    fn random_config(r: &mut Rng) -> SimConfig {
+        let mut c = SimConfig {
+            seed: r.next_u64(),
+            seeds: Seeds { s1: r.next_u64(), s2: r.next_u64(), s3: r.next_u64(), s4: r.next_u64(), s5: r.next_u64(), s6: r.next_u64(), s7: r.next_u64() },
+            biome: r.pick(&Biome::ALL),
+            weather: r.pick(&WeatherKind::ALL),
+            ..SimConfig::default()
+        };
+        let s = &mut c.settings;
+        s.scale = r.pick(&SCALES);
+        s.chords = r.int(1, 4) as u8;
+        s.pace = if r.chance(0.5) { Pace::Jungle } else { Pace::HalfTime };
+        s.kit = r.pick(&KITS);
+        s.space = r.pick(&SPACES);
+        s.bpm = r.int(MIN_BPM as u64, MAX_BPM as u64) as u16;
+        for i in 0..4 {
+            s.loops[i] = if r.chance(0.3) {
+                let words = [r.next_u64() as u32, r.next_u64() as u32, r.next_u64() as u32, r.next_u64() as u32];
+                LoopDesign::Events(if r.chance(0.5) { Grid::from_words(words) } else { r.pick(&[Grid::fire(), Grid::water(), Grid::stones(), Grid::wood()]) })
+            } else {
+                LoopDesign::Sustained(r.pick(&LOOP_TIMBRES))
+            };
+            s.loop_arcs[i] = arc(r);
+        }
+        s.loop_transpose = signed(r, -12, 12) as i8;
+        s.key = if r.chance(0.2) { KeyChoice::Seed } else { KeyChoice::Note(r.int(0, 11) as u8) };
+        s.drone = arc(r);
+        s.drone_tone = r.int(0, 2_000) as u16;
+        s.drum_reverse = r.chance(0.5);
+        s.master.enabled = r.chance(0.5);
+        s.master.tape = r.chance(0.5);
+        s.master.cd = r.chance(0.5);
+        s.master.pitch = r.chance(0.5);
+        s.master.radio = r.chance(0.5);
+        s.master.crush = r.chance(0.5);
+        s.master.dropout = r.chance(0.5);
+        s.code = CodeOverlay {
+            enabled: r.chance(0.5),
+            opacity: r.int(0, 100) as u8,
+            speed: r.int(0, 100) as u8,
+            scale: r.int(CodeOverlay::MIN_SCALE as u64, CodeOverlay::MAX_SCALE as u64) as u8,
+            angle: signed(r, CodeOverlay::MIN_ANGLE as i64, CodeOverlay::MAX_ANGLE as i64) as i16,
+            offset: signed(r, CodeOverlay::MIN_OFFSET as i64, CodeOverlay::MAX_OFFSET as i64) as i16,
+            plane: r.int(0, 2) as u8,
+        };
+        // Any printable name up to the cap, without spaces at its ends (a seed
+        // line is trimmed, so those are not kept).
+        let len = r.int(0, 32) as usize;
+        let mut name: String = (0..len).map(|_| (b' ' + r.int(0, 94) as u8) as char).collect();
+        name = name.trim().to_string();
+        s.name = shrine0012::name::Name::from_str(&name);
+        let rot = |r: &mut Rng| signed(r, ArchTransform::MIN_ROT as i64, ArchTransform::MAX_ROT as i64) as i16;
+        let off = |r: &mut Rng| signed(r, ArchTransform::MIN_OFF as i64, ArchTransform::MAX_OFF as i64) as i16;
+        s.arch = ArchTransform { rot_x: rot(r), rot_y: rot(r), rot_z: rot(r), off_x: off(r), off_y: off(r), off_z: off(r) };
+        for g in s.glitch.iter_mut() {
+            let (a, b) = (r.int(1, 24) as u8, r.int(1, 24) as u8);
+            *g = GlitchSetup {
+                enabled: r.chance(0.5),
+                kinds: [0; 6].map(|_| r.chance(0.5)),
+                fill: r.int(0, 100) as u8,
+                rate: r.int(0, 3) as u8,
+                gain: r.int(0, 200) as u8,
+                steps: r.int(1, 24) as u8,
+                repeats_min: a.min(b),
+                repeats_max: a.max(b),
+                ratchet: r.int(1, 8) as u8,
+            };
+        }
+        s.model = ShrineModel::EMPTY;
+        if r.chance(0.6) {
+            for _ in 0..r.int(1, 60) {
+                let (x, y) = (r.int(0, 15) as usize, r.int(0, 15) as usize);
+                let h = signed(r, ShrineModel::MIN_HEIGHT as i64, ShrineModel::MAX as i64) as i8;
+                s.model.set(x, y, h, r.int(1, 7) as u8, r.int(0, 3) as u8);
+            }
+        }
+        s.camera_speed = signed(r, -180, 180) as i16;
+        s.drone_rhythm = r.chance(0.5);
+        s.loop_rhythm = r.chance(0.5);
+        s.wildlife = r.chance(0.5);
+        c
+    }
+
+    fn assert_same(back: &SimConfig, config: &SimConfig, label: &str) {
+        assert_eq!(back.seed, config.seed, "{label}: seed");
+        assert_eq!(back.seeds, config.seeds, "{label}: seeds");
+        assert_eq!(back.biome, config.biome, "{label}: biome");
+        assert_eq!(back.weather, config.weather, "{label}: weather");
+        // The whole struct, so no setting can be left out.
+        assert_eq!(back.settings, config.settings, "{label}: settings\n{}", to_text(config));
+    }
+
+    #[test]
+    fn every_parameter_round_trips_through_a_seed() {
+        let mut r = Rng::new(0x5EED_F11E);
+        for i in 0..400 {
+            let config = random_config(&mut r);
+            let back = from_text(&to_text(&config)).expect("should parse");
+            assert_same(&back, &config, &format!("config {i}"));
+        }
+    }
+
+    #[test]
+    fn every_weather_biome_and_loop_timbre_round_trips() {
+        for weather in WeatherKind::ALL {
+            for biome in Biome::ALL {
+                let mut c = SimConfig { weather, biome, ..SimConfig::default() };
+                c.settings.wildlife = true;
+                let back = from_text(&to_text(&c)).unwrap();
+                assert_eq!((back.weather, back.biome), (weather, biome));
+                assert!(back.settings.wildlife);
+            }
+        }
+        for t in LOOP_TIMBRES {
+            let mut c = SimConfig::default();
+            c.settings.loops = [LoopDesign::Sustained(t); 4];
+            assert_eq!(from_text(&to_text(&c)).unwrap().settings.loops, c.settings.loops, "{}", t.name());
+        }
+    }
+
+    #[test]
+    fn every_line_a_seed_writes_is_one_it_can_read() {
+        // A key the writer emits but the reader ignores would silently lose
+        // that setting on import. Each line must be recognised on its own.
+        let mut r = Rng::new(7);
+        for _ in 0..40 {
+            let config = random_config(&mut r);
+            for line in to_text(&config).lines() {
+                if line.trim().is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                assert!(from_text(line).is_some(), "the reader does not recognise: {line}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_seed_from_before_nine_bit_cells_keeps_its_architecture() {
+        // Earlier seeds wrote the model as one byte a cell: height 0..6, kind
+        // and variation (the version-13 layout), 512 hex digits.
+        let mut bytes = [0u8; 256];
+        bytes[4 + 6 * 16] = 5 | (3 << 3) | (2 << 6); // (4, 6): height 5, kind 3, variant 2
+        bytes[9 + 9 * 16] = 0 | (1 << 3); // (9, 9): ground
+        let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let back = from_text(&format!("seed=5\nmodel={hex}\n")).unwrap();
+        let m = back.settings.model;
+        assert!(m.is_authored(), "an old model must stay authored");
+        assert_eq!((m.height(4, 6), m.kind(4, 6), m.variant(4, 6)), (5, 3, 2));
+        assert_eq!(m.height(9, 9), 0);
+        // And it writes back out in today's form, which reads back the same.
+        let again = from_text(&to_text(&back)).unwrap();
+        assert_eq!(again.settings.model, m);
+    }
+
+    #[test]
+    fn export_and_import_through_a_file() {
+        let mut r = Rng::new(99);
+        let config = random_config(&mut r);
+        let dir = std::env::temp_dir().join(format!("shrineseed-test-{}", std::process::id()));
+        let path = dir.join("nested").join("ShrineGen-test.shrineseed");
+        let path = path.to_str().unwrap();
+        write(&config, path).expect("export");
+        let back = read(path).expect("import");
+        assert_same(&back, &config, "file");
+        let _ = fs::remove_dir_all(&dir);
+        assert!(read("/nonexistent/x.shrineseed").is_err());
+    }
 }
+

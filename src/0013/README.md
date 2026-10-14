@@ -31,7 +31,30 @@ radio, crush, dropouts) you can combine freely; the **Glitches** opens a per-lay
 pattern length, mutation cadence, retriggers) for the two glitch layers;
 **Architecture editor** paints the 16x16 shrine — plan grid beside the live
 preview, height/kind/variation per cell, undo, and a key to hand it back to the
-seed; **Reset to defaults** starts a fresh project. **Camera · Rotation speed** orbits
+seed; **Reset to defaults** starts a fresh project. **Drone rhythm** switches on a
+rhythmic amplitude LFO for the drone, shaped by **Seed 7** (off by default).
+Cells in the architecture editor run from **-6 to +6**: positive stacks tiles up,
+negative stacks the same blocks *downwards* below the ground plane, and a height
+can be typed exactly. The drone rhythm can also be applied to the atmosphere
+loops (**Loop rhythm**). There are seven **weathers** — Clear, Rain, Wind, Fog,
+Storm, Snow and Dusk — each with its own particles, light and sound: motes and
+shafts of light, layered rain splashing on the stone, blown leaves and gust
+whistles, drifting fog and drips, lightning with its thunder arriving after the
+flash, snowfall whitening the tops, and rising embers under a low sun. The
+picture and the weather sound play from the same levels and the same events, so
+heavier rain is both denser and louder, and every splash you see is a drop you
+hear. **Wildlife** (off by default) adds a few creatures chosen by the biome and
+seed — frogs and doves in moss, songbirds and crickets in verdant growth,
+cicadas, owls and fireflies among the fungi — whose calls thin out in bad
+weather. The atmosphere layers offer twenty loop timbres, from Voices and Bells
+to Drift, Tide, Ember, Ripple, Ebb, Bronze, Frost, Lantern and Loom.
+The shrine itself is a ruin of brutalist concrete poured over weathered
+stone: board-formed walls with tie holes and water stains, ribbed pillars, slab
+roofs, ashlar footings and flagstones, carved friezes and glowing rune panels,
+cracks, chipped edges and creeping moss. Every texture is fixed to its block,
+and every weather lights it differently — its own sun, sky light, cast shadows,
+occlusion, rim light and altar glow — in stepped, ordered-dither shading.
+**Camera · Rotation speed** orbits
 the whole viewport around the shrine, in degrees per second (default 0); the
 **Code plane** setting puts the scrolling source on a *static* plane, a *flat*
 one that slides with the camera, or a *sphere* that wraps around the viewer so
@@ -43,7 +66,8 @@ text size* scales it (100% = normal, 200% = double), *Code angle* tilts the
 drift (positive leans left) so it travels along that tilted axis, and *Code
 vertical* shifts the whole drift up or down to re-centre it. The **Architecture**
 controls turn the shrine about x, y and z (any angle, so it can be tipped onto
-its side or pushed through the ground) and offset it in x, y and z; the default
+its side or pushed through the ground — the ground plateau hides whatever goes
+below it, though it still shows past the plateau's edge) and offset it in x, y and z; the default
 is centred and upright, and the *model* stays the centred 16x16 footprint
 whatever the transform says. The engine can
 leave the sky unfilled and reports the lit sky colours it would have used; the

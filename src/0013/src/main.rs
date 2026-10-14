@@ -95,7 +95,8 @@ fn parse(args: &[String]) -> Args {
     Args {
         seed,
         biome: biome.unwrap_or(Biome::ALL[(seed % Biome::ALL.len() as u64) as usize]),
-        weather: weather.unwrap_or(WeatherKind::ALL[(seed / 3 % WeatherKind::ALL.len() as u64) as usize]),
+        // Only the first five kinds, so a seed keeps the weather it always had.
+        weather: weather.unwrap_or(WeatherKind::ALL[(seed / 3 % 5) as usize]),
         seconds,
         out,
     }

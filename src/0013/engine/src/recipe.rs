@@ -23,7 +23,7 @@ use crate::track::{DroneArc, KeyChoice, LoopDesign, Seeds, Settings};
 use crate::weather::WeatherKind;
 use crate::{DEFAULT_SEEDS, DEFAULT_SETTINGS};
 
-pub const VERSION: u32 = 13;
+pub const VERSION: u32 = 15;
 
 /// Encode a configuration.
 pub fn encode(config: &SimConfig) -> Vec<u32> {
@@ -33,7 +33,15 @@ pub fn encode(config: &SimConfig) -> Vec<u32> {
     w.push(VERSION);
     w.push((config.seed >> 32) as u32);
     w.push(config.seed as u32);
-    for seed in [config.seeds.s1, config.seeds.s2, config.seeds.s3, config.seeds.s4, config.seeds.s5, config.seeds.s6] {
+    for seed in [
+        config.seeds.s1,
+        config.seeds.s2,
+        config.seeds.s3,
+        config.seeds.s4,
+        config.seeds.s5,
+        config.seeds.s6,
+        config.seeds.s7,
+    ] {
         w.push((seed >> 32) as u32);
         w.push(seed as u32);
     }
@@ -79,6 +87,9 @@ pub fn encode(config: &SimConfig) -> Vec<u32> {
         w.push(layer.word_b());
     }
     w.push((s.camera_speed + 180).clamp(0, 360) as u32);
+    // Bit 0: the drone. Bit 1: the same rhythm on the atmosphere loops.
+    // Bit 2: wildlife (an older recipe has it clear, so it decodes as off).
+    w.push(s.drone_rhythm as u32 | ((s.loop_rhythm as u32) << 1) | ((s.wildlife as u32) << 2));
     for word in s.model.words() {
         w.push(word);
     }
@@ -97,8 +108,12 @@ pub fn decode(words: &[u32]) -> SimConfig {
     let mut c = Cursor { words, at: 0 };
     let version = c.next();
     let seed = join(c.next(), c.next());
-    let mut s: [u64; 6] = [0; 6];
-    for v in &mut s {
+    let mut s: [u64; 7] = [0; 7];
+    for (i, v) in s.iter_mut().enumerate() {
+        // Version 15 added the drone-rhythm seed; older recipes carry six.
+        if i == 6 && version < 15 {
+            break;
+        }
         *v = join(c.next(), c.next());
     }
     let biome = pick(&Biome::ALL, c.next());
@@ -171,9 +186,18 @@ pub fn decode(words: &[u32]) -> SimConfig {
     } else {
         0
     };
-    let model = if version >= 13 {
+    let (drone_rhythm, loop_rhythm, wildlife) = if version >= 15 {
+        let word = c.next();
+        (word & 1 != 0, word & 2 != 0, word & 4 != 0)
+    } else {
+        (false, false, false)
+    };
+    let model = if version >= 14 {
         let words: Vec<u32> = (0..crate::shrine_model::WORDS as u32).map(|_| c.next()).collect();
         crate::shrine_model::ShrineModel::from_words(&words)
+    } else if version >= 13 {
+        let words: Vec<u32> = (0..(crate::shrine_model::CELLS as u32 / 4 + 1)).map(|_| c.next()).collect();
+        crate::shrine_model::ShrineModel::from_v13_words(&words)
     } else if version >= 11 {
         let words: Vec<u32> = (0..crate::shrine_model::CELLS as u32 / 4).map(|_| c.next()).collect();
         crate::shrine_model::ShrineModel::from_legacy_words(&words)
@@ -192,7 +216,7 @@ pub fn decode(words: &[u32]) -> SimConfig {
 
     SimConfig {
         seed,
-        seeds: Seeds { s1: s[0], s2: s[1], s3: s[2], s4: s[3], s5: s[4], s6: s[5] },
+        seeds: Seeds { s1: s[0], s2: s[1], s3: s[2], s4: s[3], s5: s[4], s6: s[5], s7: s[6] },
         settings: Settings {
             scale,
             chords,
@@ -214,6 +238,9 @@ pub fn decode(words: &[u32]) -> SimConfig {
             glitch,
             model,
             camera_speed,
+            drone_rhythm,
+            loop_rhythm,
+            wildlife,
         },
         biome,
         weather,

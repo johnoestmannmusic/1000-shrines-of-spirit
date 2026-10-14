@@ -4,7 +4,8 @@
 //! At start-up each chord of the progression gets its own loop, a few
 //! seconds long, synthesised once by one of the timbres (formant voices, an FM
 //! bell, a bell pad over a warm swell, a wave-cycle pad, or one of the noise
-//! textures: Air, Hush, Gust, Shine, Rill, Veil and Mist). Everything that
+//! textures: Air, Hush, Gust, Shine, Rill, Veil and Mist), or one of the later
+//! family: Drift, Tide, Ember, Ripple, Ebb, Bronze, Frost, Lantern and Loom. Everything that
 //! moves inside the loop
 //! (the vowel, the wave steps, the swells, the strikes) is timed to repeat
 //! exactly once per loop. The loop point is then hidden the way a sampler
@@ -18,7 +19,7 @@
 use crate::filter::Svf;
 use crate::fm::{Algo, Fm3, Op};
 use crate::harmony::Harmony;
-use crate::math::{cos_turns, decay_coef, exp, midi_hz, sin_turns};
+use crate::math::{cos_turns, decay_coef, exp, exp2, midi_hz, sin_turns};
 use crate::rng::Rng;
 use crate::LoopDesign;
 
@@ -37,10 +38,19 @@ pub enum LoopTimbre {
     Rill,
     Veil,
     Mist,
+    Drift,
+    Tide,
+    Ember,
+    Ripple,
+    Ebb,
+    Bronze,
+    Frost,
+    Lantern,
+    Loom,
     Off,
 }
 
-pub const LOOP_TIMBRES: [LoopTimbre; 12] = [
+pub const LOOP_TIMBRES: [LoopTimbre; 21] = [
     LoopTimbre::Voices,
     LoopTimbre::Bells,
     LoopTimbre::BellPad,
@@ -52,6 +62,15 @@ pub const LOOP_TIMBRES: [LoopTimbre; 12] = [
     LoopTimbre::Rill,
     LoopTimbre::Veil,
     LoopTimbre::Mist,
+    LoopTimbre::Drift,
+    LoopTimbre::Tide,
+    LoopTimbre::Ember,
+    LoopTimbre::Ripple,
+    LoopTimbre::Ebb,
+    LoopTimbre::Bronze,
+    LoopTimbre::Frost,
+    LoopTimbre::Lantern,
+    LoopTimbre::Loom,
     LoopTimbre::Off,
 ];
 
@@ -69,6 +88,15 @@ impl LoopTimbre {
             LoopTimbre::Rill => "Rill",
             LoopTimbre::Veil => "Veil",
             LoopTimbre::Mist => "Mist",
+            LoopTimbre::Drift => "Drift",
+            LoopTimbre::Tide => "Tide",
+            LoopTimbre::Ember => "Ember",
+            LoopTimbre::Ripple => "Ripple",
+            LoopTimbre::Ebb => "Ebb",
+            LoopTimbre::Bronze => "Bronze",
+            LoopTimbre::Frost => "Frost",
+            LoopTimbre::Lantern => "Lantern",
+            LoopTimbre::Loom => "Loom",
             LoopTimbre::Off => "Off",
         }
     }
@@ -87,6 +115,15 @@ impl LoopTimbre {
             LoopTimbre::Rill => "narrow bands fluttering quickly: water over stones",
             LoopTimbre::Veil => "resonant bands sweeping up and back: a curtain of light",
             LoopTimbre::Mist => "a low, slowly breathing noise bed with almost no pitch",
+            LoopTimbre::Drift => "detuned pulse-wave strings, slowly chorused and breathing",
+            LoopTimbre::Tide => "a bright saw pad through a slowly sweeping notch: a phasing tide",
+            LoopTimbre::Ember => "a dark pad pulsing through a soft rhythmic gate, in time",
+            LoopTimbre::Ripple => "plucked strings arpeggiating the chord, trailing a soft dotted echo",
+            LoopTimbre::Ebb => "reversed swells: each note breathes in backwards, then stops",
+            LoopTimbre::Bronze => "inharmonic gong partials swelling and beating slowly",
+            LoopTimbre::Frost => "tiny high grains scattered over the chord: crystalline frost",
+            LoopTimbre::Lantern => "a breathy flute-organ with a chiff on each note and slow tremolo",
+            LoopTimbre::Loom => "a soft square-wave arpeggio stepping through an opening filter",
             LoopTimbre::Off => "no loop layer",
         }
     }
@@ -105,6 +142,15 @@ impl LoopTimbre {
             LoopTimbre::Rill => "RIL",
             LoopTimbre::Veil => "VEL",
             LoopTimbre::Mist => "MST",
+            LoopTimbre::Drift => "DRF",
+            LoopTimbre::Tide => "TDE",
+            LoopTimbre::Ember => "EMB",
+            LoopTimbre::Ripple => "RPL",
+            LoopTimbre::Ebb => "EBB",
+            LoopTimbre::Bronze => "BRZ",
+            LoopTimbre::Frost => "FRS",
+            LoopTimbre::Lantern => "LNT",
+            LoopTimbre::Loom => "LOM",
             LoopTimbre::Off => "OFF",
         }
     }
@@ -200,8 +246,9 @@ fn pick_notes(rng: &mut Rng, chord: &[f64], count: usize) -> Vec<f64> {
 
 fn perform(timbre: LoopTimbre, rng: &mut Rng, chord: &[f64], beats: u64, beat: u64) -> Performance {
     let count = match timbre {
-        LoopTimbre::BellPad | LoopTimbre::Shine | LoopTimbre::Veil => 4,
+        LoopTimbre::BellPad | LoopTimbre::Shine | LoopTimbre::Veil | LoopTimbre::Ripple | LoopTimbre::Loom => 4,
         LoopTimbre::Mist => 1,
+        LoopTimbre::Bronze => 2,
         _ => 3,
     };
     let notes = pick_notes(rng, chord, count);
@@ -228,6 +275,50 @@ fn perform(timbre: LoopTimbre, rng: &mut Rng, chord: &[f64], beats: u64, beat: u
             }
             let half = (beats as usize / 2) * beat as usize;
             strikes.push((rng.below(notes.len()), half, 0.45));
+        }
+        LoopTimbre::Ember => {
+            // A gate on every eighth: the downbeats always open, the rest by
+            // chance, so the pad pulses in a pattern that repeats each loop.
+            let step = beat as usize / 2;
+            for s in 0..beats as usize * 2 {
+                if s == 0 || s % 4 == 0 || rng.chance(0.62) {
+                    let vel = if s % 4 == 0 { 1.0 } else { rng.range(0.45, 0.85) };
+                    strikes.push((0, s * step, vel));
+                }
+            }
+        }
+        LoopTimbre::Ripple | LoopTimbre::Loom => {
+            // An arpeggio on eighths, up then down the chord; Loom also leaps
+            // an octave (an index past the last note means "an octave up").
+            let n = notes.len().max(1);
+            let span = if timbre == LoopTimbre::Loom { 2 * n } else { n };
+            let mut order: Vec<usize> = (0..span).collect();
+            order.extend((1..span.saturating_sub(1)).rev());
+            let shift = rng.below(order.len());
+            let step = beat as usize / 2;
+            for s in 0..beats as usize * 2 {
+                if s > 0 && rng.chance(0.18) {
+                    continue;
+                }
+                let idx = order[(s + shift) % order.len()];
+                let vel = if s % 2 == 0 { rng.range(0.8, 1.0) } else { rng.range(0.5, 0.8) };
+                strikes.push((idx, s * step, vel));
+            }
+        }
+        LoopTimbre::Ebb => {
+            // Each note swells in backwards to a cut on a beat.
+            for i in 0..notes.len() {
+                let end = (1 + rng.below(beats as usize)) * beat as usize;
+                strikes.push((i, end, rng.range(0.6, 1.0)));
+            }
+        }
+        LoopTimbre::Lantern => {
+            // Each note is re-tongued once or twice per loop, on a beat.
+            for i in 0..notes.len() {
+                for _ in 0..rng.int(1, 2) {
+                    strikes.push((i, rng.below(beats as usize) * beat as usize, rng.range(0.6, 1.0)));
+                }
+            }
         }
         _ => {}
     }
@@ -280,6 +371,12 @@ fn saw(phase: f64, dt: f64) -> f64 {
         0.0
     };
     2.0 * phase - 1.0 - blep
+}
+
+/// Band-limited pulse of width `pw` (0..1): the difference of two saws.
+fn pulse(phase: f64, pw: f64, dt: f64) -> f64 {
+    let other = phase + pw;
+    saw(phase, dt) - saw(other - other.floor(), dt)
 }
 
 fn advance(phase: &mut f64, dt: f64) {
@@ -595,6 +692,273 @@ fn render_channel(timbre: LoopTimbre, perf: &Performance, rng: &mut Rng, len: us
                 *o = (1.4 * lp.process(x).low + 0.8 * res.process(x).band) * (0.5 + 0.5 * breath);
             }
         }
+        LoopTimbre::Drift => {
+            // Three pulse waves per note, each narrowing and widening at its
+            // own whole number of cycles per loop (the "chorus"), through a
+            // soft low-pass that breathes once per loop.
+            for note in &perf.notes {
+                for d in [-9.0, 0.0, 9.0] {
+                    let hz = midi_hz(note + (d + rng.range(-2.0, 2.0)) / 100.0);
+                    let (mut ph, pwm_at, pwm_rate) = (rng.unit(), rng.unit(), rng.int(1, 3) as f64);
+                    let (ens_at, ens_rate) = (rng.unit(), (len as f64 / SR * rng.range(2.2, 3.4)).round().max(1.0));
+                    for (i, o) in out.iter_mut().enumerate() {
+                        let p = turns(i);
+                        let dt = hz * (1.0 + 0.0028 * sin_turns(p * ens_rate + ens_at)) / SR;
+                        let pw = 0.5 + 0.38 * sin_turns(p * pwm_rate + pwm_at);
+                        *o += pulse(ph, pw, dt);
+                        advance(&mut ph, dt);
+                    }
+                }
+            }
+            let mut lp = Svf::default();
+            for (i, o) in out.iter_mut().enumerate() {
+                if i % CONTROL == 0 {
+                    lp.set(1_100.0 + 1_300.0 * (0.5 - 0.5 * cos_turns(turns(i))), 0.75, SR);
+                }
+                *o = lp.process(*o).low;
+            }
+        }
+        LoopTimbre::Tide => {
+            // Two bright saws per note through four all-pass stages whose
+            // corner sweeps up and back once per loop; mixed with the dry
+            // signal, the moving notches roll through the pad like a tide.
+            for note in &perf.notes {
+                for d in [-6.0, 6.0] {
+                    let dt = midi_hz(note + (d + rng.range(-2.0, 2.0)) / 100.0) / SR;
+                    let mut ph = rng.unit();
+                    for o in out.iter_mut() {
+                        *o += saw(ph, dt);
+                        advance(&mut ph, dt);
+                    }
+                }
+            }
+            let mut stages = [(0.0f64, 0.0f64); 4];
+            let (mut coef, mut fb) = (0.0, 0.0);
+            let mut lp = Svf::new(4_200.0, 0.7, SR);
+            for (i, o) in out.iter_mut().enumerate() {
+                if i % CONTROL == 0 {
+                    let sweep = 0.5 - 0.5 * cos_turns(turns(i));
+                    let g = crate::math::tan_turns(0.5 * 260.0 * exp2(3.6 * sweep) / SR);
+                    coef = (g - 1.0) / (g + 1.0);
+                }
+                let dry = *o;
+                let mut x = dry + 0.55 * fb;
+                for (x1, y1) in stages.iter_mut() {
+                    let y = coef * x + *x1 - coef * *y1;
+                    *x1 = x;
+                    *y1 = y;
+                    x = y;
+                }
+                fb = x;
+                *o = lp.process(0.5 * (dry + x)).low;
+            }
+        }
+        LoopTimbre::Ember => {
+            // A dark, slowly opening saw pad, opened and closed by the gate
+            // pattern in the strikes. The gate is smoothed so it never clicks.
+            let mut pad = vec![0.0; total];
+            for note in &perf.notes {
+                for d in [-8.0, 8.0] {
+                    let dt = midi_hz(note - 12.0 + (d + rng.range(-2.0, 2.0)) / 100.0) / SR;
+                    let mut ph = rng.unit();
+                    for p in pad.iter_mut() {
+                        *p += saw(ph, dt);
+                        advance(&mut ph, dt);
+                    }
+                }
+            }
+            let mut gate = vec![0.0; len];
+            let open = beat / 2 * 7 / 10;
+            for &(_, at, vel) in &perf.strikes {
+                for g in gate[at..(at + open).min(len)].iter_mut() {
+                    *g = vel;
+                }
+            }
+            let (mut env, coef) = (0.0, 1.0 - decay_coef(0.006, SR));
+            let mut lp = Svf::default();
+            for (i, (o, p)) in out.iter_mut().zip(&pad).enumerate() {
+                if i % CONTROL == 0 {
+                    lp.set(520.0 + 520.0 * (0.5 - 0.5 * cos_turns(turns(i))) + 600.0 * env, 1.1, SR);
+                }
+                env += (gate[i % len] - env) * coef;
+                *o = lp.process(*p).low * env;
+            }
+        }
+        LoopTimbre::Ripple => {
+            // Karplus-Strong plucks: a burst of noise recirculating through a
+            // gently damped delay of one period. Each pluck is the same burst
+            // in every pass, so the loop repeats exactly.
+            let ring = (1.6 * SR) as usize;
+            for &(n, at, vel) in &perf.strikes {
+                let hz = midi_hz(perf.notes[n % perf.notes.len()] - 12.0 + rng.range(-3.0, 3.0) / 100.0);
+                let period = ((SR / hz) - 0.5).round().max(2.0) as usize;
+                let burst: Vec<f64> = (0..period).map(|_| rng.bipolar() * vel).collect();
+                let mut start = at;
+                while start < total {
+                    let mut buf = burst.clone();
+                    let mut k = 0;
+                    for o in out[start..(start + ring).min(total)].iter_mut() {
+                        let (a, b) = (buf[k], buf[(k + 1) % period]);
+                        buf[k] = 0.5 * (a + b) * 0.996;
+                        *o += a;
+                        k = (k + 1) % period;
+                    }
+                    start += len;
+                }
+            }
+            // A dotted-eighth echo, darkened on each repeat.
+            let d = beat * 3 / 4;
+            let mut damp = crate::filter::OnePole::new(2_400.0, SR);
+            for i in d..total {
+                let back = damp.process(out[i - d]);
+                out[i] += 0.42 * back;
+            }
+        }
+        LoopTimbre::Ebb => {
+            // A soft FM tone per note whose envelope is a decay played
+            // backwards: it swells in, brightening, and is cut on the beat.
+            for &(n, end, vel) in &perf.strikes {
+                let hz = midi_hz(perf.notes[n] + rng.range(-4.0, 4.0) / 100.0);
+                let length = ((1.5 + 1.5 * vel) * beat as f64) as usize;
+                let tau = length as f64 / 4.0;
+                let tail = (0.015 * SR) as usize;
+                let mut stop = end;
+                while stop < total + length {
+                    let begin = stop.saturating_sub(length);
+                    let mut v = crate::fm::Fm2::new(hz, 2.0);
+                    for t in begin..(stop + tail).min(total) {
+                        let env = if t < stop {
+                            exp(-((stop - t) as f64) / tau)
+                        } else {
+                            0.5 + 0.5 * cos_turns(0.5 * (t - stop) as f64 / tail as f64)
+                        };
+                        out[t] += vel * env * v.next(SR, 0.2 + 1.6 * env);
+                    }
+                    stop += len;
+                }
+            }
+        }
+        LoopTimbre::Bronze => {
+            // Inharmonic partials of a struck plate, an octave down; each is
+            // paired with a twin a whole number of beats-per-loop away, so
+            // the pair beats slowly and still repeats with the loop.
+            const PARTIALS: [(f64, f64); 6] = [(1.0, 1.0), (1.48, 0.7), (2.09, 0.55), (2.57, 0.4), (3.14, 0.3), (4.21, 0.18)];
+            let loop_hz = SR / len as f64;
+            for note in &perf.notes {
+                let base = midi_hz(note - 12.0);
+                for (k, &(ratio, amp)) in PARTIALS.iter().enumerate() {
+                    let beat_hz = loop_hz * rng.int(1, 4) as f64;
+                    let swell_at = rng.unit();
+                    let rate = 1.0 + (k % 2) as f64;
+                    for twin in [0.0, beat_hz] {
+                        // A rotating phasor: one complex multiply per sample
+                        // instead of a sine (only + - *, so still exact).
+                        let dt = (base * ratio + twin) / SR;
+                        let start = rng.unit();
+                        let (mut re, mut im) = (cos_turns(start), sin_turns(start));
+                        let (c, sn) = (cos_turns(dt), sin_turns(dt));
+                        let mut swell = 0.0;
+                        for (i, o) in out.iter_mut().enumerate() {
+                            if i % CONTROL == 0 {
+                                swell = 0.25 + 0.75 * (0.5 - 0.5 * cos_turns(turns(i) * rate + swell_at));
+                            }
+                            *o += amp * swell * im;
+                            (re, im) = (re * c - im * sn, re * sn + im * c);
+                        }
+                    }
+                }
+            }
+        }
+        LoopTimbre::Frost => {
+            // Short windowed sine grains, two and three octaves above the
+            // chord, scattered differently in each channel; the same grains
+            // in every pass. A faint high air sits under them.
+            let grains = (len as f64 / SR * 16.0) as usize;
+            for _ in 0..grains {
+                let note = perf.notes[rng.below(perf.notes.len())] + if rng.chance(0.6) { 24.0 } else { 36.0 };
+                let dt = midi_hz(note.min(108.0)) / SR;
+                let dur = (rng.range(0.02, 0.07) * SR) as usize;
+                let (amp, phase) = (rng.range(0.3, 1.0), rng.unit());
+                let mut start = rng.below(len);
+                while start < total {
+                    let mut ph = phase;
+                    for (k, o) in out[start..(start + dur).min(total)].iter_mut().enumerate() {
+                        let w = 0.5 - 0.5 * cos_turns(k as f64 / dur as f64);
+                        *o += amp * w * sin_turns(ph);
+                        advance(&mut ph, dt);
+                    }
+                    start += len;
+                }
+            }
+            let mut noise = Rng::new(rng.next_u64());
+            let mut air = Svf::new(7_000.0, 0.8, SR);
+            for o in out.iter_mut() {
+                *o += 0.05 * air.process(noise.bipolar()).band;
+            }
+        }
+        LoopTimbre::Lantern => {
+            // A flute-organ: a sine with a little second and third harmonic,
+            // breath tuned to the note, a whole-number tremolo, and a chiff
+            // (a short bright puff) each time the note is re-tongued.
+            let mut noise = Rng::new(rng.next_u64());
+            let trem = (len as f64 / SR * 4.8).round().max(1.0);
+            for (n, note) in perf.notes.iter().enumerate() {
+                let hz = midi_hz(note + rng.range(-3.0, 3.0) / 100.0);
+                let dt = hz / SR;
+                let mut ph = rng.unit();
+                let trem_at = rng.unit();
+                let mut breath = Svf::new(2.0 * hz, 6.0, SR);
+                let mut chiff = Svf::new(4.0 * hz, 3.0, SR);
+                let tongues: Vec<usize> = perf.strikes.iter().filter(|s| s.0 == n).map(|s| s.1).collect();
+                for (i, o) in out.iter_mut().enumerate() {
+                    let pos = i % len;
+                    // Samples since the most recent tonguing, wrapping round the loop.
+                    let since = tongues.iter().map(|&at| (pos + len - at) % len).min().unwrap_or(len) as f64;
+                    let attack = 1.0 - exp(-since / (0.09 * SR));
+                    let puff = exp(-since / (0.03 * SR));
+                    let x = noise.bipolar();
+                    let tone = sin_turns(ph) + 0.28 * sin_turns(2.0 * ph) + 0.1 * sin_turns(3.0 * ph);
+                    let t = 0.82 + 0.18 * sin_turns(turns(i) * trem + trem_at);
+                    *o += t * (0.35 + 0.65 * attack) * (tone + 0.9 * breath.process(x).band) + 2.5 * puff * chiff.process(x).band;
+                    advance(&mut ph, dt);
+                }
+            }
+        }
+        LoopTimbre::Loom => {
+            // Square-wave steps, each with its own quick envelope and a
+            // resonant low-pass that snaps open with the step and closes.
+            let n = perf.notes.len().max(1);
+            let step = beat / 2;
+            let mut lp = Svf::default();
+            let mut voice: Vec<(usize, f64, f64)> = vec![(0, 0.0, 0.0); len];
+            for &(idx, at, vel) in &perf.strikes {
+                let hz = midi_hz(perf.notes[idx % n] + 12.0 * (idx / n) as f64);
+                for (k, v) in voice[at..(at + step).min(len)].iter_mut().enumerate() {
+                    *v = (k, hz, vel);
+                }
+            }
+            let mut ph = rng.unit();
+            for (i, o) in out.iter_mut().enumerate() {
+                let (k, hz, vel) = voice[i % len];
+                if hz == 0.0 {
+                    lp.process(0.0);
+                    continue;
+                }
+                let since = k as f64;
+                let amp = vel * (1.0 - exp(-since / (0.003 * SR))) * exp(-since / (0.22 * step as f64 + 1.0));
+                if i % CONTROL == 0 {
+                    lp.set(380.0 + 3_000.0 * vel * exp(-since / (0.12 * step as f64 + 1.0)), 3.5, SR);
+                }
+                let dt = hz / SR;
+                *o = lp.process(amp * pulse(ph, 0.5, dt)).low;
+                advance(&mut ph, dt);
+            }
+            let d = beat * 3 / 4;
+            for i in d..total {
+                let back = out[i - d];
+                out[i] += 0.3 * back;
+            }
+        }
         LoopTimbre::Off => {}
     }
     out
@@ -776,6 +1140,19 @@ mod tests {
             }
             seen.push((name, hash));
         }
+    }
+
+    #[test]
+    fn the_original_timbres_keep_their_recipe_indices() {
+        // Recipes store a sustained loop by its index here, so new timbres are
+        // only ever appended (before Off, which has its own recipe tag).
+        let codes: Vec<&str> = LOOP_TIMBRES[..11].iter().map(|t| t.code()).collect();
+        assert_eq!(codes, ["VOX", "BEL", "BLP", "WVC", "AIR", "HSH", "GST", "SHN", "RIL", "VEL", "MST"]);
+        assert_eq!(LOOP_TIMBRES.last(), Some(&LoopTimbre::Off));
+        let mut all: Vec<&str> = LOOP_TIMBRES.iter().map(|t| t.code()).collect();
+        all.sort();
+        all.dedup();
+        assert_eq!(all.len(), LOOP_TIMBRES.len(), "every code is unique");
     }
 
     #[test]
