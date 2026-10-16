@@ -3772,6 +3772,552 @@ impl Player {
 
 }
 
+// ---- src/props.rs ----
+pub mod props {
+//! The props of the built futures: the street furniture, machines and
+//! fittings that make each one a place.
+//!
+//! - **Near Future**: street lamps along the curbs, utility poles strung with
+//!   sagging wires, traffic signals at the junctions, vending machines,
+//!   bollards, small parked cars.
+//! - **Research Lab**: server racks with blinking lights, terminals with
+//!   glowing screens, glass partitions.
+//! - **Ecofuture**: white wind turbines turning with the wind, sensor masts,
+//!   hydroponic pods, round trees, a drone hovering over its pad.
+//! - **Greenhouse**: tree ferns, planters, misting heads breathing vapour,
+//!   baskets hanging from the roof.
+//!
+//! Where they stand comes from the layout (`layout.rs`) and the seed; what
+//! they look like at a moment is a pure function of time and the weather, so
+//! any frame can be drawn on its own. The wild biomes have none.
+
+use crate::framebuffer::{blend, Framebuffer, Rgba};
+use crate::iso::{to_px_round, Point};
+use crate::layout::{cell_hash, ring, Ground, Plan, Side, ORIGIN};
+use crate::math::{cos_turns, sin_turns};
+use crate::plants::Biome;
+use crate::raster;
+use crate::{GRID_H, GRID_W, SHRINE_H, SHRINE_W};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    StreetLamp,
+    UtilityPole,
+    Signal,
+    Vending,
+    Bollard,
+    Car,
+    Rack,
+    Terminal,
+    Partition,
+    Turbine,
+    Mast,
+    Pod,
+    Tree,
+    DronePad,
+    TreeFern,
+    Planter,
+    Mister,
+    Basket,
+}
+
+/// One prop: what, where (its centre on the plateau), which way it faces.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Prop {
+    pub kind: Kind,
+    pub gx: i32,
+    pub gy: i32,
+    pub x: f64,
+    pub y: f64,
+    /// Whether it lines up with the y axis (a car on a road along y, a rack
+    /// in a row along y).
+    pub along_y: bool,
+    pub hash: u64,
+}
+
+/// Every prop of a scene, and the wires between the utility poles.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Props {
+    pub items: Vec<Prop>,
+    /// Pairs of utility poles strung together (indices into `items`).
+    pub wires: Vec<(usize, usize)>,
+}
+
+impl Props {
+    pub fn generate(seed: u64, biome: Biome) -> Self {
+        let mut items = Vec::new();
+        if !biome.futuristic() {
+            return Props::default();
+        }
+        let plan = Plan::new(seed, biome);
+        let mut turbines = 0;
+        for gy in 0..GRID_H as i32 {
+            for gx in 0..GRID_W as i32 {
+                let r = ring(gx, gy);
+                if r == 0 {
+                    continue;
+                }
+                let h = cell_hash(seed ^ 0x5052_4f50, gx, gy); // "PROP"
+                let g = plan.cell(gx, gy);
+                let jitter = |k: u32| ((h >> k & 0xff) as f64 / 255.0 - 0.5) * 0.3;
+                let corner = (gx < ORIGIN.0 || gx >= ORIGIN.0 + SHRINE_W as i32) && (gy < ORIGIN.1 || gy >= ORIGIN.1 + SHRINE_H as i32);
+                let side_along_y = gx < ORIGIN.0 || gx >= ORIGIN.0 + SHRINE_W as i32;
+                // How far along its side a ring cell is.
+                let along = if side_along_y { gy } else { gx };
+                let mut put = |kind: Kind, x: f64, y: f64, along_y: bool| items.push(Prop { kind, gx, gy, x, y, along_y, hash: h });
+                let (cx, cy) = (gx as f64, gy as f64);
+                match biome {
+                    Biome::NearFuture => match g {
+                        Ground::Sidewalk { curb: Some(side) } => {
+                            // At the curb: lamps every four cells, bollards between.
+                            let (ex, ey) = match side {
+                                Side::West => (-0.36, 0.0),
+                                Side::East => (0.36, 0.0),
+                                Side::North => (0.0, -0.36),
+                                Side::South => (0.0, 0.36),
+                            };
+                            if along % 4 == 1 {
+                                put(Kind::StreetLamp, cx + ex, cy + ey, side.along_y());
+                            } else if along % 4 == 3 && h % 3 == 0 {
+                                put(Kind::Bollard, cx + ex, cy + ey, side.along_y());
+                            }
+                        }
+                        Ground::Sidewalk { curb: None } if r == 1 => {
+                            if corner {
+                                put(Kind::Signal, cx, cy, false);
+                            } else if h % 7 == 0 {
+                                put(Kind::Vending, cx + jitter(8), cy + jitter(16), side_along_y);
+                            }
+                        }
+                        Ground::Sidewalk { curb: None } if r == 4 && !corner && along % 5 == 2 => {
+                            put(Kind::UtilityPole, cx, cy, side_along_y);
+                        }
+                        Ground::Road { along_y, lane: false, crossing: false } if h % 6 == 0 => {
+                            put(Kind::Car, cx, cy, along_y);
+                        }
+                        _ => {}
+                    },
+                    Biome::ResearchLab => match g {
+                        Ground::Floor { strip: false } if r >= 2 => match h % 7 {
+                            0 | 1 => put(Kind::Rack, cx, cy, side_along_y),
+                            2 => put(Kind::Terminal, cx + jitter(8), cy + jitter(16), side_along_y),
+                            3 if r == 2 => put(Kind::Partition, cx, cy, side_along_y),
+                            _ => {}
+                        },
+                        _ => {}
+                    },
+                    Biome::Ecofuture => match g {
+                        Ground::Lawn if r >= 2 => match h % 11 {
+                            0 if turbines < 3 && r == 4 => {
+                                turbines += 1;
+                                put(Kind::Turbine, cx, cy, side_along_y);
+                            }
+                            1 | 2 => put(Kind::Tree, cx + jitter(8), cy + jitter(16), false),
+                            3 => put(Kind::Mast, cx, cy, false),
+                            4 => put(Kind::Pod, cx + jitter(8), cy + jitter(16), side_along_y),
+                            _ => {}
+                        },
+                        Ground::Lawn if r == 4 && corner && gx == gy => put(Kind::DronePad, cx, cy, false),
+                        _ => {}
+                    },
+                    Biome::Greenhouse => match g {
+                        Ground::Bed if h % 3 == 0 => put(Kind::TreeFern, cx + jitter(8), cy + jitter(16), false),
+                        Ground::Bed if h % 3 == 1 && along % 3 == 0 => put(Kind::Mister, cx, cy, false),
+                        Ground::Tile if r == 4 && h % 4 == 0 => put(Kind::Planter, cx, cy, side_along_y),
+                        Ground::Gravel if h % 5 == 0 => put(Kind::Basket, cx + jitter(8), cy + jitter(16), false),
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+        }
+        // String each utility pole to the next one along the same side.
+        let mut wires = Vec::new();
+        for (i, a) in items.iter().enumerate() {
+            if a.kind != Kind::UtilityPole {
+                continue;
+            }
+            let next = items.iter().enumerate().filter(|(j, b)| {
+                *j != i && b.kind == Kind::UtilityPole && b.along_y == a.along_y && {
+                    let (da, db) = if a.along_y { (a.gx - b.gx, b.gy - a.gy) } else { (a.gy - b.gy, b.gx - a.gx) };
+                    da == 0 && db > 0 && db <= 6
+                }
+            });
+            if let Some((j, _)) = next.min_by_key(|(_, b)| if a.along_y { b.gy } else { b.gx }) {
+                wires.push((i, j));
+            }
+        }
+        Props { items, wires }
+    }
+
+    /// The props standing in cell `(gx, gy)`, by index.
+    pub fn in_cell(&self, gx: i32, gy: i32) -> impl Iterator<Item = usize> + '_ {
+        self.items.iter().enumerate().filter(move |(_, p)| p.gx == gx && p.gy == gy).map(|(i, _)| i)
+    }
+
+    /// Whether any prop stands in cell `(gx, gy)`.
+    pub fn any_in(&self, gx: i32, gy: i32) -> bool {
+        self.items.iter().any(|p| p.gx == gx && p.gy == gy)
+    }
+
+    /// A stable hash of every prop, for tests.
+    pub fn hash(&self) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for p in &self.items {
+            for v in [p.kind as u64, p.gx as u64, p.gy as u64, p.hash] {
+                h ^= v;
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        h
+    }
+}
+
+/// What drawing a prop needs from the frame.
+pub struct Ctx<'a> {
+    /// A point on the plateau (`x`, `y`) at height `z` levels, on screen.
+    pub proj: &'a dyn Fn(f64, f64, f64) -> Point,
+    /// The weather's light and grade, for a colour.
+    pub lit: &'a dyn Fn(Rgba) -> Rgba,
+    pub t: f64,
+    /// Wind strength, 0-1 (turns the turbines).
+    pub wind: f64,
+    /// How dark it is, 0-1 (lamps glow more).
+    pub night: f64,
+    /// The light that reaches the prop, relative to full sun (shadows).
+    pub light: f64,
+    /// The roof, for things hanging from it.
+    pub roof: Option<&'a crate::roof::Roof>,
+}
+
+fn shade(c: Rgba, f: f64) -> Rgba {
+    let k = |v: u8| (v as f64 * f).clamp(0.0, 255.0) as u8;
+    [k(c[0]), k(c[1]), k(c[2]), 255]
+}
+
+impl Ctx<'_> {
+    fn px(&self, x: f64, y: f64, z: f64) -> (i32, i32) {
+        let p = (self.proj)(x, y, z);
+        (to_px_round(p.x), to_px_round(p.y))
+    }
+
+    /// A lit surface colour, a face of it turned `face` (1 = top).
+    fn surface(&self, c: Rgba, face: f64) -> Rgba {
+        shade((self.lit)(c), face * (0.55 + 0.45 * self.light))
+    }
+
+    /// A light: lit from within, never darker than itself.
+    fn lamp(&self, c: Rgba) -> Rgba {
+        let g = (self.lit)(c);
+        [0, 1, 2, 3].map(|k| if k == 3 { 255 } else { g[k].max((c[k] as f64 * 0.9) as u8) })
+    }
+
+    /// A solid box from `(x0, y0, z0)` to `(x1, y1, z1)`; `front`, when set,
+    /// colours the face toward +x (or +y when `along_y`).
+    fn cuboid(&self, fb: &mut Framebuffer, a: (f64, f64, f64), b: (f64, f64, f64), c: Rgba) {
+        self.cuboid_with(fb, a, b, c, None);
+    }
+
+    fn cuboid_with(&self, fb: &mut Framebuffer, (x0, y0, z0): (f64, f64, f64), (x1, y1, z1): (f64, f64, f64), c: Rgba, front: Option<(bool, Rgba)>) {
+        let p = |x, y, z| (self.proj)(x, y, z);
+        // Each face's corners wind counter-clockwise seen from outside, so a
+        // face is toward the viewer when it winds the same way as the top.
+        let faces: [([Point; 4], f64, u8); 5] = [
+            ([p(x0, y0, z1), p(x1, y0, z1), p(x1, y1, z1), p(x0, y1, z1)], 1.0, 0),
+            ([p(x1, y0, z0), p(x1, y1, z0), p(x1, y1, z1), p(x1, y0, z1)], 0.8, 1),
+            ([p(x0, y1, z0), p(x0, y0, z0), p(x0, y0, z1), p(x0, y1, z1)], 0.7, 2),
+            ([p(x1, y1, z0), p(x0, y1, z0), p(x0, y1, z1), p(x1, y1, z1)], 0.64, 3),
+            ([p(x0, y0, z0), p(x1, y0, z0), p(x1, y0, z1), p(x0, y0, z1)], 0.56, 4),
+        ];
+        let area = |q: &[Point; 4]| {
+            let mut a = 0i64;
+            for i in 0..4 {
+                let (u, v) = (q[i], q[(i + 1) % 4]);
+                a += u.x as i64 * v.y as i64 - v.x as i64 * u.y as i64;
+            }
+            a
+        };
+        let up = area(&faces[0].0).signum();
+        for (q, f, id) in faces.iter() {
+            let a = area(q);
+            if a == 0 || a.signum() != up {
+                continue;
+            }
+            let colour = match front {
+                Some((along_y, fc)) if (*id == 1 && !along_y) || (*id == 3 && along_y) => fc,
+                _ => self.surface(c, *f),
+            };
+            raster::fill_polygon(fb, q, colour);
+        }
+    }
+
+    /// A thin upright post (a pole, a mast, a trunk).
+    fn post(&self, fb: &mut Framebuffer, x: f64, y: f64, z0: f64, z1: f64, r: f64, c: Rgba) {
+        self.cuboid(fb, (x - r, y - r, z0), (x + r, y + r, z1), c);
+    }
+
+    fn line(&self, fb: &mut Framebuffer, a: (f64, f64, f64), b: (f64, f64, f64), c: Rgba) {
+        let (p, q) = (self.px(a.0, a.1, a.2), self.px(b.0, b.1, b.2));
+        raster::line(fb, p.0, p.1, q.0, q.1, c);
+    }
+
+    /// A soft dithered glow around a light, stronger in the dark.
+    fn halo(&self, fb: &mut Framebuffer, at: (f64, f64, f64), c: Rgba, r: i32, k: f64) {
+        let (cx, cy) = self.px(at.0, at.1, at.2);
+        let k = k * (0.25 + 0.75 * self.night);
+        for y in cy - r..=cy + r {
+            for x in cx - r..=cx + r {
+                let d = (((x - cx) * (x - cx) + (y - cy) * (y - cy)) as f64).sqrt() / r as f64;
+                if d >= 1.0 {
+                    continue;
+                }
+                let a = crate::light::dither(k * (1.0 - d) * (1.0 - d), 4.0, crate::light::bayer(x, y));
+                fb.blend_over(x, y, c, (a * 110.0) as u32);
+            }
+        }
+    }
+}
+
+const STEEL: Rgba = [150, 156, 164, 255];
+const DARK: Rgba = [58, 62, 70, 255];
+const WHITE: Rgba = [238, 240, 242, 255];
+const WARM: Rgba = [255, 226, 160, 255];
+
+/// Draw prop `i` of `props`.
+pub fn draw(fb: &mut Framebuffer, props: &Props, i: usize, cx: &Ctx, accent: Rgba, foliage: [Rgba; 3]) {
+    let p = &props.items[i];
+    let (x, y) = (p.x, p.y);
+    let h = p.hash;
+    // Its own long and short axes.
+    let (lx, ly) = if p.along_y { (0.0, 1.0) } else { (1.0, 0.0) };
+    match p.kind {
+        Kind::StreetLamp => {
+            cx.post(fb, x, y, 0.0, 3.0, 0.05, STEEL);
+            // An arm reaching out over the road, and the lamp at its end.
+            let (ax, ay) = (x + 0.0, y + 0.0);
+            let (dx, dy) = if p.along_y { (if x < ORIGIN.0 as f64 { -0.5 } else { 0.5 }, 0.0) } else { (0.0, if y < ORIGIN.1 as f64 { -0.5 } else { 0.5 }) };
+            cx.line(fb, (ax, ay, 3.0), (ax + dx, ay + dy, 3.1), cx.surface(STEEL, 0.9));
+            let head = (ax + dx, ay + dy, 3.0);
+            cx.cuboid(fb, (head.0 - 0.1, head.1 - 0.1, 2.92), (head.0 + 0.1, head.1 + 0.1, 3.05), cx.lamp(WARM));
+            cx.halo(fb, (head.0, head.1, 2.6), WARM, 6, 0.7);
+        }
+        Kind::UtilityPole => {
+            cx.post(fb, x, y, 0.0, 4.4, 0.07, [128, 118, 104, 255]);
+            // Crossarms with insulators.
+            for z in [4.1, 3.7] {
+                let (a, b) = ((x - 0.4 * ly, y - 0.4 * lx), (x + 0.4 * ly, y + 0.4 * lx));
+                cx.line(fb, (a.0, a.1, z), (b.0, b.1, z), cx.surface([96, 90, 82, 255], 0.8));
+            }
+            // A transformer drum on some.
+            if h % 2 == 0 {
+                cx.cuboid(fb, (x - 0.12, y - 0.12, 3.0), (x + 0.12, y + 0.12, 3.4), [160, 164, 168, 255]);
+            }
+        }
+        Kind::Signal => {
+            cx.post(fb, x, y, 0.0, 2.6, 0.04, STEEL);
+            cx.cuboid(fb, (x - 0.08, y - 0.22, 2.2), (x + 0.08, y + 0.22, 2.5), DARK);
+            // Green, amber or red, changing on a slow cycle.
+            let phase = ((cx.t / 9.0 + (h % 7) as f64 / 7.0) % 1.0 * 3.0) as usize;
+            let c = [[90, 230, 140, 255], [255, 196, 70, 255], [250, 80, 70, 255]][phase.min(2)];
+            let (lx0, ly0) = cx.px(x + 0.09, y - 0.12 + 0.12 * phase as f64, 2.35);
+            fb.put(lx0, ly0, cx.lamp(c));
+            fb.put(lx0 + 1, ly0, cx.lamp(c));
+            cx.halo(fb, (x + 0.1, y, 2.35), c, 3, 0.5);
+        }
+        Kind::Vending => {
+            let (w, d) = (0.28 * lx + 0.18 * ly, 0.28 * ly + 0.18 * lx);
+            let body = [[232, 66, 60, 255], [60, 120, 220, 255], [240, 240, 236, 255]][(h % 3) as usize];
+            cx.cuboid_with(fb, (x - w, y - d, 0.0), (x + w, y + d, 1.0), body, Some((p.along_y, cx.lamp([236, 244, 250, 255]))));
+            cx.halo(fb, (x + 0.2 * ly + 0.2 * lx, y, 0.6), [220, 240, 255, 255], 4, 0.6);
+        }
+        Kind::Bollard => cx.post(fb, x, y, 0.0, 0.4, 0.05, [236, 196, 52, 255]),
+        Kind::Car => {
+            let paint = [[244, 238, 226, 255], [176, 210, 230, 255], [240, 190, 170, 255], [190, 226, 196, 255]][(h % 4) as usize];
+            let (hl, hw) = (0.42, 0.24);
+            let (ex, ey) = (hl * lx + hw * ly, hl * ly + hw * lx);
+            cx.cuboid(fb, (x - ex, y - ey, 0.08), (x + ex, y + ey, 0.5), paint);
+            let (cxx, cyy) = (0.24 * lx + 0.2 * ly, 0.24 * ly + 0.2 * lx);
+            cx.cuboid_with(fb, (x - cxx, y - cyy, 0.5), (x + cxx, y + cyy, 0.9), [120, 160, 190, 255], None);
+        }
+        Kind::Rack => {
+            let (w, d) = (0.36 * ly + 0.22 * lx, 0.36 * lx + 0.22 * ly);
+            cx.cuboid(fb, (x - w, y - d, 0.0), (x + w, y + d, 1.9), DARK);
+            // Status lights blinking down the front.
+            for k in 0..6 {
+                let on = (h >> k & 1 == 1) ^ (((cx.t * (1.0 + (k % 3) as f64)) as u64 + k) % 4 == 0);
+                if on {
+                    let (fx, fy) = (x + w + 0.01, y);
+                    let (px, py) = cx.px(fx, fy - 0.1 + 0.05 * (k % 2) as f64, 0.3 + 0.26 * k as f64);
+                    fb.put(px, py, cx.lamp(if k % 3 == 0 { accent } else { [120, 255, 160, 255] }));
+                }
+            }
+        }
+        Kind::Terminal => {
+            cx.cuboid(fb, (x - 0.3, y - 0.3, 0.0), (x + 0.3, y + 0.3, 0.7), STEEL);
+            // A screen on a stand, showing scrolling lines.
+            let (sw, sd) = (0.26 * ly + 0.03 * lx, 0.26 * lx + 0.03 * ly);
+            cx.cuboid_with(fb, (x - sw, y - sd, 0.8), (x + sw, y + sd, 1.4), DARK, Some((p.along_y, cx.lamp(blend(accent, [10, 30, 34, 255], 40, 100)))));
+            cx.halo(fb, (x, y, 1.1), accent, 5, 0.55);
+        }
+        Kind::Partition => {
+            let (w, d) = (0.5 * ly + 0.03 * lx, 0.5 * lx + 0.03 * ly);
+            let corners = |z| [(x - w, y - d, z), (x + w, y - d, z), (x + w, y + d, z), (x - w, y + d, z)];
+            let (lo, hi) = (corners(0.0), corners(2.2));
+            let q: Vec<Point> = [lo[0], lo[2], hi[2], hi[0]].iter().map(|c| (cx.proj)(c.0, c.1, c.2)).collect();
+            raster::blend_polygon(fb, &q, (cx.lit)([170, 220, 230, 255]), 70);
+            cx.line(fb, hi[0], hi[2], cx.surface(STEEL, 1.0));
+        }
+        Kind::Turbine => {
+            cx.post(fb, x, y, 0.0, 4.6, 0.06, WHITE);
+            cx.cuboid(fb, (x - 0.12, y - 0.12, 4.5), (x + 0.12, y + 0.12, 4.75), WHITE);
+            // Three blades turning with the wind, facing along the side.
+            let spin = cx.t * (0.15 + 0.9 * cx.wind) + (h % 100) as f64 / 100.0;
+            let hub = (x + 0.15 * ly, y + 0.15 * lx, 4.62);
+            for k in 0..3 {
+                let a = spin + k as f64 / 3.0;
+                let (u, v) = (cos_turns(a) * 1.3, sin_turns(a) * 1.3);
+                let tip = (hub.0 + u * lx, hub.1 + u * ly, hub.2 + v);
+                cx.line(fb, hub, tip, cx.surface(WHITE, 0.95));
+            }
+        }
+        Kind::Mast => {
+            cx.post(fb, x, y, 0.0, 2.8, 0.035, WHITE);
+            for z in [1.0, 1.8, 2.5] {
+                cx.cuboid(fb, (x - 0.08, y - 0.08, z), (x + 0.08, y + 0.08, z + 0.08), [182, 188, 194, 255]);
+            }
+            let blink = ((cx.t * 0.7 + (h % 10) as f64 / 10.0) % 1.0) < 0.5;
+            if blink {
+                cx.cuboid(fb, (x - 0.05, y - 0.05, 2.8), (x + 0.05, y + 0.05, 2.9), cx.lamp(accent));
+                cx.halo(fb, (x, y, 2.85), accent, 3, 0.6);
+            }
+        }
+        Kind::Pod => {
+            let (w, d) = (0.4 * lx + 0.26 * ly, 0.4 * ly + 0.26 * lx);
+            cx.cuboid(fb, (x - w, y - d, 0.0), (x + w, y + d, 0.45), WHITE);
+            // A glazed top full of green.
+            cx.cuboid(fb, (x - w + 0.05, y - d + 0.05, 0.45), (x + w - 0.05, y + d - 0.05, 0.75), blend(foliage[2], [190, 230, 236, 255], 40, 100));
+        }
+        Kind::Tree => {
+            cx.post(fb, x, y, 0.0, 1.4, 0.05, [110, 84, 62, 255]);
+            // A round canopy of dithered leaves, swaying a little.
+            let sway = 0.05 * sin_turns(cx.t * 0.2 + (h % 100) as f64 / 100.0) * (0.3 + cx.wind);
+            let (tx, ty) = cx.px(x + sway, y, 2.1);
+            let r = 6 + (h % 3) as i32;
+            for py in ty - r..=ty + r {
+                for px in tx - r..=tx + r {
+                    let d2 = (px - tx) * (px - tx) + (py - ty) * (py - ty) * 2;
+                    if d2 > r * r {
+                        continue;
+                    }
+                    // Lighter toward the upper left, as if lit from there.
+                    let lit = ((px - tx) + (py - ty)) as f64 / r as f64;
+                    let k = if lit < -0.6 { 2 } else if lit < 0.4 { 1 } else { 0 };
+                    let keep = crate::light::bayer(px, py) < 0.9;
+                    if keep {
+                        fb.put(px, py, cx.surface(foliage[k], 1.0));
+                    }
+                }
+            }
+        }
+        Kind::DronePad => {
+            // A flat pad with a ring, and a drone bobbing over it.
+            cx.cuboid(fb, (x - 0.42, y - 0.42, 0.0), (x + 0.42, y + 0.42, 0.06), [210, 214, 218, 255]);
+            let (rx, ry) = cx.px(x, y, 0.07);
+            for k in 0..16 {
+                let a = k as f64 / 16.0;
+                fb.put(rx + (cos_turns(a) * 3.5) as i32, ry + (sin_turns(a) * 1.8) as i32, cx.lamp(accent));
+            }
+            let bob = 1.3 + 0.18 * sin_turns(cx.t * 0.35 + (h % 10) as f64 / 10.0);
+            cx.cuboid(fb, (x - 0.12, y - 0.12, bob), (x + 0.12, y + 0.12, bob + 0.1), WHITE);
+            for (ex, ey) in [(-0.22, -0.22), (0.22, -0.22), (0.22, 0.22), (-0.22, 0.22)] {
+                let (px, py) = cx.px(x + ex, y + ey, bob + 0.12);
+                let blur = if (cx.t * 30.0) as i64 % 2 == 0 { 1 } else { 0 };
+                raster::line(fb, px - 1, py + blur, px + 1, py - blur, cx.surface([200, 204, 210, 255], 1.0));
+            }
+        }
+        Kind::TreeFern => {
+            // A slender trunk, a crown of arching fronds.
+            let tall = 2.2 + (h % 5) as f64 * 0.25;
+            cx.post(fb, x, y, 0.0, tall, 0.045, [92, 72, 52, 255]);
+            let n = 7;
+            for k in 0..n {
+                let a = k as f64 / n as f64 + (h % 13) as f64 / 13.0;
+                let sway = 0.04 * sin_turns(cx.t * 0.15 + a);
+                let (u, v) = (cos_turns(a), sin_turns(a));
+                let mid = (x + u * 0.45, y + v * 0.45, tall + 0.25);
+                let tip = (x + u * (0.85 + sway), y + v * (0.85 + sway), tall - 0.35);
+                let c = cx.surface(foliage[1 + (k % 2)], 1.0);
+                cx.line(fb, (x, y, tall), mid, c);
+                cx.line(fb, mid, tip, c);
+            }
+        }
+        Kind::Planter => {
+            let (w, d) = (0.42 * lx + 0.3 * ly, 0.42 * ly + 0.3 * lx);
+            cx.cuboid(fb, (x - w, y - d, 0.0), (x + w, y + d, 0.5), [222, 226, 228, 255]);
+            cx.cuboid(fb, (x - w + 0.05, y - d + 0.05, 0.5), (x + w - 0.05, y + d - 0.05, 0.56), foliage[0]);
+            for k in 0..5 {
+                let (ox, oy) = ((k as f64 - 2.0) * 0.16 * lx, (k as f64 - 2.0) * 0.16 * ly);
+                let top = 0.9 + 0.12 * ((h >> (k * 4)) & 3) as f64;
+                cx.line(fb, (x + ox, y + oy, 0.56), (x + ox * 1.4, y + oy * 1.4, top), cx.surface(foliage[1 + k % 2], 1.0));
+            }
+        }
+        Kind::Mister => {
+            cx.post(fb, x, y, 0.0, 0.9, 0.025, STEEL);
+            // Breaths of vapour, rising and fading on a cycle.
+            for k in 0..3 {
+                let age = (cx.t * 0.25 + k as f64 / 3.0 + (h % 10) as f64 / 10.0) % 1.0;
+                let (px, py) = cx.px(x + 0.1 * age, y - 0.1 * age, 1.0 + 0.9 * age);
+                let r = 1 + (age * 4.0) as i32;
+                for yy in py - r..=py + r {
+                    for xx in px - r..=px + r {
+                        if (xx - px) * (xx - px) + (yy - py) * (yy - py) <= r * r && crate::light::bayer(xx, yy) < 0.6 {
+                            fb.blend_over(xx, yy, [240, 248, 246, 255], ((1.0 - age) * 90.0) as u32);
+                        }
+                    }
+                }
+            }
+        }
+        Kind::Basket => {
+            // Hanging from the roof on a line, trailing leaves.
+            let top = cx.roof.map_or(5.0, |r| r.height_at(x, y));
+            let z = top - 1.6 - (h % 3) as f64 * 0.4;
+            cx.line(fb, (x, y, top), (x, y, z + 0.3), cx.surface(STEEL, 0.9));
+            cx.cuboid(fb, (x - 0.16, y - 0.16, z), (x + 0.16, y + 0.16, z + 0.3), [150, 112, 80, 255]);
+            for k in 0..4 {
+                let a = k as f64 / 4.0 + 0.125;
+                let (u, v) = (cos_turns(a) * 0.22, sin_turns(a) * 0.22);
+                cx.line(fb, (x + u, y + v, z + 0.3), (x + u * 1.3, y + v * 1.3, z - 0.4 - 0.1 * k as f64), cx.surface(foliage[1 + k % 2], 1.0));
+            }
+        }
+    }
+}
+
+/// The wires between two utility poles, sagging between their tops.
+pub fn wire(fb: &mut Framebuffer, a: &Prop, b: &Prop, cx: &Ctx) {
+    let c = cx.surface([46, 46, 50, 255], 1.0);
+    for (k, z) in [4.1f64, 3.7].iter().enumerate() {
+        for s in [-0.35, 0.35] {
+            let (ox, oy) = if a.along_y { (s, 0.0) } else { (0.0, s) };
+            let n = 10;
+            let mut prev = None;
+            for i in 0..=n {
+                let f = i as f64 / n as f64;
+                let sag = 0.45 * 4.0 * f * (1.0 - f) * (1.0 + 0.2 * k as f64);
+                let p = cx.px(a.x + ox + (b.x - a.x) * f, a.y + oy + (b.y - a.y) * f, z - sag);
+                if let Some(q) = prev {
+                    let (q0, q1): (i32, i32) = q;
+                    raster::line(fb, q0, q1, p.0, p.1, c);
+                }
+                prev = Some(p);
+            }
+        }
+    }
+}
+
+
+
+}
+
 // ---- src/raster.rs ----
 pub mod raster {
 //! Raster primitives for the logical buffer.
@@ -3883,6 +4429,46 @@ pub fn fill_polygon(fb: &mut Framebuffer, corners: &[Point], colour: Rgba) {
         }
         fb.fill_span(py, floor_div(lo, FP), ceil_div(hi, FP), colour);
     }
+}
+
+/// Visit every pixel of a convex polygon (corners in fixed-point units, in
+/// order), with the same coverage rule as [`fill_polygon`]: `f(x, y)` once
+/// per covered pixel. For translucent and dithered fills (glass, frost).
+pub fn for_polygon(corners: &[Point], mut f: impl FnMut(i32, i32)) {
+    let n = corners.len();
+    if n < 3 {
+        return;
+    }
+    let min_y = corners.iter().map(|p| p.y).min().unwrap_or(0);
+    let max_y = corners.iter().map(|p| p.y).max().unwrap_or(0);
+    for py in floor_div(min_y, FP)..=ceil_div(max_y, FP) {
+        let yc = py * FP + FP / 2;
+        let (mut lo, mut hi, mut hits) = (i32::MAX, i32::MIN, 0);
+        for i in 0..n {
+            let a = corners[i];
+            let b = corners[(i + 1) % n];
+            if (a.y <= yc && yc <= b.y) || (b.y <= yc && yc <= a.y) {
+                let dy = b.y - a.y;
+                if dy != 0 {
+                    let x = a.x + ((b.x - a.x) * (yc - a.y)).div_euclid(dy);
+                    lo = lo.min(x);
+                    hi = hi.max(x);
+                    hits += 1;
+                }
+            }
+        }
+        if hits < 2 {
+            continue;
+        }
+        for px in floor_div(lo, FP)..=ceil_div(hi, FP) {
+            f(px, py);
+        }
+    }
+}
+
+/// Composite `colour` over a convex polygon at coverage `alpha` (0-255).
+pub fn blend_polygon(fb: &mut Framebuffer, corners: &[Point], colour: Rgba, alpha: u32) {
+    for_polygon(corners, |x, y| fb.blend_over(x, y, colour, alpha));
 }
 
 /// Which side of the ground plane (world `z = 0`) to draw.
@@ -4840,6 +5426,313 @@ impl Rng {
 
 }
 
+// ---- src/roof.rs ----
+pub mod roof {
+//! The roofs of the two indoor futures, drawn as a cutaway so the shrine
+//! stays in view, and the weather that lands on them.
+//!
+//! - **Greenhouse**: a pitched glass roof on exposed, minimal steel, with
+//!   glazed back walls, shafts of sun slanting down through it, rain beading
+//!   and running down the panes, snow settling on the glass.
+//! - **Research Lab**: a flat ceiling grid of steel and glass with light
+//!   panels, and back walls of steel panels, a neon line and a band of
+//!   windows with screens set into them.
+//!
+//! The back walls stand on the two far edges of the plateau (whichever two
+//! are far as the camera turns) and are drawn behind the shrine; the roof is
+//! drawn over everything, translucent. Rain splashes that would land on the
+//! ground land on the roof instead: they are the very same events the
+//! weather bed plays, so every one you see is still one you hear.
+
+use crate::framebuffer::{blend, Framebuffer, Rgba};
+use crate::iso::{to_px_round, Point};
+use crate::light::{bayer, dither};
+use crate::plants::Biome;
+use crate::raster;
+use crate::rng::{hash3, Rng};
+use crate::weather::WeatherState;
+use crate::{GRID_H, GRID_W};
+
+/// The plateau's edges, in grid units.
+const LO: f64 = -0.5;
+const HI_X: f64 = GRID_W as f64 - 0.5;
+const HI_Y: f64 = GRID_H as f64 - 0.5;
+/// How much higher the greenhouse's ridge is than its eaves.
+const PITCH: f64 = 2.2;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Roof {
+    pub biome: Biome,
+    /// The eaves' height, in levels.
+    pub z: f64,
+}
+
+/// What drawing the roof needs from the frame.
+pub struct Ctx<'a> {
+    pub proj: &'a dyn Fn(f64, f64, f64) -> Point,
+    pub lit: &'a dyn Fn(Rgba) -> Rgba,
+    pub seed: u64,
+    pub t: f64,
+    pub w: WeatherState,
+    /// The future's light colour (neon, screens).
+    pub accent: Rgba,
+    /// The glass's own tint.
+    pub glass: Rgba,
+}
+
+impl Ctx<'_> {
+    fn px(&self, x: f64, y: f64, z: f64) -> (i32, i32) {
+        let p = (self.proj)(x, y, z);
+        (to_px_round(p.x), to_px_round(p.y))
+    }
+
+    fn line(&self, fb: &mut Framebuffer, a: (f64, f64, f64), b: (f64, f64, f64), c: Rgba) {
+        let (p, q) = (self.px(a.0, a.1, a.2), self.px(b.0, b.1, b.2));
+        raster::line(fb, p.0, p.1, q.0, q.1, c);
+    }
+
+    fn quad(&self, q: [(f64, f64, f64); 4]) -> [Point; 4] {
+        q.map(|c| (self.proj)(c.0, c.1, c.2))
+    }
+
+    /// A light, never dimmed by the weather.
+    fn lamp(&self, c: Rgba) -> Rgba {
+        let g = (self.lit)(c);
+        [0, 1, 2, 3].map(|k| if k == 3 { 255 } else { g[k].max((c[k] as f64 * 0.9) as u8) })
+    }
+}
+
+/// One edge of the plateau: from `a` to `b` on the ground.
+#[derive(Clone, Copy)]
+struct Edge {
+    a: (f64, f64),
+    b: (f64, f64),
+}
+
+const EDGES: [Edge; 4] = [
+    Edge { a: (LO, LO), b: (LO, HI_Y) },
+    Edge { a: (HI_X, LO), b: (HI_X, HI_Y) },
+    Edge { a: (LO, LO), b: (HI_X, LO) },
+    Edge { a: (LO, HI_Y), b: (HI_X, HI_Y) },
+];
+
+impl Roof {
+    /// The roof for a biome, over a shrine whose tallest column is `tallest`
+    /// levels: clear of it by at least a level and a half.
+    pub fn new(biome: Biome, tallest: f64) -> Option<Self> {
+        biome.roofed().then(|| Roof { biome, z: (tallest + 1.5).max(5.0) })
+    }
+
+    /// The roof's height over plateau point `(x, y)`.
+    pub fn height_at(&self, _x: f64, y: f64) -> f64 {
+        if self.biome == Biome::Greenhouse {
+            let mid = (LO + HI_Y) / 2.0;
+            self.z + PITCH * (1.0 - (y - mid).abs() / (mid - LO))
+        } else {
+            self.z
+        }
+    }
+
+    /// The two edges that are far from the viewer.
+    fn far_edges(&self, cx: &Ctx) -> Vec<Edge> {
+        let centre = cx.px((LO + HI_X) / 2.0, (LO + HI_Y) / 2.0, 0.0).1;
+        EDGES.iter().copied().filter(|e| cx.px((e.a.0 + e.b.0) / 2.0, (e.a.1 + e.b.1) / 2.0, 0.0).1 < centre).collect()
+    }
+
+    /// The back walls, behind the shrine.
+    pub fn back(&self, fb: &mut Framebuffer, cx: &Ctx) {
+        let steel = (cx.lit)([214, 220, 224, 255]);
+        for e in self.far_edges(cx) {
+            let n = 12;
+            for i in 0..n {
+                let f0 = i as f64 / n as f64;
+                let f1 = (i + 1) as f64 / n as f64;
+                let p = |f: f64| (e.a.0 + (e.b.0 - e.a.0) * f, e.a.1 + (e.b.1 - e.a.1) * f);
+                let (p0, p1) = (p(f0), p(f1));
+                let (h0, h1) = (self.height_at(p0.0, p0.1), self.height_at(p1.0, p1.1));
+                let panel = |z0: f64, z1a: f64, z1b: f64| cx.quad([(p0.0, p0.1, z0), (p1.0, p1.1, z0), (p1.0, p1.1, z1b), (p0.0, p0.1, z1a)]);
+                if self.biome == Biome::Greenhouse {
+                    // Glazing, with a low base wall.
+                    raster::fill_polygon(fb, &panel(0.0, 0.5, 0.5), (cx.lit)([176, 170, 162, 255]));
+                    raster::blend_polygon(fb, &panel(0.5, h0, h1), (cx.lit)(cx.glass), 60);
+                    for z in [0.5, 2.0, 3.5] {
+                        cx.line(fb, (p0.0, p0.1, z), (p1.0, p1.1, z), steel);
+                    }
+                } else {
+                    // Steel panels below, a neon line, windows and screens above.
+                    let panel_c = (cx.lit)(if i % 2 == 0 { [120, 130, 140, 255] } else { [110, 120, 130, 255] });
+                    raster::fill_polygon(fb, &panel(0.0, 1.4, 1.4), panel_c);
+                    let screen = hash3(cx.seed, 0x5343, i as u64) % 4 == 0;
+                    if screen {
+                        raster::fill_polygon(fb, &panel(1.6, h0 - 0.8, h1 - 0.8), cx.lamp(blend(cx.accent, [8, 24, 30, 255], 35, 100)));
+                    } else {
+                        raster::blend_polygon(fb, &panel(1.4, h0, h1), (cx.lit)([60, 90, 110, 255]), 120);
+                    }
+                    cx.line(fb, (p0.0, p0.1, 1.4), (p1.0, p1.1, 1.4), cx.lamp(cx.accent));
+                    cx.line(fb, (p0.0, p0.1, h0 - 0.05), (p1.0, p1.1, h1 - 0.05), steel);
+                }
+                // A mullion or a column at each panel's edge.
+                cx.line(fb, (p0.0, p0.1, 0.0), (p0.0, p0.1, h0), steel);
+            }
+            cx.line(fb, (e.b.0, e.b.1, 0.0), (e.b.0, e.b.1, self.height_at(e.b.0, e.b.1)), steel);
+        }
+    }
+
+    /// The roof, over everything: glass, its frame, the light coming through
+    /// it, and the weather landing on it. `splashes` are the rain's splash
+    /// events this frame, `(x, y, age)`.
+    pub fn draw(&self, fb: &mut Framebuffer, cx: &Ctx, splashes: &[(f64, f64, f64)], water: Rgba) {
+        let w = &cx.w;
+        let h = |x: f64, y: f64| self.height_at(x, y);
+        let mid = (LO + HI_Y) / 2.0;
+        // The roof's planes: two pitches, or one flat ceiling.
+        let planes: Vec<[(f64, f64, f64); 4]> = if self.biome == Biome::Greenhouse {
+            vec![
+                [(LO, LO, h(LO, LO)), (HI_X, LO, h(HI_X, LO)), (HI_X, mid, h(HI_X, mid)), (LO, mid, h(LO, mid))],
+                [(LO, mid, h(LO, mid)), (HI_X, mid, h(HI_X, mid)), (HI_X, HI_Y, h(HI_X, HI_Y)), (LO, HI_Y, h(LO, HI_Y))],
+            ]
+        } else {
+            vec![[(LO, LO, self.z), (HI_X, LO, self.z), (HI_X, HI_Y, self.z), (LO, HI_Y, self.z)]]
+        };
+
+        // Sun slanting down through the glass.
+        if self.biome == Biome::Greenhouse {
+            let level = w.light * (1.0 - w.cloud) * (1.0 - 0.5 * w.fog);
+            if level > 0.05 {
+                let c = (cx.lit)([255, 240, 200, 255]);
+                for i in 0..4u64 {
+                    let mut r = Rng::new(hash3(cx.seed, 0x5348_4146, i));
+                    let (sx, sy) = (r.range(1.0, 18.0), r.range(1.0, 18.0));
+                    let wide = r.range(1.0, 2.2);
+                    let breathe = 0.6 + 0.4 * crate::math::sin_turns(cx.t * r.range(0.02, 0.05) + r.unit());
+                    let top = h(sx, sy);
+                    let d = top * 0.45;
+                    let q = cx.quad([(sx, sy, top), (sx + wide, sy, top), (sx + wide + d, sy + d, 0.0), (sx + d, sy + d, 0.0)]);
+                    raster::blend_polygon(fb, &q, c, (level * breathe * 26.0) as u32);
+                }
+            }
+        }
+
+        // The glass itself, a faint tint.
+        let (tint, alpha) = if self.biome == Biome::Greenhouse { (cx.glass, 26) } else { ([150, 190, 206, 255], 20) };
+        let tint = (cx.lit)(tint);
+        for q in &planes {
+            raster::blend_polygon(fb, &cx.quad(*q), tint, alpha);
+        }
+
+        // Snow settling on the glass, dithered.
+        if w.cover > 0.02 {
+            let snow = (cx.lit)([240, 244, 252, 255]);
+            for q in &planes {
+                raster::for_polygon(&cx.quad(*q), |x, y| {
+                    if bayer(x, y) < w.cover * 0.8 {
+                        fb.blend_over(x, y, snow, 170);
+                    }
+                });
+            }
+        }
+
+        // The frame.
+        let steel = (cx.lit)(if self.biome == Biome::Greenhouse { [232, 236, 238, 255] } else { [86, 96, 108, 255] });
+        let fine = (cx.lit)(if self.biome == Biome::Greenhouse { [210, 216, 220, 255] } else { [110, 122, 134, 255] });
+        if self.biome == Biome::Greenhouse {
+            // Rafters every two cells, heavier every six; purlins every four.
+            let mut x = LO;
+            while x <= HI_X + 1e-9 {
+                let c = if ((x - LO) as i64) % 6 == 0 { steel } else { fine };
+                cx.line(fb, (x, LO, h(x, LO)), (x, mid, h(x, mid)), c);
+                cx.line(fb, (x, mid, h(x, mid)), (x, HI_Y, h(x, HI_Y)), c);
+                x += 2.0;
+            }
+            let mut y = LO;
+            while y <= HI_Y + 1e-9 {
+                cx.line(fb, (LO, y, h(LO, y)), (HI_X, y, h(HI_X, y)), if (y - mid).abs() < 0.1 { steel } else { fine });
+                y += 4.0;
+            }
+            cx.line(fb, (LO, mid, h(LO, mid)), (HI_X, mid, h(HI_X, mid)), steel);
+            // Glints where the sun catches a pane.
+            for i in 0..6u64 {
+                let mut r = Rng::new(hash3(cx.seed, 0x474c_494e, i));
+                let (gx, gy) = (r.range(0.0, 23.0), r.range(0.0, 23.0));
+                let on = crate::math::sin_turns(cx.t * 0.05 + r.unit()) > 0.6;
+                if on && w.light > 0.4 {
+                    let (px, py) = cx.px(gx, gy, h(gx, gy));
+                    for k in -2..=2 {
+                        fb.blend_over(px + k, py - k / 2, [255, 255, 245, 255], 150 - 30 * (k as i32).unsigned_abs());
+                    }
+                }
+            }
+        } else {
+            // A grid of beams every three cells, light panels in the bays.
+            let lamp = cx.lamp([226, 246, 255, 255]);
+            for by in 0..8 {
+                for bx in 0..8 {
+                    let (x0, y0) = (LO + bx as f64 * 3.0, LO + by as f64 * 3.0);
+                    if (bx + by) % 2 == 0 {
+                        let q = cx.quad([(x0 + 0.7, y0 + 1.2, self.z), (x0 + 2.3, y0 + 1.2, self.z), (x0 + 2.3, y0 + 1.8, self.z), (x0 + 0.7, y0 + 1.8, self.z)]);
+                        raster::blend_polygon(fb, &q, lamp, 150);
+                    }
+                }
+            }
+            for k in 0..=8 {
+                let v = LO + k as f64 * 3.0;
+                cx.line(fb, (v, LO, self.z), (v, HI_Y, self.z), steel);
+                cx.line(fb, (LO, v, self.z), (HI_X, v, self.z), steel);
+            }
+            // A neon line round the ceiling's edge.
+            let neon = cx.lamp(cx.accent);
+            for e in EDGES {
+                cx.line(fb, (e.a.0, e.a.1, self.z), (e.b.0, e.b.1, self.z), neon);
+            }
+        }
+        // Columns down the near edges, every six cells (the far ones stand
+        // with the back walls).
+        let far = self.far_edges(cx);
+        for e in EDGES {
+            if far.iter().any(|f| f.a == e.a && f.b == e.b) {
+                continue;
+            }
+            for k in 0..=4 {
+                let f = k as f64 / 4.0;
+                let (x, y) = (e.a.0 + (e.b.0 - e.a.0) * f, e.a.1 + (e.b.1 - e.a.1) * f);
+                cx.line(fb, (x, y, 0.0), (x, y, h(x, y)), steel);
+            }
+            cx.line(fb, (e.a.0, e.a.1, h(e.a.0, e.a.1)), (e.b.0, e.b.1, h(e.b.0, e.b.1)), steel);
+        }
+
+        // Rain on the glass: beads running down the panes, and the splashes.
+        if w.rain > 0.02 {
+            let bead = (cx.lit)([236, 244, 255, 255]);
+            let n = (w.rain * 90.0) as u64;
+            for i in 0..n {
+                let mut r = Rng::new(hash3(cx.seed, 0x4245_4144, i));
+                let x = r.range(LO, HI_X);
+                let (y, alpha) = if self.biome == Biome::Greenhouse {
+                    // Running down from the ridge to the eaves.
+                    let side = if r.chance(0.5) { 1.0 } else { -1.0 };
+                    let run = (cx.t * r.range(0.4, 1.2) + r.unit() * 12.0) % (mid - LO);
+                    (mid + side * run, 130)
+                } else {
+                    // Beads gathering and letting go on the flat ceiling.
+                    let life = (cx.t * r.range(0.2, 0.5) + r.unit()) % 1.0;
+                    (r.range(LO, HI_Y), (dither(1.0 - life, 4.0, 0.5) * 140.0) as u32)
+                };
+                let (px, py) = cx.px(x, y, h(x, y));
+                fb.blend_over(px, py, bead, alpha);
+                fb.blend_over(px, py + 1, bead, alpha / 2);
+            }
+            for &(x, y, age) in splashes {
+                let p = (cx.proj)(x, y, h(x, y));
+                crate::weather_fx::splash(fb, p, age, true, water);
+            }
+        }
+    }
+}
+
+
+
+}
+
 // ---- src/scene.rs ----
 pub mod scene {
 //! Scene assembly: everything needed to draw one frame.
@@ -4982,6 +5875,10 @@ pub struct Scene {
     pub weather: Weather,
     /// The creatures that can be seen, when the Wildlife setting is on.
     pub wildlife: Option<Wildlife>,
+    /// The built futures' street furniture and machines (none in the wild).
+    pub props: crate::props::Props,
+    /// The indoor futures' roof.
+    pub roof: Option<crate::roof::Roof>,
 }
 
 impl Scene {
@@ -4989,7 +5886,7 @@ impl Scene {
         let shrine = Shrine::generate(seed);
         let plants = Plants::generate(seed, &shrine, biome);
         let weather = Weather::new(weather_kind, seed);
-
+        let roof = crate::roof::Roof::new(biome, tallest(&shrine));
 
         Scene {
             seed,
@@ -4999,6 +5896,8 @@ impl Scene {
             plants,
             weather,
             wildlife: None,
+            props: crate::props::Props::generate(seed, biome),
+            roof,
         }
     }
 
@@ -5018,6 +5917,7 @@ impl Scene {
         }
         self.shrine = Shrine::from_model(self.seed, model);
         self.plants = Plants::generate(self.seed, &self.shrine, self.biome);
+        self.roof = crate::roof::Roof::new(self.biome, tallest(&self.shrine));
     }
 
     /// The weather at `t` seconds, from this scene's own weather.
@@ -5124,7 +6024,7 @@ impl Scene {
                 let inside = gx >= ox && gx < ox + SHRINE_W as i32 && gy >= oy && gy < oy + SHRINE_H as i32;
                 let height = if inside { self.shrine.height_at(gx - ox, gy - oy) as u32 } else { 0 };
                 let depth = depth_at(gx, gy);
-                let has_plants = !buckets[(gy * GRID_W as i32 + gx) as usize].is_empty();
+                let has_plants = !buckets[(gy * GRID_W as i32 + gx) as usize].is_empty() || self.props.any_in(gx, gy);
                 if height == 0 && depth == 0 && !has_plants {
                     continue;
                 }
@@ -5347,6 +6247,34 @@ impl Scene {
             draw(&mut Pass::Paint(fb, &owner), id, g, (0, 0), raster::Half::All);
         }
 
+        // A point of the plateau's space at height `z`, on screen: where the
+        // props stand and the roof is built.
+        let proj3 = |x: f64, y: f64, z: f64| -> Point {
+            if general {
+                iso.project_rotated(x, y, z, &ground_rot, ground_off)
+            } else {
+                iso.project_world(x, y, z)
+            }
+        };
+        // The indoor futures' back walls stand behind everything else.
+        let roof_cx = self.roof.map(|_| crate::roof::Ctx {
+            proj: &proj3,
+            lit: &lit,
+            seed: self.seed,
+            t: state.time,
+            w,
+            accent: materials.glow(),
+            glass: blend(self.palette.sky_bottom, [214, 236, 224, 255], 60, 100),
+        });
+        if let (Some(r), Some(c)) = (&self.roof, &roof_cx) {
+            r.back(fb, c);
+        }
+        let night = ((1.0 - w.light)
+            + if self.weather.kind == WeatherKind::Dusk { 0.5 } else { 0.0 }
+            + if self.biome == Biome::ResearchLab { 0.3 } else { 0.0 })
+        .clamp(0.0, 1.0);
+        let foliage = [self.palette.foliage_dark, self.palette.foliage, self.palette.foliage_light];
+
         // Where a point of the world lands on screen: on the plateau, or on the
         // architecture at model level `z` (which moves with the transform).
         let on_ground = |x: f64, y: f64| -> Point {
@@ -5374,8 +6302,14 @@ impl Scene {
         // nearer columns hide them; those on the ground go on the plateau now.
         let water = self.lit(blend(self.palette.sky_bottom, [240, 245, 255, 255], 85, 100), &w);
         let mut on_cell: Vec<Vec<(Point, f64, f64, bool)>> = vec![Vec::new(); (GRID_W * GRID_H) as usize];
+        // Under a roof the rain lands on the glass, not the ground.
+        let mut on_roof: Vec<(f64, f64, f64)> = Vec::new();
         for (e, age) in weather_fx::live(&self.weather, EventKind::Splash, state.time, weather_fx::SPLASH_S) {
             let (x, y) = e.spot();
+            if self.roof.is_some() {
+                on_roof.push((x, y, age));
+                continue;
+            }
             match self.column_at(x, y).filter(|c| above_ground(x, y, c.2 as f64 - 1.0)) {
                 Some((gx, gy, h)) => {
                     let at = on_shrine(x, y, h as f64 - 1.0);
@@ -5385,7 +6319,7 @@ impl Scene {
             }
         }
         let columns = self.columns();
-        if !columns.is_empty() {
+        if !columns.is_empty() && self.roof.is_none() {
             for (e, age) in weather_fx::live(&self.weather, EventKind::Drip, state.time, weather_fx::DRIP_S) {
                 let (gx, gy, h) = columns[(e.hash % columns.len() as u64) as usize];
                 if !above_ground(gx as f64 + 0.5, gy as f64 + 0.5, h as f64 - 1.0) {
@@ -5410,6 +6344,21 @@ impl Scene {
                     weather_fx::splash(fb, at, age, true, water);
                 } else {
                     weather_fx::drip(fb, at, fall, age, water);
+                }
+            }
+            for i in self.props.in_cell(gx, gy) {
+                let p = &self.props.items[i];
+                let base = proj3(p.x, p.y, 0.0);
+                let light = rig.on_plant(p.x, p.y, to_px_round(base.x), to_px_round(base.y));
+                let pcx = crate::props::Ctx { proj: &proj3, lit: &lit, t: state.time, wind: w.wind_strength, night, light, roof: self.roof.as_ref() };
+                crate::props::draw(fb, &self.props, i, &pcx, self.palette.accent, foliage);
+                // A wire is strung when the nearer of its two poles is drawn.
+                for &(a, b) in &self.props.wires {
+                    let other = if a == i { b } else if b == i { a } else { continue };
+                    let o = &self.props.items[other];
+                    if (o.gx + o.gy, other) < (p.gx + p.gy, i) {
+                        crate::props::wire(fb, &self.props.items[a], &self.props.items[b], &pcx);
+                    }
                 }
             }
             for (n, &i) in buckets[(gy * GRID_W as i32 + gx) as usize].iter().enumerate() {
@@ -5443,6 +6392,11 @@ impl Scene {
                     fb.blend_over(x, y, halo, (a * 85.0) as u32);
                 }
             }
+        }
+
+        // The roof, over the shrine, with the weather landing on it.
+        if let (Some(r), Some(c)) = (&self.roof, &roof_cx) {
+            r.draw(fb, c, &on_roof, water);
         }
 
         // The near layer, over everything: the close rain, snow, leaves,
@@ -5580,6 +6534,17 @@ impl Scene {
             }
         }
     }
+}
+
+/// The tallest column of a shrine, in levels.
+fn tallest(shrine: &Shrine) -> f64 {
+    let mut h = 0u8;
+    for ly in 0..SHRINE_H as i32 {
+        for lx in 0..SHRINE_W as i32 {
+            h = h.max(shrine.height_at(lx, ly));
+        }
+    }
+    h as f64
 }
 
 fn lerp(a: Rgba, b: Rgba, t: f64) -> Rgba {
@@ -6328,7 +7293,7 @@ impl Sim {
             .collect();
         let wildlife = config.settings.wildlife.then(|| Wildlife::new(config.seed, config.biome));
         scene.wildlife = wildlife.clone();
-        let weather_bed = Some(WeatherBed::new(config.seed, hard, wildlife));
+        let weather_bed = Some(WeatherBed::new(config.seed, hard, wildlife).roofed(config.biome.roofed()));
         Sim { config, scene, track, weather_bed, audio_time: 0.0 }
     }
 
@@ -14609,6 +15574,9 @@ pub struct WeatherBed {
     hard: Vec<bool>,
     /// Snow muffles everything in the bed.
     muffle: [OnePole; 2],
+    /// Under a roof: the weather is heard through glass, every splash lands
+    /// on a pane, and the wind is a muffled pressure outside.
+    roofed: bool,
     state: Option<WeatherState>,
     tick: usize,
 }
@@ -14626,12 +15594,23 @@ impl WeatherBed {
             creatures: Creatures::default(),
             hard,
             muffle: [OnePole::new(9_000.0, SR), OnePole::new(9_000.0, SR)],
+            roofed: false,
             state: None,
             tick: 0,
         }
     }
 
+    /// Heard from under a roof (the indoor futures).
+    pub fn roofed(mut self, on: bool) -> Self {
+        self.roofed = on;
+        self
+    }
+
     fn is_hard(&self, x: f64, y: f64) -> bool {
+        if self.roofed {
+            // Every drop lands on the glass.
+            return true;
+        }
         let (gx, gy) = (x.round() as i64, y.round() as i64);
         if gx < 0 || gy < 0 || gx >= GRID_W as i64 || gy >= GRID_H as i64 {
             return false;
@@ -14684,13 +15663,18 @@ impl WeatherBed {
             if self.tick % CONTROL == 0 || self.state.is_none() {
                 let s = weather.state(t0 + i as f64 / SR);
                 for m in self.muffle.iter_mut() {
-                    m.set_cutoff(9_000.0 - 6_800.0 * s.snow, SR);
+                    let open = 9_000.0 - 6_800.0 * s.snow;
+                    m.set_cutoff(if self.roofed { open * 0.4 } else { open }, SR);
                 }
                 self.state = Some(s);
             }
             self.tick = self.tick.wrapping_add(1);
             let s = self.state.expect("sampled above");
-            let (wl, wr) = self.wind.next(s.wind_strength, s.gust, s.wind_dir);
+            let (mut wl, mut wr) = self.wind.next(s.wind_strength, s.gust, s.wind_dir);
+            if self.roofed {
+                wl *= 0.45;
+                wr *= 0.45;
+            }
             let (rl, rr) = self.rain.next(s.rain);
             let (tl, tr) = self.thunder.next();
             let (al, ar) = self.ambience.next(&s);

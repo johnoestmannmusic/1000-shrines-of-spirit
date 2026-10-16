@@ -109,6 +109,46 @@ pub fn fill_polygon(fb: &mut Framebuffer, corners: &[Point], colour: Rgba) {
     }
 }
 
+/// Visit every pixel of a convex polygon (corners in fixed-point units, in
+/// order), with the same coverage rule as [`fill_polygon`]: `f(x, y)` once
+/// per covered pixel. For translucent and dithered fills (glass, frost).
+pub fn for_polygon(corners: &[Point], mut f: impl FnMut(i32, i32)) {
+    let n = corners.len();
+    if n < 3 {
+        return;
+    }
+    let min_y = corners.iter().map(|p| p.y).min().unwrap_or(0);
+    let max_y = corners.iter().map(|p| p.y).max().unwrap_or(0);
+    for py in floor_div(min_y, FP)..=ceil_div(max_y, FP) {
+        let yc = py * FP + FP / 2;
+        let (mut lo, mut hi, mut hits) = (i32::MAX, i32::MIN, 0);
+        for i in 0..n {
+            let a = corners[i];
+            let b = corners[(i + 1) % n];
+            if (a.y <= yc && yc <= b.y) || (b.y <= yc && yc <= a.y) {
+                let dy = b.y - a.y;
+                if dy != 0 {
+                    let x = a.x + ((b.x - a.x) * (yc - a.y)).div_euclid(dy);
+                    lo = lo.min(x);
+                    hi = hi.max(x);
+                    hits += 1;
+                }
+            }
+        }
+        if hits < 2 {
+            continue;
+        }
+        for px in floor_div(lo, FP)..=ceil_div(hi, FP) {
+            f(px, py);
+        }
+    }
+}
+
+/// Composite `colour` over a convex polygon at coverage `alpha` (0-255).
+pub fn blend_polygon(fb: &mut Framebuffer, corners: &[Point], colour: Rgba, alpha: u32) {
+    for_polygon(corners, |x, y| fb.blend_over(x, y, colour, alpha));
+}
+
 /// Which side of the ground plane (world `z = 0`) to draw.
 ///
 /// The ground is drawn between the two halves: everything [`Half::Below`] it

@@ -74,7 +74,7 @@ impl Sim {
             .collect();
         let wildlife = config.settings.wildlife.then(|| Wildlife::new(config.seed, config.biome));
         scene.wildlife = wildlife.clone();
-        let weather_bed = Some(WeatherBed::new(config.seed, hard, wildlife));
+        let weather_bed = Some(WeatherBed::new(config.seed, hard, wildlife).roofed(config.biome.roofed()));
         Sim { config, scene, track, weather_bed, audio_time: 0.0 }
     }
 

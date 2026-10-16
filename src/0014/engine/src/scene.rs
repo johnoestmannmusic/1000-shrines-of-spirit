@@ -138,6 +138,10 @@ pub struct Scene {
     pub weather: Weather,
     /// The creatures that can be seen, when the Wildlife setting is on.
     pub wildlife: Option<Wildlife>,
+    /// The built futures' street furniture and machines (none in the wild).
+    pub props: crate::props::Props,
+    /// The indoor futures' roof.
+    pub roof: Option<crate::roof::Roof>,
 }
 
 impl Scene {
@@ -145,7 +149,7 @@ impl Scene {
         let shrine = Shrine::generate(seed);
         let plants = Plants::generate(seed, &shrine, biome);
         let weather = Weather::new(weather_kind, seed);
-
+        let roof = crate::roof::Roof::new(biome, tallest(&shrine));
 
         Scene {
             seed,
@@ -155,6 +159,8 @@ impl Scene {
             plants,
             weather,
             wildlife: None,
+            props: crate::props::Props::generate(seed, biome),
+            roof,
         }
     }
 
@@ -174,6 +180,7 @@ impl Scene {
         }
         self.shrine = Shrine::from_model(self.seed, model);
         self.plants = Plants::generate(self.seed, &self.shrine, self.biome);
+        self.roof = crate::roof::Roof::new(self.biome, tallest(&self.shrine));
     }
 
     /// The weather at `t` seconds, from this scene's own weather.
@@ -280,7 +287,7 @@ impl Scene {
                 let inside = gx >= ox && gx < ox + SHRINE_W as i32 && gy >= oy && gy < oy + SHRINE_H as i32;
                 let height = if inside { self.shrine.height_at(gx - ox, gy - oy) as u32 } else { 0 };
                 let depth = depth_at(gx, gy);
-                let has_plants = !buckets[(gy * GRID_W as i32 + gx) as usize].is_empty();
+                let has_plants = !buckets[(gy * GRID_W as i32 + gx) as usize].is_empty() || self.props.any_in(gx, gy);
                 if height == 0 && depth == 0 && !has_plants {
                     continue;
                 }
@@ -503,6 +510,34 @@ impl Scene {
             draw(&mut Pass::Paint(fb, &owner), id, g, (0, 0), raster::Half::All);
         }
 
+        // A point of the plateau's space at height `z`, on screen: where the
+        // props stand and the roof is built.
+        let proj3 = |x: f64, y: f64, z: f64| -> Point {
+            if general {
+                iso.project_rotated(x, y, z, &ground_rot, ground_off)
+            } else {
+                iso.project_world(x, y, z)
+            }
+        };
+        // The indoor futures' back walls stand behind everything else.
+        let roof_cx = self.roof.map(|_| crate::roof::Ctx {
+            proj: &proj3,
+            lit: &lit,
+            seed: self.seed,
+            t: state.time,
+            w,
+            accent: materials.glow(),
+            glass: blend(self.palette.sky_bottom, [214, 236, 224, 255], 60, 100),
+        });
+        if let (Some(r), Some(c)) = (&self.roof, &roof_cx) {
+            r.back(fb, c);
+        }
+        let night = ((1.0 - w.light)
+            + if self.weather.kind == WeatherKind::Dusk { 0.5 } else { 0.0 }
+            + if self.biome == Biome::ResearchLab { 0.3 } else { 0.0 })
+        .clamp(0.0, 1.0);
+        let foliage = [self.palette.foliage_dark, self.palette.foliage, self.palette.foliage_light];
+
         // Where a point of the world lands on screen: on the plateau, or on the
         // architecture at model level `z` (which moves with the transform).
         let on_ground = |x: f64, y: f64| -> Point {
@@ -530,8 +565,14 @@ impl Scene {
         // nearer columns hide them; those on the ground go on the plateau now.
         let water = self.lit(blend(self.palette.sky_bottom, [240, 245, 255, 255], 85, 100), &w);
         let mut on_cell: Vec<Vec<(Point, f64, f64, bool)>> = vec![Vec::new(); (GRID_W * GRID_H) as usize];
+        // Under a roof the rain lands on the glass, not the ground.
+        let mut on_roof: Vec<(f64, f64, f64)> = Vec::new();
         for (e, age) in weather_fx::live(&self.weather, EventKind::Splash, state.time, weather_fx::SPLASH_S) {
             let (x, y) = e.spot();
+            if self.roof.is_some() {
+                on_roof.push((x, y, age));
+                continue;
+            }
             match self.column_at(x, y).filter(|c| above_ground(x, y, c.2 as f64 - 1.0)) {
                 Some((gx, gy, h)) => {
                     let at = on_shrine(x, y, h as f64 - 1.0);
@@ -541,7 +582,7 @@ impl Scene {
             }
         }
         let columns = self.columns();
-        if !columns.is_empty() {
+        if !columns.is_empty() && self.roof.is_none() {
             for (e, age) in weather_fx::live(&self.weather, EventKind::Drip, state.time, weather_fx::DRIP_S) {
                 let (gx, gy, h) = columns[(e.hash % columns.len() as u64) as usize];
                 if !above_ground(gx as f64 + 0.5, gy as f64 + 0.5, h as f64 - 1.0) {
@@ -566,6 +607,21 @@ impl Scene {
                     weather_fx::splash(fb, at, age, true, water);
                 } else {
                     weather_fx::drip(fb, at, fall, age, water);
+                }
+            }
+            for i in self.props.in_cell(gx, gy) {
+                let p = &self.props.items[i];
+                let base = proj3(p.x, p.y, 0.0);
+                let light = rig.on_plant(p.x, p.y, to_px_round(base.x), to_px_round(base.y));
+                let pcx = crate::props::Ctx { proj: &proj3, lit: &lit, t: state.time, wind: w.wind_strength, night, light, roof: self.roof.as_ref() };
+                crate::props::draw(fb, &self.props, i, &pcx, self.palette.accent, foliage);
+                // A wire is strung when the nearer of its two poles is drawn.
+                for &(a, b) in &self.props.wires {
+                    let other = if a == i { b } else if b == i { a } else { continue };
+                    let o = &self.props.items[other];
+                    if (o.gx + o.gy, other) < (p.gx + p.gy, i) {
+                        crate::props::wire(fb, &self.props.items[a], &self.props.items[b], &pcx);
+                    }
                 }
             }
             for (n, &i) in buckets[(gy * GRID_W as i32 + gx) as usize].iter().enumerate() {
@@ -599,6 +655,11 @@ impl Scene {
                     fb.blend_over(x, y, halo, (a * 85.0) as u32);
                 }
             }
+        }
+
+        // The roof, over the shrine, with the weather landing on it.
+        if let (Some(r), Some(c)) = (&self.roof, &roof_cx) {
+            r.draw(fb, c, &on_roof, water);
         }
 
         // The near layer, over everything: the close rain, snow, leaves,
@@ -736,6 +797,17 @@ impl Scene {
             }
         }
     }
+}
+
+/// The tallest column of a shrine, in levels.
+fn tallest(shrine: &Shrine) -> f64 {
+    let mut h = 0u8;
+    for ly in 0..SHRINE_H as i32 {
+        for lx in 0..SHRINE_W as i32 {
+            h = h.max(shrine.height_at(lx, ly));
+        }
+    }
+    h as f64
 }
 
 fn lerp(a: Rgba, b: Rgba, t: f64) -> Rgba {

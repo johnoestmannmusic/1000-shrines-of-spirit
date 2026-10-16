@@ -42,6 +42,9 @@ pub struct WeatherBed {
     hard: Vec<bool>,
     /// Snow muffles everything in the bed.
     muffle: [OnePole; 2],
+    /// Under a roof: the weather is heard through glass, every splash lands
+    /// on a pane, and the wind is a muffled pressure outside.
+    roofed: bool,
     state: Option<WeatherState>,
     tick: usize,
 }
@@ -59,12 +62,23 @@ impl WeatherBed {
             creatures: Creatures::default(),
             hard,
             muffle: [OnePole::new(9_000.0, SR), OnePole::new(9_000.0, SR)],
+            roofed: false,
             state: None,
             tick: 0,
         }
     }
 
+    /// Heard from under a roof (the indoor futures).
+    pub fn roofed(mut self, on: bool) -> Self {
+        self.roofed = on;
+        self
+    }
+
     fn is_hard(&self, x: f64, y: f64) -> bool {
+        if self.roofed {
+            // Every drop lands on the glass.
+            return true;
+        }
         let (gx, gy) = (x.round() as i64, y.round() as i64);
         if gx < 0 || gy < 0 || gx >= GRID_W as i64 || gy >= GRID_H as i64 {
             return false;
@@ -117,13 +131,18 @@ impl WeatherBed {
             if self.tick % CONTROL == 0 || self.state.is_none() {
                 let s = weather.state(t0 + i as f64 / SR);
                 for m in self.muffle.iter_mut() {
-                    m.set_cutoff(9_000.0 - 6_800.0 * s.snow, SR);
+                    let open = 9_000.0 - 6_800.0 * s.snow;
+                    m.set_cutoff(if self.roofed { open * 0.4 } else { open }, SR);
                 }
                 self.state = Some(s);
             }
             self.tick = self.tick.wrapping_add(1);
             let s = self.state.expect("sampled above");
-            let (wl, wr) = self.wind.next(s.wind_strength, s.gust, s.wind_dir);
+            let (mut wl, mut wr) = self.wind.next(s.wind_strength, s.gust, s.wind_dir);
+            if self.roofed {
+                wl *= 0.45;
+                wr *= 0.45;
+            }
             let (rl, rr) = self.rain.next(s.rain);
             let (tl, tr) = self.thunder.next();
             let (al, ar) = self.ambience.next(&s);
