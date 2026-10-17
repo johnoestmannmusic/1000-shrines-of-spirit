@@ -268,3 +268,79 @@ impl BassLine {
         (sub * 0.3 + body * 0.85) * self.env * self.vel
     }
 }
+
+/// Microsound's sub pulse: a pure sine on the chord root, struck short on
+/// the off-beat eighths between the sub kicks (and now and then on the
+/// sixteenth before a beat), so kick and pulse rock against each other
+/// without ever overlapping. No FM and no filter: just the sine, an attack
+/// of a millisecond and a quick release. Every bar is a pure function of
+/// seed 4 and the bar number.
+pub struct SubPulse {
+    seed: u64,
+    six: u64,
+    bar: u64,
+    phase: f64,
+    freq: f64,
+    env: f64,
+    vel: f64,
+    release_at: u64,
+    plan: Option<(u64, [f64; 16])>,
+    midi: f64,
+}
+
+impl SubPulse {
+    pub fn new(seed: u64, tempo: crate::tempo::Tempo) -> Self {
+        let six = tempo.drum16;
+        SubPulse { seed, six, bar: 16 * six, phase: 0.0, freq: midi_hz(ROOT), env: 0.0, vel: 0.0, release_at: 0, plan: None, midi: ROOT }
+    }
+
+    /// The velocity on each sixteenth of bar `bar` (0 = silent). Pure.
+    pub fn plan(&self, bar: u64) -> [f64; 16] {
+        let mut rng = Rng::stream(self.seed, 0x5B00_0000 ^ (bar / 8) << 4 ^ bar % 2);
+        let mut v = [0.0; 16];
+        for (i, x) in v.iter_mut().enumerate() {
+            let w = match i % 4 {
+                2 => 0.85,
+                3 => 0.12,
+                _ => 0.0,
+            };
+            if rng.chance(w) {
+                *x = rng.range(0.6, 1.0);
+            }
+        }
+        v
+    }
+
+    /// The current note (MIDI), for display.
+    pub fn pitch(&self) -> f64 {
+        self.midi
+    }
+
+    pub fn next(&mut self, clock: u64, root: f64, active: bool) -> f64 {
+        let sr = crate::SAMPLE_RATE as f64;
+        let bar = clock / self.bar;
+        let in_bar = clock % self.bar;
+        if self.plan.as_ref().is_none_or(|(b, _)| *b != bar) {
+            self.plan = Some((bar, self.plan(bar)));
+        }
+        if active && in_bar % self.six == 0 {
+            let vel = self.plan.as_ref().unwrap().1[(in_bar / self.six) as usize];
+            if vel > 0.0 {
+                let mut midi = root;
+                while midi > 45.0 {
+                    midi -= 12.0;
+                }
+                self.midi = midi;
+                self.freq = midi_hz(midi);
+                self.vel = vel;
+                self.release_at = clock + self.six * 3 / 4;
+            }
+        }
+        let gate = active && clock < self.release_at;
+        self.env += if gate { (1.0 - self.env) * 0.02 } else { -self.env * 0.004 };
+        let s = sin_turns(self.phase);
+        self.phase += self.freq / sr;
+        self.phase -= self.phase.floor();
+        s * self.env * self.vel * 0.42
+    }
+}

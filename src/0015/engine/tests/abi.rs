@@ -59,6 +59,12 @@ fn custom() -> SimConfig {
                 progression: 4,
                 lift: shrine0015::garage::KeyLift::Every8,
             },
+            micro: shrine0015::micro::MicroSetup {
+                pulse: shrine0015::micro::Pulse::Off,
+                grains: shrine0015::micro::Grains::Dense,
+                pips: shrine0015::micro::Pips::Busy,
+                dropouts: shrine0015::micro::Dropouts::Many,
+            },
             drone_rhythm: true,
             loop_rhythm: true,
             model: {
@@ -103,7 +109,19 @@ fn a_recipe_round_trips_exactly() {
         assert_eq!(back.settings.loop_rhythm, config.settings.loop_rhythm);
         assert_eq!(back.settings.pace, config.settings.pace);
         assert_eq!(back.settings.garage, config.settings.garage);
+        assert_eq!(back.settings.micro, config.settings.micro);
     }
+}
+
+#[test]
+fn a_version_17_recipe_gets_the_microsound_defaults() {
+    let mut config = custom();
+    config.settings.micro = shrine0015::micro::MicroSetup::DEFAULT;
+    let mut words = recipe::encode(&config);
+    let micro_at = words.len() - shrine0015::shrine_model::WORDS - shrine0015::name::CAP / 4 - 1;
+    words.remove(micro_at);
+    words[0] = 17;
+    assert_eq!(recipe::decode(&words).settings, config.settings);
 }
 
 #[test]
@@ -113,9 +131,12 @@ fn a_version_15_recipe_keeps_its_mode_and_gets_the_garage_defaults() {
     let mut config = custom();
     config.settings.pace = shrine0015::harmony::Pace::Jungle;
     config.settings.garage = shrine0015::garage::GarageSetup::DEFAULT;
+    config.settings.micro = shrine0015::micro::MicroSetup::DEFAULT;
     let mut words = recipe::encode(&config);
-    // (and version 16 had no start offset, the word after it).
-    let garage_at = words.len() - shrine0015::shrine_model::WORDS - shrine0015::name::CAP / 4 - 2;
+    // (and version 16 had no start offset, the word after it, nor version 17
+    // the microsound word after that).
+    let garage_at = words.len() - shrine0015::shrine_model::WORDS - shrine0015::name::CAP / 4 - 3;
+    words.remove(garage_at + 2);
     words.remove(garage_at + 1);
     words.remove(garage_at);
     words[0] = 15;
@@ -129,7 +150,7 @@ fn encoding_twice_is_stable() {
     let a = recipe::encode(&custom());
     let b = recipe::encode(&custom());
     assert_eq!(a, b);
-    assert_eq!(a.len(), 167);
+    assert_eq!(a.len(), 168);
 }
 
 #[test]

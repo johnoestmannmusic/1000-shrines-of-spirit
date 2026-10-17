@@ -85,6 +85,10 @@ enum Kind {
     GarageTone,
     GarageProgression,
     GarageLift,
+    MicroPulse,
+    MicroGrains,
+    MicroPips,
+    MicroDropouts,
     Bpm,
     Kit,
     Space,
@@ -617,6 +621,12 @@ impl App {
                 field("Stab tone".into(), s.garage.tone.name().to_string(), Kind::GarageTone, &mut rows);
             }
         }
+        if s.pace == Pace::Micro {
+            field("Pulse".into(), s.micro.pulse.name().to_string(), Kind::MicroPulse, &mut rows);
+            field("Grains".into(), s.micro.grains.name().to_string(), Kind::MicroGrains, &mut rows);
+            field("Pips".into(), s.micro.pips.name().to_string(), Kind::MicroPips, &mut rows);
+            field("Dropouts".into(), s.micro.dropouts.name().to_string(), Kind::MicroDropouts, &mut rows);
+        }
         field("Tempo".into(), format!("{} BPM", s.bpm), Kind::Bpm, &mut rows);
         field("Kit".into(), s.kit.name().to_string(), Kind::Kit, &mut rows);
         field("Space".into(), s.space.name().to_string(), Kind::Space, &mut rows);
@@ -739,21 +749,12 @@ impl App {
                 self.config.settings.chords = if forward { (c % 4) + 1 } else { ((c + 2) % 4) + 1 };
             }
             Kind::Pace => {
+                // Each mode moves the tempo, scale and chords that were still
+                // at the old mode's defaults; anything chosen by hand is kept.
                 let s = &mut self.config.settings;
-                s.pace = cycle(&PACES, s.pace, forward);
-                // Garage lives around 130 BPM, in a plain major (or minor)
-                // scale, on a four-chord loop: move off the defaults that suit
-                // the other modes. Anything chosen by hand is kept.
-                if s.pace == Pace::Garage {
-                    if s.bpm == shrine0015::tempo::DEFAULT_BPM {
-                        s.bpm = 132;
-                    }
-                    if s.scale == shrine0015::DEFAULT_SETTINGS.scale {
-                        s.scale = shrine0015::harmony::Scale::Ionian;
-                    }
-                    if s.chords == shrine0015::DEFAULT_SETTINGS.chords {
-                        s.chords = 4;
-                    }
+                s.set_mode(cycle(&PACES, s.pace, forward));
+                if s.pace == Pace::Micro && !s.kit.is_light() && s.kit != shrine0015::kits::Kit::Off {
+                    s.kit = shrine0015::kits::Kit::MicroBlips;
                 }
             }
             Kind::GarageProgression => {
@@ -794,7 +795,28 @@ impl App {
                     b.saturating_sub(if shift { 10 } else { 1 }).max(70)
                 };
             }
-            Kind::Kit => self.config.settings.kit = cycle(&KITS, self.config.settings.kit, forward),
+            Kind::Kit => {
+                // Microsound only makes sense with the light, small kits.
+                let s = &mut self.config.settings;
+                let kits: Vec<_> = KITS.into_iter().filter(|k| s.pace != Pace::Micro || k.is_light() || *k == shrine0015::kits::Kit::Off).collect();
+                s.kit = cycle(&kits, s.kit, forward);
+            }
+            Kind::MicroPulse => {
+                let m = &mut self.config.settings.micro;
+                m.pulse = cycle(&shrine0015::micro::PULSES, m.pulse, forward);
+            }
+            Kind::MicroGrains => {
+                let m = &mut self.config.settings.micro;
+                m.grains = cycle(&shrine0015::micro::GRAINS, m.grains, forward);
+            }
+            Kind::MicroPips => {
+                let m = &mut self.config.settings.micro;
+                m.pips = cycle(&shrine0015::micro::PIPS, m.pips, forward);
+            }
+            Kind::MicroDropouts => {
+                let m = &mut self.config.settings.micro;
+                m.dropouts = cycle(&shrine0015::micro::DROPOUTS, m.dropouts, forward);
+            }
             Kind::Space => self.config.settings.space = cycle(&SPACES, self.config.settings.space, forward),
             Kind::DrumReverse => self.config.settings.drum_reverse = !self.config.settings.drum_reverse,
             Kind::OpenFx => {

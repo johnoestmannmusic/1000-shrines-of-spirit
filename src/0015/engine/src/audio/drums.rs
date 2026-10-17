@@ -23,6 +23,14 @@
 //! reversed claps sucking into the snare, kicks dropping out, pitched-down
 //! tails; and its sections breathe between hats, a kick-less breakdown, the
 //! full 2-step, and 2-step with the glitches let loose.
+//!
+//! **Microsound** records its loop at the track's tempo too, dead straight
+//! and with no human timing (exactness is the sound): a sub-sine kick on each
+//! beat, clicks of a few samples on the beats and off-beats, ticks and
+//! grains scattered over the sixteenths. It skips the sampler colour, so
+//! every click stays as sharp as it was made. Its edits are digital
+//! failures: a step drops out, skips back to repeat the one before, or
+//! ratchets four times in a sixteenth.
 
 use crate::filter::{OnePole, Svf};
 use crate::harmony::Harmony;
@@ -80,6 +88,10 @@ pub enum Op {
     PitchDown,
     /// Half speed across two steps: the "half-time" drag.
     Half,
+    /// Silence for the step: a microsound dropout.
+    Gap,
+    /// Retriggered four times within the step (a 1/64 ratchet).
+    Ratchet,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,6 +109,12 @@ pub enum Section {
     TwoStep,
     /// 2-step garage, with stutters and reversals let loose.
     Shuffle,
+    /// Microsound: the clicks and grains without the kick.
+    Clicks,
+    /// Microsound: the full pulse.
+    Pulse,
+    /// Microsound: the pulse, failing more often.
+    Fracture,
 }
 
 impl Section {
@@ -110,6 +128,9 @@ impl Section {
             Section::Breakdown => "breakdown",
             Section::TwoStep => "2-step",
             Section::Shuffle => "2-step + glitch",
+            Section::Clicks => "clicks only",
+            Section::Pulse => "micro pulse",
+            Section::Fracture => "pulse + dropouts",
         }
     }
 }
@@ -189,6 +210,8 @@ pub struct Drums {
     /// The garage breakdown's low cut, and how far it is in.
     low_cut: [Svf; 2],
     lc_mix: f64,
+    /// Microsound: its pulse, grains and dropouts, or `None` for the other modes.
+    micro: Option<crate::micro::MicroSetup>,
     // Display-only.
     last_hits: Vec<Voice>,
     hit_count: u64,
@@ -202,15 +225,28 @@ impl Drums {
     }
 
     pub fn new(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo) -> Self {
-        Drums::styled(seed, kit, space, harmony, tempo, None)
+        Drums::styled(seed, kit, space, harmony, tempo, None, None)
     }
 
     /// 2-step garage drums, shuffled by `swing` (0.5 straight .. about 0.66).
     pub fn garage(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo, swing: f64) -> Self {
-        Drums::styled(seed, kit, space, harmony, tempo, Some(swing.clamp(0.5, 0.72)))
+        Drums::styled(seed, kit, space, harmony, tempo, Some(swing.clamp(0.5, 0.72)), None)
     }
 
-    fn styled(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo, swing: Option<f64>) -> Self {
+    /// Microsound drums: straight, exact, small.
+    pub fn micro(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo, setup: crate::micro::MicroSetup) -> Self {
+        Drums::styled(seed, kit, space, harmony, tempo, None, Some(setup))
+    }
+
+    fn styled(
+        seed: u64,
+        kit: crate::kits::Kit,
+        space: DrumSpace,
+        harmony: &Harmony,
+        tempo: Tempo,
+        swing: Option<f64>,
+        micro: Option<crate::micro::MicroSetup>,
+    ) -> Self {
         let mut params = KitParams::new(seed, kit, harmony);
         if swing.is_some() {
             // A rounder, shorter kick that leaves room for a moving bassline.
@@ -218,8 +254,8 @@ impl Drums {
             params.kick_drop *= 0.8;
         }
         let six = tempo.drum16;
-        // Garage plays its loop at the track's own tempo, unpitched.
-        let src16 = if swing.is_some() { six as usize } else { (60.0 / params.source_bpm / 4.0 * SR).round() as usize };
+        // Garage and microsound play their loop at the track's own tempo, unpitched.
+        let src16 = if swing.is_some() || micro.is_some() { six as usize } else { (60.0 / params.source_bpm / 4.0 * SR).round() as usize };
         let mut d = Drums {
             enabled: kit != crate::kits::Kit::Off,
             reverse: true,
@@ -241,6 +277,7 @@ impl Drums {
             swing,
             low_cut: [Svf::new(260.0, 0.7, SR), Svf::new(260.0, 0.7, SR)],
             lc_mix: 0.0,
+            micro,
             last_hits: Vec::new(),
             hit_count: 0,
             step: 0,
@@ -358,11 +395,64 @@ impl Drums {
         hits
     }
 
+    /// The microsound loop's hits: exactly on the sixteenths, from the
+    /// pulse and grain settings with seed 5 choosing within them.
+    fn micro_hits(&mut self, rng: &mut Rng) -> Vec<(usize, Voice, f64)> {
+        let six = self.src16;
+        let m = self.micro.unwrap_or(crate::micro::MicroSetup::DEFAULT);
+        let g = m.grains.amount();
+        let kick = m.pulse != crate::micro::Pulse::Off;
+        let click = m.pulse == crate::micro::Pulse::SubClick;
+        // Bar B may leave one beat's kick out.
+        let skip = if rng.chance(0.5) { Some(rng.pick(&[4usize, 8, 12])) } else { None };
+        let mut hits: Vec<(usize, Voice, f64)> = Vec::new();
+        for s in 0..SLICES {
+            let (b, second) = (s % STEPS, s >= STEPS);
+            let at = s * six;
+            if kick && b % 4 == 0 && !(second && skip == Some(b)) {
+                hits.push((at, Voice::Kick, rng.range(0.85, 1.0)));
+            }
+            if click {
+                if b % 4 == 0 {
+                    hits.push((at, Voice::Snare, rng.range(0.35, 0.5)));
+                } else if b % 4 == 2 && rng.chance(0.5) {
+                    hits.push((at, Voice::Snare, rng.range(0.25, 0.4)));
+                }
+            }
+            // Ticks on the sixteenths, softer off the eighths.
+            if rng.chance(0.25 + 0.45 * g) {
+                let accent = if b % 2 == 0 { 1.0 } else { 0.75 };
+                hits.push((at, Voice::Hat, rng.range(0.12, 0.35) * accent));
+            }
+            if rng.chance(0.08 + 0.22 * g) {
+                hits.push((at, Voice::Ghost, rng.range(0.2, 0.5)));
+            }
+            if rng.chance(0.03 + 0.04 * g) {
+                hits.push((at, Voice::OpenHat, rng.range(0.25, 0.35)));
+            }
+        }
+        self.pattern = match (kick, skip.is_some()) {
+            (false, _) => "micro: clicks and grains, no pulse",
+            (true, false) => "micro: four-on-the-floor sub",
+            (true, true) => "micro: four-on-the-floor sub, a beat left out",
+        };
+        hits.sort_by_key(|h| h.0);
+        hits
+    }
+
     /// Plays and samples the break (once, at start-up).
     fn record_break(&mut self) {
         let garage = self.swing.is_some();
-        let mut rng = Rng::stream(self.seed, if garage { 0x2577 } else { 0xB4EA });
-        let hits = if garage { self.garage_hits(&mut rng) } else { self.jungle_hits(&mut rng) };
+        let micro = self.micro.is_some();
+        let mut rng = Rng::stream(self.seed, if micro { 0x31C0 } else if garage { 0x2577 } else { 0xB4EA });
+        let hits = if micro {
+            self.micro_hits(&mut rng)
+        } else if garage {
+            self.garage_hits(&mut rng)
+        } else {
+            self.jungle_hits(&mut rng)
+        };
+        let click_on_kick = self.micro.is_some_and(|m| m.pulse == crate::micro::Pulse::SubClick);
         let p = self.params.clone();
         let len = self.break_len() + SR as usize;
         let (mut buf, mut buf_r, mut perc) = (vec![0.0; len], vec![0.0; len], vec![0.0; len]);
@@ -371,6 +461,18 @@ impl Drums {
         let space = self.space;
         for (i, (pos, voice, vel)) in hits.iter().enumerate() {
             let sound = match voice {
+                Voice::Kick if micro => {
+                    let mut k = crate::kits::sub_kick(&p, *vel);
+                    if click_on_kick {
+                        for (j, x) in crate::kits::micro_click(&p, 0.5 * vel, false, &mut rng).iter().enumerate() {
+                            k[j] += x;
+                        }
+                    }
+                    k
+                }
+                Voice::Snare if micro => crate::kits::micro_click(&p, *vel, false, &mut rng),
+                Voice::Hat if micro => crate::kits::micro_click(&p, *vel, true, &mut rng),
+                Voice::Ghost | Voice::OpenHat | Voice::Ride if micro => crate::kits::micro_grain(&p, *vel, &mut rng),
                 Voice::Kick => crate::kits::kick(&p, *vel, &mut rng),
                 Voice::Snare if garage => {
                     // A clap over the kit's snare, set a little back.
@@ -396,8 +498,11 @@ impl Drums {
             // cymbals 50–75% (never near centre, so the clicks always use the space).
             // (2-step garage keeps its claps in the middle with the kick: they
             // are the backbeat. Its rims and ghosts still spread out.)
+            // (Microsound places every small sound exactly, anywhere across
+            // the field; the kick stays in the middle.)
             let (lo, hi) = match voice {
                 Voice::Kick => (0.0, 0.0),
+                _ if micro => (0.2, 0.95),
                 Voice::Snare if garage => (0.0, 0.0),
                 Voice::Snare | Voice::Ghost => (0.45, 0.65),
                 _ => (0.5, 0.75),
@@ -424,6 +529,19 @@ impl Drums {
             }
         }
         self.hits = hits.iter().map(|(p, v, _)| (*p, *v)).collect();
+
+        if micro {
+            // No bus, no sampler, no room: each click as sharp as it was
+            // made. A fixed level, so a loop of only grains stays small.
+            let peak = buf.iter().chain(buf_r.iter()).fold(1.0f64, |a, x| a.max(x.abs()));
+            for x in buf.iter_mut().chain(buf_r.iter_mut()) {
+                *x = sanitize(*x * 0.9 / peak);
+            }
+            self.brk = buf;
+            self.brk_r = buf_r;
+            self.perc = perc;
+            return;
+        }
 
         // Punch: compress and soft-clip the whole break, as if bussed through hardware.
         crate::kits::punch_bus(&mut buf, &mut buf_r, p.punch);
@@ -495,6 +613,9 @@ impl Drums {
         if self.swing.is_some() {
             return self.garage_section(p, mods);
         }
+        if self.micro.is_some() {
+            return self.micro_section(p, mods);
+        }
         let energy = mods.at(p * PHRASE_BARS * self.bar).drums;
         let mut rng = Rng::stream(self.seed, 0x5EC0 ^ p);
         let e = (energy + rng.range(-0.12, 0.12)).clamp(0.0, 1.0);
@@ -520,6 +641,57 @@ impl Drums {
             x if x < 0.8 => Section::TwoStep,
             _ => Section::Shuffle,
         }
+    }
+
+    /// A microsound phrase's section: clicks alone, the pulse, or the pulse
+    /// failing, by the same energy LFO.
+    fn micro_section(&self, p: u64, mods: &Mods) -> Section {
+        let energy = mods.at(p * PHRASE_BARS * self.bar).drums;
+        let mut rng = Rng::stream(self.seed, 0x31C0_5EC0 ^ p);
+        let e = (energy + rng.range(-0.12, 0.12)).clamp(0.0, 1.0);
+        match e {
+            x if x < 0.2 => Section::Out,
+            x if x < 0.36 => Section::Clicks,
+            x if x < 0.82 => Section::Pulse,
+            _ => Section::Fracture,
+        }
+    }
+
+    /// The slice plan for a microsound bar (pure): the loop in order, with
+    /// digital failures on top — a step dropping out, skipping back to repeat
+    /// the one before, or ratcheting.
+    fn micro_plan(&self, bar: u64, mods: &Mods) -> Plan {
+        let section = self.section(bar / PHRASE_BARS, mods);
+        let fill = bar % PHRASE_BARS == PHRASE_BARS - 1;
+        let half = (bar % 2) as usize * STEPS;
+        let mut steps = [Step { slice: 0, op: Op::Play }; STEPS];
+        for (i, s) in steps.iter_mut().enumerate() {
+            *s = Step { slice: (half + i) as u8, op: Op::Play };
+        }
+        let mut rng = Rng::stream(self.seed, 0x31C0_BA40_0000 ^ bar);
+        let base = self.micro.map_or(0.0, |m| m.dropouts.chance());
+        let p = if section == Section::Out || base == 0.0 {
+            0.0
+        } else {
+            base + if section == Section::Fracture { 0.12 } else { 0.0 } + if fill { 0.1 } else { 0.0 }
+        };
+        for i in 1..STEPS {
+            if rng.chance(p) {
+                let here = steps[i].slice;
+                steps[i] = match rng.weighted(&[0.3, 0.25, 0.25, 0.2]) {
+                    0 => Step { slice: here, op: Op::Gap },
+                    1 => Step { slice: steps[i - 1].slice, op: Op::Play },
+                    2 => Step { slice: here, op: Op::Ratchet },
+                    _ => Step { slice: here, op: Op::Roll },
+                };
+            }
+        }
+        let mut join = [false; STEPS];
+        for i in 1..STEPS {
+            let (a, b) = (steps[i - 1], steps[i]);
+            join[i] = a.op == Op::Play && b.op == Op::Play && b.slice == a.slice + 1;
+        }
+        Plan { bar, section, fill, steps, join }
     }
 
     /// The slice plan for a garage bar (pure): the loop in order, with
@@ -594,6 +766,9 @@ impl Drums {
         if self.swing.is_some() {
             return self.garage_plan(bar, mods);
         }
+        if self.micro.is_some() {
+            return self.micro_plan(bar, mods);
+        }
         let section = self.section(bar / PHRASE_BARS, mods);
         let fill = bar % PHRASE_BARS == PHRASE_BARS - 1;
         let half = (bar % 2) as usize * STEPS;
@@ -611,8 +786,8 @@ impl Drums {
             Section::HatsOnly => 0.08,
             Section::Full => 0.14,
             Section::Rolls => 0.32,
-            // Garage sections never reach the jungle plan.
-            Section::Breakdown | Section::TwoStep | Section::Shuffle => 0.0,
+            // Garage and microsound sections never reach the jungle plan.
+            Section::Breakdown | Section::TwoStep | Section::Shuffle | Section::Clicks | Section::Pulse | Section::Fracture => 0.0,
         } + if fill && section != Section::Out { 0.2 } else { 0.0 };
         let strong = self.strong_slices();
         for (i, s) in steps.iter_mut().enumerate().skip(1) {
@@ -686,6 +861,8 @@ impl Drums {
         match step.op {
             Op::Play | Op::Reverse => (base, base + len),
             Op::Roll => (base, base + len / 2.0),
+            Op::Ratchet => (base, base + len / 4.0),
+            Op::Gap => (base, base),
             Op::PitchDown => (base, base + len * 0.75),
             Op::Half => {
                 let h = if i % 2 == 0 { 0.0 } else { len / 2.0 };
@@ -724,14 +901,20 @@ impl Drums {
 
         // Retriggers: count which drum hits this step plays (display only).
         let (roll_at, roll_from) = self.roll_split(st.slice);
-        let retrigger = t == 0 || (st.op == Op::Roll && t == roll_at);
+        let quarter = (six / 4).max(1);
+        let retrigger = t == 0 || (st.op == Op::Roll && t == roll_at) || (st.op == Op::Ratchet && t % quarter == 0);
         if retrigger && section != Section::Out {
             self.step = i;
             let (lo, hi) = self.range(st, i);
             self.last_hits = self
                 .hits
                 .iter()
-                .filter(|(p, v)| (*p as f64) >= lo && (*p as f64) < hi && (section != Section::HatsOnly || v.is_cymbal()))
+                .filter(|(p, v)| {
+                    (*p as f64) >= lo
+                        && (*p as f64) < hi
+                        && (section != Section::HatsOnly || v.is_cymbal())
+                        && (section != Section::Clicks || *v != Voice::Kick)
+                })
                 .map(|(_, v)| *v)
                 .collect();
             self.hit_count += self.last_hits.len() as u64;
@@ -753,22 +936,27 @@ impl Drums {
                 }
             }
             Op::PitchDown => (base + tt * rate * 0.75, t, six),
+            Op::Ratchet => {
+                let u = t % quarter;
+                (base + u as f64 * rate, u, quarter)
+            }
+            Op::Gap => (base, t, six),
             Op::Half => (base + (tt + (i % 2) as f64 * six as f64) * rate * 0.5, t, six),
         };
-        let (mut x, mut xr, mut xp) = if section == Section::Out { (0.0, 0.0, 0.0) } else { self.sample_at(pos) };
+        let (mut x, mut xr, mut xp) = if section == Section::Out || st.op == Op::Gap { (0.0, 0.0, 0.0) } else { self.sample_at(pos) };
 
         // Fade only where the sequence actually jumps.
-        let joined_in = joined && st.op != Op::Roll;
+        let joined_in = joined && !matches!(st.op, Op::Roll | Op::Ratchet);
         let fade_in = if joined_in && local == t { 1.0 } else { (local as f64 / DECLICK as f64).min(1.0) };
         let to_end = local_len - local;
-        let fade_out = if next_joins && st.op != Op::Roll { 1.0 } else { (to_end as f64 / DECLICK as f64).min(1.0) };
+        let fade_out = if next_joins && !matches!(st.op, Op::Roll | Op::Ratchet) { 1.0 } else { (to_end as f64 / DECLICK as f64).min(1.0) };
         x *= fade_in * fade_out;
         xr *= fade_in * fade_out;
         xp *= fade_in * fade_out;
 
         // Hats-only sections: glide a high-pass in, so only the cymbals remain
         // (and the snare-only tape send fades out with it).
-        let target = if section == Section::HatsOnly { 1.0 } else { 0.0 };
+        let target = if matches!(section, Section::HatsOnly | Section::Clicks) { 1.0 } else { 0.0 };
         self.hp_mix += (target - self.hp_mix) * 0.0005;
         let low = self.highpass[0].process(x).low;
         let high = x - low;

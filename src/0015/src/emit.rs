@@ -253,10 +253,19 @@ pub fn info(config: &SimConfig, build: u32) -> String {
         format!("chords     {}", s.chords),
         format!(
             "mode       {}",
-            if s.pace == shrine0015::harmony::Pace::Garage {
-                format!("{} · {} · key lift {}", s.pace.name(), s.garage.progression_name(), s.garage.lift.name())
-            } else {
-                s.pace.name().to_string()
+            match s.pace {
+                shrine0015::harmony::Pace::Garage => {
+                    format!("{} · {} · key lift {}", s.pace.name(), s.garage.progression_name(), s.garage.lift.name())
+                }
+                shrine0015::harmony::Pace::Micro => format!(
+                    "{} · pulse {} · grains {} · pips {} · dropouts {}",
+                    s.pace.name(),
+                    s.micro.pulse.name(),
+                    s.micro.grains.name(),
+                    s.micro.pips.name(),
+                    s.micro.dropouts.name()
+                ),
+                _ => s.pace.name().to_string(),
             }
         ),
         format!("tempo      {} BPM", s.bpm),

@@ -5069,7 +5069,7 @@ use crate::track::{DroneArc, KeyChoice, LoopDesign, Seeds, Settings};
 use crate::weather::WeatherKind;
 use crate::{DEFAULT_SEEDS, DEFAULT_SETTINGS};
 
-pub const VERSION: u32 = 17;
+pub const VERSION: u32 = 18;
 
 /// Encode a configuration.
 pub fn encode(config: &SimConfig) -> Vec<u32> {
@@ -5140,6 +5140,8 @@ pub fn encode(config: &SimConfig) -> Vec<u32> {
     w.push(s.garage.word());
     // Version 17: the start offset.
     w.push(s.start_s as u32);
+    // Version 18: the microsound setup.
+    w.push(s.micro.word());
     for word in s.model.words() {
         w.push(word);
     }
@@ -5174,6 +5176,7 @@ pub fn decode(words: &[u32]) -> SimConfig {
     let pace = match c.next() {
         1 => Pace::Jungle,
         2 => Pace::Garage,
+        3 => Pace::Micro,
         _ => Pace::HalfTime,
     };
     let kit = KITS[(c.next() as usize) % KITS.len()];
@@ -5250,6 +5253,8 @@ pub fn decode(words: &[u32]) -> SimConfig {
     let garage = if version >= 16 { crate::garage::GarageSetup::from_word(c.next()) } else { crate::garage::GarageSetup::DEFAULT };
     // Version 17 added the start offset; older recipes start at the beginning.
     let start_s = if version >= 17 { c.next().min(crate::track::MAX_START_S as u32) as u16 } else { 0 };
+    // Version 18 added microsound's own settings.
+    let micro = if version >= 18 { crate::micro::MicroSetup::from_word(c.next()) } else { crate::micro::MicroSetup::DEFAULT };
     let model = if version >= 14 {
         let words: Vec<u32> = (0..crate::shrine_model::WORDS as u32).map(|_| c.next()).collect();
         crate::shrine_model::ShrineModel::from_words(&words)
@@ -5301,6 +5306,7 @@ pub fn decode(words: &[u32]) -> SimConfig {
             wildlife,
             garage,
             start_s,
+            micro,
         },
         biome,
         weather,
@@ -10217,6 +10223,82 @@ impl BassLine {
     }
 }
 
+/// Microsound's sub pulse: a pure sine on the chord root, struck short on
+/// the off-beat eighths between the sub kicks (and now and then on the
+/// sixteenth before a beat), so kick and pulse rock against each other
+/// without ever overlapping. No FM and no filter: just the sine, an attack
+/// of a millisecond and a quick release. Every bar is a pure function of
+/// seed 4 and the bar number.
+pub struct SubPulse {
+    seed: u64,
+    six: u64,
+    bar: u64,
+    phase: f64,
+    freq: f64,
+    env: f64,
+    vel: f64,
+    release_at: u64,
+    plan: Option<(u64, [f64; 16])>,
+    midi: f64,
+}
+
+impl SubPulse {
+    pub fn new(seed: u64, tempo: crate::tempo::Tempo) -> Self {
+        let six = tempo.drum16;
+        SubPulse { seed, six, bar: 16 * six, phase: 0.0, freq: midi_hz(ROOT), env: 0.0, vel: 0.0, release_at: 0, plan: None, midi: ROOT }
+    }
+
+    /// The velocity on each sixteenth of bar `bar` (0 = silent). Pure.
+    pub fn plan(&self, bar: u64) -> [f64; 16] {
+        let mut rng = Rng::stream(self.seed, 0x5B00_0000 ^ (bar / 8) << 4 ^ bar % 2);
+        let mut v = [0.0; 16];
+        for (i, x) in v.iter_mut().enumerate() {
+            let w = match i % 4 {
+                2 => 0.85,
+                3 => 0.12,
+                _ => 0.0,
+            };
+            if rng.chance(w) {
+                *x = rng.range(0.6, 1.0);
+            }
+        }
+        v
+    }
+
+    /// The current note (MIDI), for display.
+    pub fn pitch(&self) -> f64 {
+        self.midi
+    }
+
+    pub fn next(&mut self, clock: u64, root: f64, active: bool) -> f64 {
+        let sr = crate::SAMPLE_RATE as f64;
+        let bar = clock / self.bar;
+        let in_bar = clock % self.bar;
+        if self.plan.as_ref().is_none_or(|(b, _)| *b != bar) {
+            self.plan = Some((bar, self.plan(bar)));
+        }
+        if active && in_bar % self.six == 0 {
+            let vel = self.plan.as_ref().unwrap().1[(in_bar / self.six) as usize];
+            if vel > 0.0 {
+                let mut midi = root;
+                while midi > 45.0 {
+                    midi -= 12.0;
+                }
+                self.midi = midi;
+                self.freq = midi_hz(midi);
+                self.vel = vel;
+                self.release_at = clock + self.six * 3 / 4;
+            }
+        }
+        let gate = active && clock < self.release_at;
+        self.env += if gate { (1.0 - self.env) * 0.02 } else { -self.env * 0.004 };
+        let s = sin_turns(self.phase);
+        self.phase += self.freq / sr;
+        self.phase -= self.phase.floor();
+        s * self.env * self.vel * 0.42
+    }
+}
+
 }
 // ---- src/audio/creatures.rs ----
 pub mod creatures {
@@ -10579,6 +10661,8 @@ pub const HOP: usize = N / 4;
 const DRONE_RMS: f64 = 0.16;
 /// Bins below this are left empty (sub rumble is the bass's job).
 const LOW_CUT_HZ: f64 = 110.0;
+/// The thin (microsound) drone leaves more room below.
+const THIN_LOW_CUT_HZ: f64 = 220.0;
 
 /// Building one frame is split into small work units, one every
 /// `UNIT_SPACING` samples through the hop, so no single moment carries a
@@ -10664,15 +10748,34 @@ impl Drone {
     /// `first` must be the stream chord 1's voicing was drawn from (it goes
     /// on to choose chord 1's FM recipes, exactly as in 0009); `rest` serves
     /// the other chords.
-    pub fn new(seed: u64, harmony: Harmony, mut first: Rng, mut rest: Rng) -> Self {
+    pub fn new(seed: u64, harmony: Harmony, first: Rng, rest: Rng) -> Self {
+        Drone::build(seed, harmony, first, rest, false)
+    }
+
+    /// Microsound's drone: the same chords frozen from pure sines (every FM
+    /// index at zero), with the low end cut higher, so it is a thin, still
+    /// cluster of partials rather than a thick cloud.
+    pub fn thin(seed: u64, harmony: Harmony, first: Rng, rest: Rng) -> Self {
+        Drone::build(seed, harmony, first, rest, true)
+    }
+
+    fn build(seed: u64, harmony: Harmony, mut first: Rng, mut rest: Rng, thin: bool) -> Self {
         let fft = Fft::new(N);
         let window: Vec<f64> = (0..N).map(|i| 0.5 - 0.5 * cos_turns(i as f64 / N as f64)).collect();
-        let low_bin = (LOW_CUT_HZ * N as f64 / crate::SAMPLE_RATE as f64) as usize;
+        let low_cut = if thin { THIN_LOW_CUT_HZ } else { LOW_CUT_HZ };
+        let low_bin = (low_cut * N as f64 / crate::SAMPLE_RATE as f64) as usize;
         let mut mags = Vec::new();
         let mut all_recipes = Vec::new();
         for (i, chord) in harmony.chords.iter().enumerate() {
             let rng = if i == 0 { &mut first } else { &mut rest };
-            let recipes = recipes_for(rng, &chord.notes);
+            let mut recipes = recipes_for(rng, &chord.notes);
+            if thin {
+                for (_, [_, _, i2, i3], fb) in recipes.iter_mut() {
+                    *i2 = 0.0;
+                    *i3 = 0.0;
+                    *fb = 0.0;
+                }
+            }
             let left = render_chord(rng, &chord.notes, &recipes);
             let right = render_chord(rng, &chord.notes, &recipes);
             let mut mag_l = average_magnitudes(&fft, &window, &left);
@@ -10962,6 +11065,14 @@ pub mod drums {
 //! reversed claps sucking into the snare, kicks dropping out, pitched-down
 //! tails; and its sections breathe between hats, a kick-less breakdown, the
 //! full 2-step, and 2-step with the glitches let loose.
+//!
+//! **Microsound** records its loop at the track's tempo too, dead straight
+//! and with no human timing (exactness is the sound): a sub-sine kick on each
+//! beat, clicks of a few samples on the beats and off-beats, ticks and
+//! grains scattered over the sixteenths. It skips the sampler colour, so
+//! every click stays as sharp as it was made. Its edits are digital
+//! failures: a step drops out, skips back to repeat the one before, or
+//! ratchets four times in a sixteenth.
 
 use crate::filter::{OnePole, Svf};
 use crate::harmony::Harmony;
@@ -11019,6 +11130,10 @@ pub enum Op {
     PitchDown,
     /// Half speed across two steps: the "half-time" drag.
     Half,
+    /// Silence for the step: a microsound dropout.
+    Gap,
+    /// Retriggered four times within the step (a 1/64 ratchet).
+    Ratchet,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11036,6 +11151,12 @@ pub enum Section {
     TwoStep,
     /// 2-step garage, with stutters and reversals let loose.
     Shuffle,
+    /// Microsound: the clicks and grains without the kick.
+    Clicks,
+    /// Microsound: the full pulse.
+    Pulse,
+    /// Microsound: the pulse, failing more often.
+    Fracture,
 }
 
 impl Section {
@@ -11049,6 +11170,9 @@ impl Section {
             Section::Breakdown => "breakdown",
             Section::TwoStep => "2-step",
             Section::Shuffle => "2-step + glitch",
+            Section::Clicks => "clicks only",
+            Section::Pulse => "micro pulse",
+            Section::Fracture => "pulse + dropouts",
         }
     }
 }
@@ -11128,6 +11252,8 @@ pub struct Drums {
     /// The garage breakdown's low cut, and how far it is in.
     low_cut: [Svf; 2],
     lc_mix: f64,
+    /// Microsound: its pulse, grains and dropouts, or `None` for the other modes.
+    micro: Option<crate::micro::MicroSetup>,
     // Display-only.
     last_hits: Vec<Voice>,
     hit_count: u64,
@@ -11141,15 +11267,28 @@ impl Drums {
     }
 
     pub fn new(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo) -> Self {
-        Drums::styled(seed, kit, space, harmony, tempo, None)
+        Drums::styled(seed, kit, space, harmony, tempo, None, None)
     }
 
     /// 2-step garage drums, shuffled by `swing` (0.5 straight .. about 0.66).
     pub fn garage(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo, swing: f64) -> Self {
-        Drums::styled(seed, kit, space, harmony, tempo, Some(swing.clamp(0.5, 0.72)))
+        Drums::styled(seed, kit, space, harmony, tempo, Some(swing.clamp(0.5, 0.72)), None)
     }
 
-    fn styled(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo, swing: Option<f64>) -> Self {
+    /// Microsound drums: straight, exact, small.
+    pub fn micro(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo, setup: crate::micro::MicroSetup) -> Self {
+        Drums::styled(seed, kit, space, harmony, tempo, None, Some(setup))
+    }
+
+    fn styled(
+        seed: u64,
+        kit: crate::kits::Kit,
+        space: DrumSpace,
+        harmony: &Harmony,
+        tempo: Tempo,
+        swing: Option<f64>,
+        micro: Option<crate::micro::MicroSetup>,
+    ) -> Self {
         let mut params = KitParams::new(seed, kit, harmony);
         if swing.is_some() {
             // A rounder, shorter kick that leaves room for a moving bassline.
@@ -11157,8 +11296,8 @@ impl Drums {
             params.kick_drop *= 0.8;
         }
         let six = tempo.drum16;
-        // Garage plays its loop at the track's own tempo, unpitched.
-        let src16 = if swing.is_some() { six as usize } else { (60.0 / params.source_bpm / 4.0 * SR).round() as usize };
+        // Garage and microsound play their loop at the track's own tempo, unpitched.
+        let src16 = if swing.is_some() || micro.is_some() { six as usize } else { (60.0 / params.source_bpm / 4.0 * SR).round() as usize };
         let mut d = Drums {
             enabled: kit != crate::kits::Kit::Off,
             reverse: true,
@@ -11180,6 +11319,7 @@ impl Drums {
             swing,
             low_cut: [Svf::new(260.0, 0.7, SR), Svf::new(260.0, 0.7, SR)],
             lc_mix: 0.0,
+            micro,
             last_hits: Vec::new(),
             hit_count: 0,
             step: 0,
@@ -11297,11 +11437,64 @@ impl Drums {
         hits
     }
 
+    /// The microsound loop's hits: exactly on the sixteenths, from the
+    /// pulse and grain settings with seed 5 choosing within them.
+    fn micro_hits(&mut self, rng: &mut Rng) -> Vec<(usize, Voice, f64)> {
+        let six = self.src16;
+        let m = self.micro.unwrap_or(crate::micro::MicroSetup::DEFAULT);
+        let g = m.grains.amount();
+        let kick = m.pulse != crate::micro::Pulse::Off;
+        let click = m.pulse == crate::micro::Pulse::SubClick;
+        // Bar B may leave one beat's kick out.
+        let skip = if rng.chance(0.5) { Some(rng.pick(&[4usize, 8, 12])) } else { None };
+        let mut hits: Vec<(usize, Voice, f64)> = Vec::new();
+        for s in 0..SLICES {
+            let (b, second) = (s % STEPS, s >= STEPS);
+            let at = s * six;
+            if kick && b % 4 == 0 && !(second && skip == Some(b)) {
+                hits.push((at, Voice::Kick, rng.range(0.85, 1.0)));
+            }
+            if click {
+                if b % 4 == 0 {
+                    hits.push((at, Voice::Snare, rng.range(0.35, 0.5)));
+                } else if b % 4 == 2 && rng.chance(0.5) {
+                    hits.push((at, Voice::Snare, rng.range(0.25, 0.4)));
+                }
+            }
+            // Ticks on the sixteenths, softer off the eighths.
+            if rng.chance(0.25 + 0.45 * g) {
+                let accent = if b % 2 == 0 { 1.0 } else { 0.75 };
+                hits.push((at, Voice::Hat, rng.range(0.12, 0.35) * accent));
+            }
+            if rng.chance(0.08 + 0.22 * g) {
+                hits.push((at, Voice::Ghost, rng.range(0.2, 0.5)));
+            }
+            if rng.chance(0.03 + 0.04 * g) {
+                hits.push((at, Voice::OpenHat, rng.range(0.25, 0.35)));
+            }
+        }
+        self.pattern = match (kick, skip.is_some()) {
+            (false, _) => "micro: clicks and grains, no pulse",
+            (true, false) => "micro: four-on-the-floor sub",
+            (true, true) => "micro: four-on-the-floor sub, a beat left out",
+        };
+        hits.sort_by_key(|h| h.0);
+        hits
+    }
+
     /// Plays and samples the break (once, at start-up).
     fn record_break(&mut self) {
         let garage = self.swing.is_some();
-        let mut rng = Rng::stream(self.seed, if garage { 0x2577 } else { 0xB4EA });
-        let hits = if garage { self.garage_hits(&mut rng) } else { self.jungle_hits(&mut rng) };
+        let micro = self.micro.is_some();
+        let mut rng = Rng::stream(self.seed, if micro { 0x31C0 } else if garage { 0x2577 } else { 0xB4EA });
+        let hits = if micro {
+            self.micro_hits(&mut rng)
+        } else if garage {
+            self.garage_hits(&mut rng)
+        } else {
+            self.jungle_hits(&mut rng)
+        };
+        let click_on_kick = self.micro.is_some_and(|m| m.pulse == crate::micro::Pulse::SubClick);
         let p = self.params.clone();
         let len = self.break_len() + SR as usize;
         let (mut buf, mut buf_r, mut perc) = (vec![0.0; len], vec![0.0; len], vec![0.0; len]);
@@ -11310,6 +11503,18 @@ impl Drums {
         let space = self.space;
         for (i, (pos, voice, vel)) in hits.iter().enumerate() {
             let sound = match voice {
+                Voice::Kick if micro => {
+                    let mut k = crate::kits::sub_kick(&p, *vel);
+                    if click_on_kick {
+                        for (j, x) in crate::kits::micro_click(&p, 0.5 * vel, false, &mut rng).iter().enumerate() {
+                            k[j] += x;
+                        }
+                    }
+                    k
+                }
+                Voice::Snare if micro => crate::kits::micro_click(&p, *vel, false, &mut rng),
+                Voice::Hat if micro => crate::kits::micro_click(&p, *vel, true, &mut rng),
+                Voice::Ghost | Voice::OpenHat | Voice::Ride if micro => crate::kits::micro_grain(&p, *vel, &mut rng),
                 Voice::Kick => crate::kits::kick(&p, *vel, &mut rng),
                 Voice::Snare if garage => {
                     // A clap over the kit's snare, set a little back.
@@ -11335,8 +11540,11 @@ impl Drums {
             // cymbals 50–75% (never near centre, so the clicks always use the space).
             // (2-step garage keeps its claps in the middle with the kick: they
             // are the backbeat. Its rims and ghosts still spread out.)
+            // (Microsound places every small sound exactly, anywhere across
+            // the field; the kick stays in the middle.)
             let (lo, hi) = match voice {
                 Voice::Kick => (0.0, 0.0),
+                _ if micro => (0.2, 0.95),
                 Voice::Snare if garage => (0.0, 0.0),
                 Voice::Snare | Voice::Ghost => (0.45, 0.65),
                 _ => (0.5, 0.75),
@@ -11363,6 +11571,19 @@ impl Drums {
             }
         }
         self.hits = hits.iter().map(|(p, v, _)| (*p, *v)).collect();
+
+        if micro {
+            // No bus, no sampler, no room: each click as sharp as it was
+            // made. A fixed level, so a loop of only grains stays small.
+            let peak = buf.iter().chain(buf_r.iter()).fold(1.0f64, |a, x| a.max(x.abs()));
+            for x in buf.iter_mut().chain(buf_r.iter_mut()) {
+                *x = sanitize(*x * 0.9 / peak);
+            }
+            self.brk = buf;
+            self.brk_r = buf_r;
+            self.perc = perc;
+            return;
+        }
 
         // Punch: compress and soft-clip the whole break, as if bussed through hardware.
         crate::kits::punch_bus(&mut buf, &mut buf_r, p.punch);
@@ -11434,6 +11655,9 @@ impl Drums {
         if self.swing.is_some() {
             return self.garage_section(p, mods);
         }
+        if self.micro.is_some() {
+            return self.micro_section(p, mods);
+        }
         let energy = mods.at(p * PHRASE_BARS * self.bar).drums;
         let mut rng = Rng::stream(self.seed, 0x5EC0 ^ p);
         let e = (energy + rng.range(-0.12, 0.12)).clamp(0.0, 1.0);
@@ -11459,6 +11683,57 @@ impl Drums {
             x if x < 0.8 => Section::TwoStep,
             _ => Section::Shuffle,
         }
+    }
+
+    /// A microsound phrase's section: clicks alone, the pulse, or the pulse
+    /// failing, by the same energy LFO.
+    fn micro_section(&self, p: u64, mods: &Mods) -> Section {
+        let energy = mods.at(p * PHRASE_BARS * self.bar).drums;
+        let mut rng = Rng::stream(self.seed, 0x31C0_5EC0 ^ p);
+        let e = (energy + rng.range(-0.12, 0.12)).clamp(0.0, 1.0);
+        match e {
+            x if x < 0.2 => Section::Out,
+            x if x < 0.36 => Section::Clicks,
+            x if x < 0.82 => Section::Pulse,
+            _ => Section::Fracture,
+        }
+    }
+
+    /// The slice plan for a microsound bar (pure): the loop in order, with
+    /// digital failures on top — a step dropping out, skipping back to repeat
+    /// the one before, or ratcheting.
+    fn micro_plan(&self, bar: u64, mods: &Mods) -> Plan {
+        let section = self.section(bar / PHRASE_BARS, mods);
+        let fill = bar % PHRASE_BARS == PHRASE_BARS - 1;
+        let half = (bar % 2) as usize * STEPS;
+        let mut steps = [Step { slice: 0, op: Op::Play }; STEPS];
+        for (i, s) in steps.iter_mut().enumerate() {
+            *s = Step { slice: (half + i) as u8, op: Op::Play };
+        }
+        let mut rng = Rng::stream(self.seed, 0x31C0_BA40_0000 ^ bar);
+        let base = self.micro.map_or(0.0, |m| m.dropouts.chance());
+        let p = if section == Section::Out || base == 0.0 {
+            0.0
+        } else {
+            base + if section == Section::Fracture { 0.12 } else { 0.0 } + if fill { 0.1 } else { 0.0 }
+        };
+        for i in 1..STEPS {
+            if rng.chance(p) {
+                let here = steps[i].slice;
+                steps[i] = match rng.weighted(&[0.3, 0.25, 0.25, 0.2]) {
+                    0 => Step { slice: here, op: Op::Gap },
+                    1 => Step { slice: steps[i - 1].slice, op: Op::Play },
+                    2 => Step { slice: here, op: Op::Ratchet },
+                    _ => Step { slice: here, op: Op::Roll },
+                };
+            }
+        }
+        let mut join = [false; STEPS];
+        for i in 1..STEPS {
+            let (a, b) = (steps[i - 1], steps[i]);
+            join[i] = a.op == Op::Play && b.op == Op::Play && b.slice == a.slice + 1;
+        }
+        Plan { bar, section, fill, steps, join }
     }
 
     /// The slice plan for a garage bar (pure): the loop in order, with
@@ -11533,6 +11808,9 @@ impl Drums {
         if self.swing.is_some() {
             return self.garage_plan(bar, mods);
         }
+        if self.micro.is_some() {
+            return self.micro_plan(bar, mods);
+        }
         let section = self.section(bar / PHRASE_BARS, mods);
         let fill = bar % PHRASE_BARS == PHRASE_BARS - 1;
         let half = (bar % 2) as usize * STEPS;
@@ -11550,8 +11828,8 @@ impl Drums {
             Section::HatsOnly => 0.08,
             Section::Full => 0.14,
             Section::Rolls => 0.32,
-            // Garage sections never reach the jungle plan.
-            Section::Breakdown | Section::TwoStep | Section::Shuffle => 0.0,
+            // Garage and microsound sections never reach the jungle plan.
+            Section::Breakdown | Section::TwoStep | Section::Shuffle | Section::Clicks | Section::Pulse | Section::Fracture => 0.0,
         } + if fill && section != Section::Out { 0.2 } else { 0.0 };
         let strong = self.strong_slices();
         for (i, s) in steps.iter_mut().enumerate().skip(1) {
@@ -11625,6 +11903,8 @@ impl Drums {
         match step.op {
             Op::Play | Op::Reverse => (base, base + len),
             Op::Roll => (base, base + len / 2.0),
+            Op::Ratchet => (base, base + len / 4.0),
+            Op::Gap => (base, base),
             Op::PitchDown => (base, base + len * 0.75),
             Op::Half => {
                 let h = if i % 2 == 0 { 0.0 } else { len / 2.0 };
@@ -11663,14 +11943,20 @@ impl Drums {
 
         // Retriggers: count which drum hits this step plays (display only).
         let (roll_at, roll_from) = self.roll_split(st.slice);
-        let retrigger = t == 0 || (st.op == Op::Roll && t == roll_at);
+        let quarter = (six / 4).max(1);
+        let retrigger = t == 0 || (st.op == Op::Roll && t == roll_at) || (st.op == Op::Ratchet && t % quarter == 0);
         if retrigger && section != Section::Out {
             self.step = i;
             let (lo, hi) = self.range(st, i);
             self.last_hits = self
                 .hits
                 .iter()
-                .filter(|(p, v)| (*p as f64) >= lo && (*p as f64) < hi && (section != Section::HatsOnly || v.is_cymbal()))
+                .filter(|(p, v)| {
+                    (*p as f64) >= lo
+                        && (*p as f64) < hi
+                        && (section != Section::HatsOnly || v.is_cymbal())
+                        && (section != Section::Clicks || *v != Voice::Kick)
+                })
                 .map(|(_, v)| *v)
                 .collect();
             self.hit_count += self.last_hits.len() as u64;
@@ -11692,22 +11978,27 @@ impl Drums {
                 }
             }
             Op::PitchDown => (base + tt * rate * 0.75, t, six),
+            Op::Ratchet => {
+                let u = t % quarter;
+                (base + u as f64 * rate, u, quarter)
+            }
+            Op::Gap => (base, t, six),
             Op::Half => (base + (tt + (i % 2) as f64 * six as f64) * rate * 0.5, t, six),
         };
-        let (mut x, mut xr, mut xp) = if section == Section::Out { (0.0, 0.0, 0.0) } else { self.sample_at(pos) };
+        let (mut x, mut xr, mut xp) = if section == Section::Out || st.op == Op::Gap { (0.0, 0.0, 0.0) } else { self.sample_at(pos) };
 
         // Fade only where the sequence actually jumps.
-        let joined_in = joined && st.op != Op::Roll;
+        let joined_in = joined && !matches!(st.op, Op::Roll | Op::Ratchet);
         let fade_in = if joined_in && local == t { 1.0 } else { (local as f64 / DECLICK as f64).min(1.0) };
         let to_end = local_len - local;
-        let fade_out = if next_joins && st.op != Op::Roll { 1.0 } else { (to_end as f64 / DECLICK as f64).min(1.0) };
+        let fade_out = if next_joins && !matches!(st.op, Op::Roll | Op::Ratchet) { 1.0 } else { (to_end as f64 / DECLICK as f64).min(1.0) };
         x *= fade_in * fade_out;
         xr *= fade_in * fade_out;
         xp *= fade_in * fade_out;
 
         // Hats-only sections: glide a high-pass in, so only the cymbals remain
         // (and the snare-only tape send fades out with it).
-        let target = if section == Section::HatsOnly { 1.0 } else { 0.0 };
+        let target = if matches!(section, Section::HatsOnly | Section::Clicks) { 1.0 } else { 0.0 };
         self.hp_mix += (target - self.hp_mix) * 0.0005;
         let low = self.highpass[0].process(x).low;
         let high = x - low;
@@ -12693,6 +12984,127 @@ impl GlitchSetup {
 
 
 }
+// ---- src/audio/grains.rs ----
+pub mod grains {
+//! Microsound's grain cloud: the sustained bed (the atmosphere loops and the
+//! drone) is listened to, and scattered back as grains — 20–80 ms slices of
+//! the last second and a half, each under a smooth window, now and then an
+//! octave up or down, every one at its own place in the field. Dense, it
+//! becomes a shimmering cloud; sparse, a few motes of the bed.
+//!
+//! The next grain's time, length, source and pan are drawn from a stream
+//! keyed by the grain's own number and placed on the exact sample, so the
+//! cloud never depends on how the audio is cut into blocks.
+
+use crate::math::{pan_gains, sin_turns};
+use crate::rng::Rng;
+
+/// The listening buffer: 1.5 s.
+const HISTORY: usize = 72_000;
+const VOICES: usize = 24;
+
+#[derive(Clone, Copy, Default)]
+struct Grain {
+    /// Read position in the history (fractional), and its step per sample.
+    read: f64,
+    step: f64,
+    pos: u64,
+    len: u64,
+    gl: f64,
+    gr: f64,
+    on: bool,
+}
+
+pub struct Cloud {
+    seed: u64,
+    hist_l: Vec<f64>,
+    hist_r: Vec<f64>,
+    write: usize,
+    /// Samples written so far (the clock the grains are placed on).
+    n: u64,
+    /// When the next grain starts, and its number.
+    next_at: u64,
+    count: u64,
+    /// Mean gap between grains, in samples.
+    gap: f64,
+    voices: [Grain; VOICES],
+}
+
+impl Cloud {
+    /// `amount` 0 (sparse) .. 1 (dense).
+    pub fn new(seed: u64, amount: f64) -> Self {
+        let gap = 0.12 - 0.1 * amount.clamp(0.0, 1.0);
+        Cloud {
+            seed,
+            hist_l: vec![0.0; HISTORY],
+            hist_r: vec![0.0; HISTORY],
+            write: 0,
+            n: 0,
+            next_at: 4_800,
+            count: 0,
+            gap: gap * crate::SAMPLE_RATE as f64,
+            voices: [Grain::default(); VOICES],
+        }
+    }
+
+    fn read(buf: &[f64], at: f64) -> f64 {
+        let i = at.floor();
+        let f = at - i;
+        let i = (i as usize) % HISTORY;
+        let j = (i + 1) % HISTORY;
+        buf[i] + (buf[j] - buf[i]) * f
+    }
+
+    /// Listen to one stereo sample of the bed, and return the cloud's.
+    pub fn process(&mut self, l: f64, r: f64) -> (f64, f64) {
+        let sr = crate::SAMPLE_RATE as f64;
+        self.hist_l[self.write] = l;
+        self.hist_r[self.write] = r;
+        if self.n == self.next_at {
+            let mut rng = Rng::stream(self.seed, 0x6A41_0000 ^ self.count);
+            self.count += 1;
+            let len = (rng.range(0.02, 0.08) * sr) as u64;
+            let step = match rng.weighted(&[0.7, 0.15, 0.15]) {
+                0 => 1.0,
+                1 => 2.0,
+                _ => 0.5,
+            };
+            // Far enough back that even a doubled-speed grain never reaches
+            // the write head.
+            let back = rng.range(0.1, 1.3) * sr + len as f64 * step;
+            let read = (self.write as f64 + HISTORY as f64 - back).rem_euclid(HISTORY as f64);
+            let (gl, gr) = pan_gains(rng.range(-0.95, 0.95));
+            let free = self.voices.iter().position(|g| !g.on);
+            if let Some(k) = free {
+                self.voices[k] = Grain { read, step, pos: 0, len, gl, gr, on: true };
+            }
+            self.next_at = self.n + 1 + (self.gap * rng.range(0.3, 1.7)) as u64;
+        }
+        let (mut ol, mut or) = (0.0, 0.0);
+        for g in self.voices.iter_mut() {
+            if !g.on {
+                continue;
+            }
+            if g.pos >= g.len {
+                g.on = false;
+                continue;
+            }
+            let w = sin_turns(0.5 * g.pos as f64 / g.len as f64);
+            let w = w * w;
+            // The grain is heard from both channels of the bed, summed, then placed.
+            let s = 0.5 * (Self::read(&self.hist_l, g.read) + Self::read(&self.hist_r, g.read)) * w;
+            g.read = (g.read + g.step).rem_euclid(HISTORY as f64);
+            g.pos += 1;
+            ol += s * g.gl;
+            or += s * g.gr;
+        }
+        self.write = (self.write + 1) % HISTORY;
+        self.n += 1;
+        (ol, or)
+    }
+}
+
+}
 // ---- src/audio/harmony.rs ----
 pub mod harmony {
 //! Harmony: the scale, the key, and a weighted progression of 1–4 complex,
@@ -12844,10 +13256,13 @@ pub enum Pace {
     /// 2-step garage: chords change every two drum bars (as half-time), and
     /// the drums, bass and stabs play the garage way.
     Garage,
+    /// Microsound: clicks, grains and sine pips on a faint pulse; chords
+    /// change slowly (as half-time), everything plays small and exact.
+    Micro,
 }
 
 /// The modes, in setup order.
-pub const PACES: [Pace; 3] = [Pace::HalfTime, Pace::Jungle, Pace::Garage];
+pub const PACES: [Pace; 4] = [Pace::HalfTime, Pace::Jungle, Pace::Garage, Pace::Micro];
 
 impl Pace {
     pub fn name(self) -> &'static str {
@@ -12855,6 +13270,7 @@ impl Pace {
             Pace::HalfTime => "half-time",
             Pace::Jungle => "jungle",
             Pace::Garage => "2-step garage",
+            Pace::Micro => "microsound",
         }
     }
 
@@ -12862,7 +13278,7 @@ impl Pace {
     pub fn from_name(name: &str) -> Option<Pace> {
         let key = |s: &str| s.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect::<String>();
         let want = key(name);
-        PACES.into_iter().find(|p| key(p.name()) == want || (want == "garage" && *p == Pace::Garage))
+        PACES.into_iter().find(|p| key(p.name()) == want || (want == "garage" && *p == Pace::Garage) || (want == "micro" && *p == Pace::Micro))
     }
 
     /// Recipe value.
@@ -12871,6 +13287,7 @@ impl Pace {
             Pace::HalfTime => 0,
             Pace::Jungle => 1,
             Pace::Garage => 2,
+            Pace::Micro => 3,
         }
     }
 
@@ -12880,6 +13297,7 @@ impl Pace {
             Pace::HalfTime => 4 * beat,
             Pace::Jungle => 2 * beat,
             Pace::Garage => 4 * beat,
+            Pace::Micro => 4 * beat,
         }
     }
 }
@@ -13944,6 +14362,82 @@ pub fn clap(p: &KitParams, vel: f64, rng: &mut Rng) -> Vec<f64> {
     v
 }
 
+/// Microsound's kick: a pure sub sine (42–58 Hz from the kit's own kick)
+/// with the barest pitch dip and a short decay, so the beat is felt more than
+/// heard. No click of its own; the pulse adds one when asked.
+pub fn sub_kick(p: &KitParams, vel: f64) -> Vec<f64> {
+    let to = p.kick_to.clamp(42.0, 58.0);
+    let len = (0.12 * SR) as usize;
+    let amp_k = decay_coef(0.045, SR);
+    let mut dive = Dive::new(to * 1.6, to, 0.008);
+    let (mut amp, mut ph) = (1.0, 0.0);
+    (0..len)
+        .map(|i| {
+            let f = dive.next();
+            let attack = (i as f64 / 96.0).min(1.0);
+            let s = sin_turns(ph) * amp * attack;
+            ph += f / SR;
+            ph -= ph.floor();
+            amp *= amp_k;
+            // The last 4 ms fade, so the tail never ends on a step.
+            let tail = ((len - i) as f64 / 192.0).min(1.0);
+            s * tail * vel
+        })
+        .collect()
+}
+
+/// Microsound's click: one to three samples of impulse, rung through a
+/// very short high resonance. `bright` lifts it toward the top of hearing.
+pub fn micro_click(p: &KitParams, vel: f64, bright: bool, rng: &mut Rng) -> Vec<f64> {
+    let centre = if bright { rng.range(7_000.0, 12_000.0) } else { rng.range(2_500.0, 6_000.0) };
+    let mut bp = Svf::new(centre, rng.range(2.0, 5.0), SR);
+    let width = 1 + rng.below(3);
+    let len = 96;
+    let crushed = matches!(p.kit, Kit::Crush | Kit::DataDust | Kit::PulseCode);
+    let mut v: Vec<f64> = (0..len)
+        .map(|i| {
+            let x = if i < width { if i % 2 == 0 { 1.0 } else { -0.6 } } else { 0.0 };
+            let ring = bp.process(x).band;
+            (x * 0.5 + ring * 1.5) * vel
+        })
+        .collect();
+    if crushed {
+        for x in v.iter_mut() {
+            *x = crush(*x, 6.0);
+        }
+    }
+    v
+}
+
+/// Microsound's grain: 2–8 ms under a smooth window, either a sliver of
+/// band-passed noise or a high sine, panned by the caller.
+pub fn micro_grain(p: &KitParams, vel: f64, rng: &mut Rng) -> Vec<f64> {
+    let len = (rng.range(0.002, 0.008) * SR) as usize;
+    let tone = rng.chance(0.45);
+    let f = if tone {
+        // The kit's metal partials, lifted into the air.
+        rng.pick(&p.metal) * rng.pick(&[8.0, 12.0, 16.0])
+    } else {
+        rng.range(1_500.0, 9_000.0)
+    };
+    let mut bp = Svf::new(f.min(16_000.0), 3.0, SR);
+    let mut ph = rng.unit();
+    (0..len)
+        .map(|i| {
+            let w = sin_turns(0.5 * i as f64 / len as f64);
+            let s = if tone {
+                let s = sin_turns(ph);
+                ph += f / SR;
+                ph -= ph.floor();
+                s
+            } else {
+                bp.process(rng.bipolar()).band * 2.5
+            };
+            s * w * w * vel
+        })
+        .collect()
+}
+
 pub fn snare(p: &KitParams, vel: f64, ghost: bool, rng: &mut Rng) -> Vec<f64> {
     let decay = if ghost { p.snare_decay * 0.4 } else { p.snare_decay };
     let len = ((decay * 1.6 + 0.05) * SR) as usize;
@@ -14483,6 +14977,150 @@ fn read_delay(left: &[f64], right: &[f64], write: usize, delay: f64) -> (f64, f6
 
 
 }
+// ---- src/audio/micro.rs ----
+pub mod micro {
+//! The microsound mode's own settings. Microsound works at the smallest time
+//! scale of music: clicks a few samples long, grains of a few milliseconds,
+//! short sine pips, and silence, placed exactly. This mode keeps a faint
+//! pulse under them (the "clicks and cuts" way): a sub-sine kick on the beat,
+//! a sub pulse on the off-beats, ticks and grains on the sixteenths, digital
+//! dropouts as edits, the bed scattered into a grain cloud. The settings only
+//! matter in microsound; the other modes ignore them, so their sound never
+//! moves.
+
+/// What carries the beat.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pulse {
+    /// No beat: only the ticks, grains and pips.
+    Off,
+    /// A sub-sine kick on each beat and a sub pulse on the off-beats.
+    Sub,
+    /// The same, with a click on every kick and a few on the off-beats.
+    SubClick,
+}
+
+pub const PULSES: [Pulse; 3] = [Pulse::Off, Pulse::Sub, Pulse::SubClick];
+
+impl Pulse {
+    pub fn name(self) -> &'static str {
+        match self {
+            Pulse::Off => "off",
+            Pulse::Sub => "sub",
+            Pulse::SubClick => "sub + click",
+        }
+    }
+}
+
+/// How thick the grains are, in the drums and in the cloud the bed becomes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Grains {
+    Sparse,
+    Medium,
+    Dense,
+}
+
+pub const GRAINS: [Grains; 3] = [Grains::Sparse, Grains::Medium, Grains::Dense];
+
+impl Grains {
+    pub fn name(self) -> &'static str {
+        match self {
+            Grains::Sparse => "sparse",
+            Grains::Medium => "medium",
+            Grains::Dense => "dense",
+        }
+    }
+
+    /// 0 (sparse) .. 1 (dense).
+    pub fn amount(self) -> f64 {
+        match self {
+            Grains::Sparse => 0.0,
+            Grains::Medium => 0.5,
+            Grains::Dense => 1.0,
+        }
+    }
+}
+
+/// How often the high sine pips play.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pips {
+    Off,
+    Sparse,
+    Busy,
+}
+
+pub const PIPS: [Pips; 3] = [Pips::Off, Pips::Sparse, Pips::Busy];
+
+impl Pips {
+    pub fn name(self) -> &'static str {
+        match self {
+            Pips::Off => "off",
+            Pips::Sparse => "sparse",
+            Pips::Busy => "busy",
+        }
+    }
+}
+
+/// How often the beat fails: gaps, skips and tiny repeats, like a skipping
+/// disc or a dropping buffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dropouts {
+    Off,
+    Some,
+    Many,
+}
+
+pub const DROPOUTS: [Dropouts; 3] = [Dropouts::Off, Dropouts::Some, Dropouts::Many];
+
+impl Dropouts {
+    pub fn name(self) -> &'static str {
+        match self {
+            Dropouts::Off => "off",
+            Dropouts::Some => "some",
+            Dropouts::Many => "many",
+        }
+    }
+
+    /// The chance a step is edited.
+    pub fn chance(self) -> f64 {
+        match self {
+            Dropouts::Off => 0.0,
+            Dropouts::Some => 0.07,
+            Dropouts::Many => 0.18,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MicroSetup {
+    pub pulse: Pulse,
+    pub grains: Grains,
+    pub pips: Pips,
+    pub dropouts: Dropouts,
+}
+
+impl MicroSetup {
+    pub const DEFAULT: MicroSetup =
+        MicroSetup { pulse: Pulse::SubClick, grains: Grains::Medium, pips: Pips::Sparse, dropouts: Dropouts::Some };
+
+    /// One recipe word: two bits each.
+    pub fn word(self) -> u32 {
+        fn idx<T: PartialEq>(all: &[T], v: T) -> u32 {
+            all.iter().position(|x| *x == v).unwrap_or(0) as u32
+        }
+        idx(&PULSES, self.pulse) | idx(&GRAINS, self.grains) << 2 | idx(&PIPS, self.pips) << 4 | idx(&DROPOUTS, self.dropouts) << 6
+    }
+
+    pub fn from_word(w: u32) -> Self {
+        fn at<T: Copy>(all: &[T], i: u32) -> T {
+            all[(i & 3) as usize % all.len()]
+        }
+        MicroSetup { pulse: at(&PULSES, w), grains: at(&GRAINS, w >> 2), pips: at(&PIPS, w >> 4), dropouts: at(&DROPOUTS, w >> 6) }
+    }
+}
+
+
+
+}
 // ---- src/audio/modulate.rs ----
 pub mod modulate {
 //! Very slow cyclic modulation that shapes the endless form.
@@ -14818,6 +15456,181 @@ impl Layer {
             }
         }
         out
+    }
+}
+
+}
+// ---- src/audio/pips.rs ----
+pub mod pips {
+//! Microsound's sine pips: the melodic dust of the mode. Each pip is one
+//! tone of the current chord lifted three or four octaves (about 1.5–8 kHz),
+//! a pure sine 5–40 ms long under a smooth window, set at an exact place in
+//! the stereo field. They land on the sixteenths, now and then on a
+//! thirty-second between them, and sometimes come as a pair a thirty-second
+//! apart. A short, quiet ping-pong echo gives each a small room.
+//!
+//! Every bar's pips are a pure function of seed 6 and the bar number.
+
+use crate::delay::PingPong;
+use crate::harmony::Harmony;
+use crate::math::{midi_hz, sin_turns};
+use crate::micro::Pips as Density;
+use crate::rng::Rng;
+use crate::tempo::Tempo;
+
+const VOICES: usize = 8;
+const LEVEL: f64 = 0.16;
+const ECHO_MIX: f64 = 0.3;
+const ECHO_FEEDBACK: f64 = 0.3;
+
+/// One pip in a bar.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pip {
+    /// Where it starts, in thirty-seconds (0..32).
+    pub at: u8,
+    /// Which chord tone (index into the chord's tones, wrapped).
+    pub tone: u8,
+    /// Octaves above the chord tone's own register.
+    pub lift: u8,
+    /// Length in milliseconds.
+    pub ms: f64,
+    pub vel: f64,
+    pub pan: f64,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Voice {
+    freq: f64,
+    phase: f64,
+    pos: u64,
+    len: u64,
+    vel: f64,
+    pan: f64,
+    on: bool,
+}
+
+pub struct Pips {
+    seed: u64,
+    density: Density,
+    /// A thirty-second and a bar, in samples.
+    t32: u64,
+    bar: u64,
+    voices: [Voice; VOICES],
+    next_voice: usize,
+    plan: Option<(u64, Vec<Pip>)>,
+    echo: PingPong,
+}
+
+impl Pips {
+    pub fn new(seed: u64, density: Density, tempo: Tempo) -> Self {
+        let six = tempo.drum16;
+        Pips {
+            seed,
+            density,
+            t32: six / 2,
+            bar: 16 * six,
+            voices: [Voice::default(); VOICES],
+            next_voice: 0,
+            plan: None,
+            // A dotted eighth: three sixteenths, so the repeats fall between.
+            echo: PingPong::new((3 * six) as usize, ECHO_FEEDBACK),
+        }
+    }
+
+    /// The pips of bar `bar` (pure).
+    pub fn plan(&self, bar: u64) -> Vec<Pip> {
+        let (lo, hi) = match self.density {
+            Density::Off => return Vec::new(),
+            Density::Sparse => (0, 3),
+            Density::Busy => (3, 8),
+        };
+        // A two-bar figure, reshaped every eight bars.
+        let (figure, shape) = (bar % 2, bar / 8);
+        let mut rng = Rng::stream(self.seed, 0x919_0000 ^ (shape << 4) ^ figure);
+        let n = lo + rng.below(hi - lo + 1);
+        let mut out: Vec<Pip> = Vec::new();
+        for _ in 0..n {
+            // Mostly on the sixteenths.
+            let at = (rng.below(16) * 2 + if rng.chance(0.2) { 1 } else { 0 }) as u8;
+            if out.iter().any(|p| p.at == at) {
+                continue;
+            }
+            let pip = Pip {
+                at,
+                tone: rng.below(4) as u8,
+                lift: if rng.chance(0.6) { 3 } else { 4 },
+                ms: rng.range(5.0, 40.0),
+                vel: rng.range(0.5, 1.0),
+                pan: rng.range(-0.9, 0.9),
+            };
+            out.push(pip);
+            // Now and then a twin, a thirty-second later, on the other side.
+            if at < 31 && rng.chance(0.25) {
+                out.push(Pip { at: at + 1, vel: pip.vel * 0.6, pan: -pip.pan, ..pip });
+            }
+        }
+        out.sort_by_key(|p| p.at);
+        out
+    }
+
+    /// One stereo sample.
+    pub fn next(&mut self, clock: u64, harmony: &Harmony, active: bool) -> (f64, f64) {
+        let sr = crate::SAMPLE_RATE as f64;
+        let bar = clock / self.bar;
+        let in_bar = clock % self.bar;
+        if self.plan.as_ref().is_none_or(|(b, _)| *b != bar) {
+            self.plan = Some((bar, self.plan(bar)));
+        }
+        if active && in_bar % self.t32 == 0 {
+            let slot = (in_bar / self.t32) as u8;
+            let due: Vec<Pip> = self.plan.as_ref().unwrap().1.iter().copied().filter(|p| p.at == slot).collect();
+            if !due.is_empty() {
+                let chord = &harmony.chords[harmony.at(clock).chord];
+                for p in due {
+                    let tones = &chord.notes;
+                    let base = tones[p.tone as usize % tones.len()];
+                    // The tone's pitch class, lifted into the air.
+                    let mut midi = base + 12.0 * p.lift as f64;
+                    while midi > 112.0 {
+                        midi -= 12.0;
+                    }
+                    while midi < 82.0 {
+                        midi += 12.0;
+                    }
+                    let v = &mut self.voices[self.next_voice];
+                    self.next_voice = (self.next_voice + 1) % VOICES;
+                    *v = Voice {
+                        freq: midi_hz(midi),
+                        phase: 0.0,
+                        pos: 0,
+                        len: ((p.ms / 1000.0) * sr) as u64,
+                        vel: p.vel,
+                        pan: p.pan,
+                        on: true,
+                    };
+                }
+            }
+        }
+        let (mut l, mut r) = (0.0, 0.0);
+        for v in self.voices.iter_mut() {
+            if !v.on {
+                continue;
+            }
+            if v.pos >= v.len {
+                v.on = false;
+                continue;
+            }
+            let w = sin_turns(0.5 * v.pos as f64 / v.len as f64);
+            let s = sin_turns(v.phase) * w * w * v.vel;
+            v.phase += v.freq / sr;
+            v.phase -= v.phase.floor();
+            v.pos += 1;
+            let (gl, gr) = crate::math::pan_gains(v.pan);
+            l += s * gl;
+            r += s * gr;
+        }
+        let (el, er) = self.echo.process(l, r);
+        ((l + el * ECHO_MIX) * LEVEL, (r + er * ECHO_MIX) * LEVEL)
     }
 }
 
@@ -16382,6 +17195,41 @@ pub struct Settings {
     /// joined part-way: the audio is fast-forwarded exactly, the visuals and
     /// weather simply begin at that time.
     pub start_s: u16,
+    /// The microsound mode's pulse, grains, pips and dropouts (ignored by
+    /// the other modes).
+    pub micro: crate::micro::MicroSetup,
+}
+
+impl Settings {
+    /// What suits each mode, when nothing was chosen by hand: (tempo,
+    /// scale, chord count). Garage lives around 130 BPM in a plain major
+    /// scale on a four-chord loop; microsound around 120 in a gapped
+    /// pentatonic, so its sine pips can never clash, on two slow chords.
+    pub fn mode_defaults(pace: Pace) -> (u16, Scale, u8) {
+        match pace {
+            Pace::HalfTime | Pace::Jungle => (DEFAULT_SETTINGS.bpm, DEFAULT_SETTINGS.scale, DEFAULT_SETTINGS.chords),
+            Pace::Garage => (132, Scale::Ionian, 4),
+            Pace::Micro => (120, Scale::PentatonicMinor, 2),
+        }
+    }
+
+    /// Switch to `pace`. Tempo, scale and chord count that were still at the
+    /// old mode's defaults move to the new mode's; anything chosen by hand
+    /// is kept.
+    pub fn set_mode(&mut self, pace: Pace) {
+        let (bpm, scale, chords) = Settings::mode_defaults(self.pace);
+        let (nbpm, nscale, nchords) = Settings::mode_defaults(pace);
+        if self.bpm == bpm {
+            self.bpm = nbpm;
+        }
+        if self.scale == scale {
+            self.scale = nscale;
+        }
+        if self.chords == chords {
+            self.chords = nchords;
+        }
+        self.pace = pace;
+    }
 }
 
 /// The latest start offset, in seconds (the audio must be fast-forwarded to
@@ -16420,6 +17268,7 @@ pub const DEFAULT_SETTINGS: Settings =
         wildlife: false,
         garage: crate::garage::GarageSetup::DEFAULT,
         start_s: 0,
+        micro: crate::micro::MicroSetup::DEFAULT,
     };
 
 /// 0010's sound: the default settings with no atmosphere loops.
@@ -16438,6 +17287,18 @@ const GARAGE_STAB_DUCK: f64 = 0.3;
 const STAB_SEND: f64 = 0.35;
 /// How far the garage reverb send dips before each change.
 const GARAGE_SEND_DIP: f64 = 0.7;
+/// Microsound's balance: the thin drone well back, the glitches forward,
+/// less of everything in the reverb, the whole about 3 dB quieter (which
+/// keeps the output stage clear of saturation), the pips' reverb send.
+const MICRO_DRONE: f64 = 0.4;
+const MICRO_GLITCH: f64 = 1.25;
+const MICRO_SEND: f64 = 0.5;
+const MICRO_WET: f64 = 0.7;
+const MICRO_LEVEL: f64 = 0.7;
+const PIP_SEND: f64 = 0.25;
+/// How much of the loops stays as it is, sparse .. dense grains, and the cloud's level.
+const MICRO_BED_DRY: [f64; 2] = [0.8, 0.35];
+const CLOUD_LEVEL: f64 = 0.9;
 const ECHO_SIXTEENTHS: u64 = 3;
 /// The drums' tape echo delay, in drum sixteenths.
 const TAPE_SIXTEENTHS: u64 = 3;
@@ -16608,6 +17469,10 @@ pub struct Track {
     pub(crate) bassline: Option<crate::bass::BassLine>,
     /// 2-step garage's chord stabs.
     pub(crate) stabs: Option<crate::stabs::Stabs>,
+    /// Microsound's sine pips, sub pulse and grain cloud.
+    pub(crate) pips: Option<crate::pips::Pips>,
+    pub(crate) sub_pulse: Option<crate::bass::SubPulse>,
+    pub(crate) cloud: Option<crate::grains::Cloud>,
     /// 2-step garage: how far the drone (and the pitched glitches) step back
     /// under a chord that rubs against the drone's open fifth.
     pub(crate) pedal_gain: f64,
@@ -16662,10 +17527,11 @@ impl Track {
             let beats = crate::atmos::loop_beats(tempo.beat(), LOOP_SECONDS[i], (i > 0).then_some(avoid));
             avoid = avoid.wrapping_mul(beats);
         }
-        let mut drums = if settings.pace == Pace::Garage {
-            Drums::garage(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.garage.swing_fraction())
-        } else {
-            Drums::new(seeds.s5, settings.kit, settings.space, &harmony, tempo)
+        let micro = settings.pace == Pace::Micro;
+        let mut drums = match settings.pace {
+            Pace::Garage => Drums::garage(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.garage.swing_fraction()),
+            Pace::Micro => Drums::micro(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.micro),
+            Pace::HalfTime | Pace::Jungle => Drums::new(seeds.s5, settings.kit, settings.space, &harmony, tempo),
         };
         drums.set_reverse(settings.drum_reverse);
         Track {
@@ -16700,7 +17566,7 @@ impl Track {
                 )
             }),
             loop_windows: [1.0; 4],
-            drone: Drone::new(seeds.s1, drone_harmony, first, rest),
+            drone: if micro { Drone::thin(seeds.s1, drone_harmony, first, rest) } else { Drone::new(seeds.s1, drone_harmony, first, rest) },
             drone_rhythm: crate::drone_rhythm::DroneRhythm::new(seeds.s7, settings.bpm),
             drone_filter: [Svf::new(1000.0, 0.7, sr), Svf::new(1000.0, 0.7, sr)],
             drone_tone_filter: [Svf::new(8_000.0, 0.7, sr), Svf::new(8_000.0, 0.7, sr)],
@@ -16715,6 +17581,10 @@ impl Track {
             stabs: (settings.pace == Pace::Garage && settings.garage.stabs != crate::garage::Stabs::Off).then(|| {
                 crate::stabs::Stabs::new(seeds.s6, settings.garage.stabs, settings.garage.tone, tempo, settings.garage.swing_fraction())
             }),
+            pips: (micro && settings.micro.pips != crate::micro::Pips::Off)
+                .then(|| crate::pips::Pips::new(seeds.s6, settings.micro.pips, tempo)),
+            sub_pulse: (micro && settings.micro.pulse != crate::micro::Pulse::Off).then(|| crate::bass::SubPulse::new(seeds.s4, tempo)),
+            cloud: micro.then(|| crate::grains::Cloud::new(seeds.s6, settings.micro.grains.amount())),
             reverb: Reverb::new(),
             dc: Default::default(),
             meters: Meters::default(),
@@ -16838,6 +17708,8 @@ impl Track {
             self.pedal_gain += (self.pedal_target - self.pedal_gain) * 0.0004;
             let g = GARAGE_DRONE * self.pedal_gain;
             (dl * g, dr * g)
+        } else if self.settings.pace == Pace::Micro {
+            (dl * MICRO_DRONE, dr * MICRO_DRONE)
         } else {
             (dl, dr)
         };
@@ -16853,6 +17725,9 @@ impl Track {
         // Garage: the glitches (which chop the drone) step back with it.
         let (g1, g2) = if self.settings.pace == Pace::Garage {
             let k = 0.4 + 0.6 * self.pedal_gain;
+            ((g1.0 * k, g1.1 * k), (g2.0 * k, g2.1 * k))
+        } else if self.settings.pace == Pace::Micro {
+            let k = MICRO_GLITCH;
             ((g1.0 * k, g1.1 * k), (g2.0 * k, g2.1 * k))
         } else {
             (g1, g2)
@@ -16880,6 +17755,35 @@ impl Track {
                 };
             }
         }
+
+        // Microsound: the bed is listened to and scattered back as grains;
+        // the loops themselves step back to make room for their cloud.
+        let cloud = match self.cloud.as_mut() {
+            Some(c) => {
+                let bed = (0..4).fold((dl * 0.5, dr * 0.5), |(x, y), k| (x + a[k].0 * LOOP_DRY[k], y + a[k].1 * LOOP_DRY[k]));
+                let (cl, cr) = c.process(bed.0, bed.1);
+                let g = self.settings.micro.grains.amount();
+                let keep = MICRO_BED_DRY[0] + (MICRO_BED_DRY[1] - MICRO_BED_DRY[0]) * g;
+                for x in a.iter_mut() {
+                    *x = (x.0 * keep, x.1 * keep);
+                }
+                Some((cl * CLOUD_LEVEL, cr * CLOUD_LEVEL))
+            }
+            None => None,
+        };
+        // Microsound: the pips and the sub pulse play when the pulse does
+        // (the pips also through the clicks-only sections).
+        let micro = (self.settings.pace == Pace::Micro).then(|| {
+            let section = self.drums.plan_now().map(|plan| plan.section);
+            match section {
+                Some(s) => (matches!(s, Section::Pulse | Section::Fracture), matches!(s, Section::Clicks | Section::Pulse | Section::Fracture)),
+                None => (!self.drums.enabled(), !self.drums.enabled()),
+            }
+        });
+        let pip = match (self.pips.as_mut(), micro) {
+            (Some(p), Some((_, on))) => Some(p.next(clock, &self.harmony, on)),
+            _ => None,
+        };
 
         // 4: bass, gliding to each chord's root during the morph bar. The bass
         // leaves with the drone: one arrangement, one envelope.
@@ -16911,6 +17815,13 @@ impl Track {
             // its fifth is the chord's own (a flat fifth on a m7b5).
             let fifth = (self.harmony.chords[chord].tones[2] as f64 - self.harmony.chords[chord].tones[0] as f64).rem_euclid(12.0);
             line.next(clock, root, next_root, fifth, changing && self.harmony.starts_pass(next), active, &m) * (1.0 - GARAGE_BASS_DUCK * punch)
+        } else if let Some((active, _)) = micro {
+            // Microsound has no drone bass: only the sub pulse, if any.
+            let root = self.harmony.chords[self.harmony.at(clock).chord].bass;
+            match self.sub_pulse.as_mut() {
+                Some(sp) => sp.next(clock, root, active) * window,
+                None => 0.0,
+            }
         } else {
             if clock % 32 == 0 {
                 let p = self.harmony.at(clock);
@@ -16929,6 +17840,11 @@ impl Track {
         };
         let loop_send = |k: usize| -> f64 { (0..4).map(|j| [a[j].0, a[j].1][k] * LOOP_SEND[j]).sum() };
         let send = |x: f64, k: usize| {
+            if micro.is_some() {
+                let p = pip.map_or(0.0, |p| [p.0, p.1][k]);
+                let c = cloud.map_or(0.0, |c| [c.0, c.1][k]);
+                return (x + p * PIP_SEND + c * LOOP_SEND[0]) * MICRO_SEND;
+            }
             if garage.is_none() {
                 return x;
             }
@@ -16987,6 +17903,17 @@ impl Track {
         if let Some((sl, sr_)) = stab {
             l += sl;
             r += sr_;
+        }
+        if micro.is_some() {
+            // Less room, the pips and the cloud on top.
+            l -= rl * REVERB_WET * (1.0 - MICRO_WET);
+            r -= rr * REVERB_WET * (1.0 - MICRO_WET);
+            for (x, y) in [pip, cloud].into_iter().flatten() {
+                l += x;
+                r += y;
+            }
+            l *= MICRO_LEVEL;
+            r *= MICRO_LEVEL;
         }
 
         let fade_len = FADE_IN_SECONDS * crate::SAMPLE_RATE as u64;
@@ -17371,7 +18298,7 @@ pub use self::track::*;
 // Baked recipe — this artifact is this shrine
 // ============================================================================
 /// `recipe::encode` of the settings the setup menu produced.
-const RECIPE: [u32; 167] = [17, 0, 1003, 0, 172, 0, 47, 0, 1009, 0, 2026, 0, 168, 0, 11, 0, 7, 3, 2, 1, 4, 2, 5, 2, 132, 9, 12, 160, 30, 0, 1, 12, 0, 0, 0, 40, 10, 1, 13, 0, 0, 0, 120, 30, 1, 7, 0, 0, 0, 80, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3358395905, 51370, 188928180, 133152, 5546119, 67368, 5016745, 49764, 178, 0, 612666, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 875638832, 1126182176, 544830569, 7238994, 0, 0, 0, 0];
+const RECIPE: [u32; 168] = [18, 0, 1003, 0, 172, 0, 47, 0, 1009, 0, 2026, 0, 168, 0, 11, 0, 7, 3, 2, 1, 4, 2, 5, 2, 132, 9, 12, 160, 30, 0, 1, 12, 0, 0, 0, 40, 10, 1, 13, 0, 0, 0, 120, 30, 1, 7, 0, 0, 0, 80, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3358395905, 51370, 188928180, 133152, 5546119, 67368, 5016745, 49764, 178, 0, 612666, 0, 86, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 875638832, 1126182176, 544830569, 7238994, 0, 0, 0, 0];
 
 /// Build date as `YYYYMMDD`, stamped when this file was emitted.
 const BUILD: u32 = 20261018;

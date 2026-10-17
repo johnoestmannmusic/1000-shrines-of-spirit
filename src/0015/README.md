@@ -84,7 +84,7 @@ Seeds chosen on the command line still land on a wild biome; the futures are
 picked by name (`--biome near-future`, `research-lab`, `ecofuture`, `greenhouse`).
 
 **Mode** sets how the music moves: *half-time* and *jungle* (the chopped
-break), or **2-step garage** — melodic, optimistic, swung. In garage:
+break), **2-step garage** — melodic, optimistic, swung — or **microsound**. In garage:
 
 - the drums play a 2-step loop at the track's own tempo: a kick on the one and
   a second that skips past beat three, claps on two and four, rimshots on the
@@ -116,6 +116,31 @@ break), or **2-step garage** — melodic, optimistic, swung. In garage:
 Choosing garage moves a default tempo to 132 BPM, Lydian to Ionian and three
 chords to four; anything set by hand is kept. Two bright Japanese scales join
 the Scale list for every mode: the major pentatonic (*yonanuki*) and *Ryukyu*.
+
+**Microsound** works at the smallest scale of sound — clicks a few samples
+long, grains of a few milliseconds, short sine pips — on a faint, exact
+pulse (no swing, no human timing):
+
+- **Pulse** *sub* puts a sub-sine kick on every beat and a sub pulse on the
+  chord root on the off-beats; *sub + click* adds a click to each kick and a
+  few on the off-beats; *off* leaves only the small sounds. Ticks and grains
+  fall on the sixteenths, panned anywhere across the field, and skip the
+  sampler colour, so each stays as sharp as it was made. Sections move
+  between clicks alone, the pulse, and the pulse failing more often;
+- **Dropouts** (*off / some / many*) are its edits: a step drops out, skips
+  back to repeat the one before, or ratchets four times in a sixteenth;
+- **Grains** (*sparse / medium / dense*) sets how many ticks and grains the
+  loop holds, and how thick the cloud the bed becomes: the atmosphere loops
+  and the drone are listened to and scattered back as 20–80 ms grains;
+- **Pips** (*off / sparse / busy*) play chord tones as pure sine pips of
+  5–40 ms, three or four octaves up, through a small ping-pong echo;
+- the drone is frozen from pure sines (no FM), thin and well back; the glitch
+  layers come forward, there is less reverb, and the whole sits about 3 dB
+  lower.
+
+Choosing microsound moves a default tempo to 120 BPM, the scale to the minor
+pentatonic and the chords to two (and back again when you leave), and keeps
+the Kit to the light kits.
 **Camera · Rotation speed** orbits
 the whole viewport around the shrine, in degrees per second (default 0); the
 **Code plane** setting puts the scrolling source on a *static* plane, a *flat*
@@ -207,7 +232,7 @@ Rust exactly.
 cargo run                                   interactive setup + live preview
 cargo run -- --preview [SEED] [--biome] [--weather] [--out FILE]
 cargo run -- --cover  [SEED] …              1600×1600 PNG
-cargo run -- --wav    [SEED] [SECONDS] … [--mode garage] [--bpm N]   plain WAV
+cargo run -- --wav    [SEED] [SECONDS] … [--mode garage|micro] [--bpm N]   plain WAV
 cargo run -- --emit   [--seed N] [--biome] [--weather] [--out FILE]
 cargo run -- --export / --import FILE.shrineseed
 cargo run -- --serve  [PORT]                serve web/ locally

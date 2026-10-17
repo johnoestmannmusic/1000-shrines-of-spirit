@@ -23,7 +23,7 @@ use crate::track::{DroneArc, KeyChoice, LoopDesign, Seeds, Settings};
 use crate::weather::WeatherKind;
 use crate::{DEFAULT_SEEDS, DEFAULT_SETTINGS};
 
-pub const VERSION: u32 = 17;
+pub const VERSION: u32 = 18;
 
 /// Encode a configuration.
 pub fn encode(config: &SimConfig) -> Vec<u32> {
@@ -94,6 +94,8 @@ pub fn encode(config: &SimConfig) -> Vec<u32> {
     w.push(s.garage.word());
     // Version 17: the start offset.
     w.push(s.start_s as u32);
+    // Version 18: the microsound setup.
+    w.push(s.micro.word());
     for word in s.model.words() {
         w.push(word);
     }
@@ -128,6 +130,7 @@ pub fn decode(words: &[u32]) -> SimConfig {
     let pace = match c.next() {
         1 => Pace::Jungle,
         2 => Pace::Garage,
+        3 => Pace::Micro,
         _ => Pace::HalfTime,
     };
     let kit = KITS[(c.next() as usize) % KITS.len()];
@@ -204,6 +207,8 @@ pub fn decode(words: &[u32]) -> SimConfig {
     let garage = if version >= 16 { crate::garage::GarageSetup::from_word(c.next()) } else { crate::garage::GarageSetup::DEFAULT };
     // Version 17 added the start offset; older recipes start at the beginning.
     let start_s = if version >= 17 { c.next().min(crate::track::MAX_START_S as u32) as u16 } else { 0 };
+    // Version 18 added microsound's own settings.
+    let micro = if version >= 18 { crate::micro::MicroSetup::from_word(c.next()) } else { crate::micro::MicroSetup::DEFAULT };
     let model = if version >= 14 {
         let words: Vec<u32> = (0..crate::shrine_model::WORDS as u32).map(|_| c.next()).collect();
         crate::shrine_model::ShrineModel::from_words(&words)
@@ -255,6 +260,7 @@ pub fn decode(words: &[u32]) -> SimConfig {
             wildlife,
             garage,
             start_s,
+            micro,
         },
         biome,
         weather,

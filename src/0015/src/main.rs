@@ -145,21 +145,19 @@ fn parse(args: &[String]) -> Args {
 }
 
 fn sim_for(a: &Args) -> Sim {
-    Sim::new(SimConfig {
-        seed: a.seed,
-        seeds: DEFAULT_SEEDS,
-        settings: shrine0015::Settings {
-            pace: a.mode.unwrap_or(DEFAULT_SETTINGS.pace),
-            // Garage sits around 132 BPM, in Ionian, on four chords, unless told otherwise.
-            bpm: a.bpm.unwrap_or(if a.mode == Some(shrine0015::harmony::Pace::Garage) { 132 } else { DEFAULT_SETTINGS.bpm }),
-            scale: a.scale.unwrap_or(if a.mode == Some(shrine0015::harmony::Pace::Garage) { shrine0015::harmony::Scale::Ionian } else { DEFAULT_SETTINGS.scale }),
-            garage: shrine0015::garage::GarageSetup { progression: a.progression, lift: a.lift, ..DEFAULT_SETTINGS.garage },
-            chords: if a.mode == Some(shrine0015::harmony::Pace::Garage) { 4 } else { DEFAULT_SETTINGS.chords },
-            ..DEFAULT_SETTINGS
-        },
-        biome: a.biome,
-        weather: a.weather,
-    })
+    // Each mode brings its own tempo, scale and chord count, unless told otherwise.
+    let mut settings = DEFAULT_SETTINGS;
+    if let Some(mode) = a.mode {
+        settings.set_mode(mode);
+    }
+    if let Some(bpm) = a.bpm {
+        settings.bpm = bpm;
+    }
+    if let Some(scale) = a.scale {
+        settings.scale = scale;
+    }
+    settings.garage = shrine0015::garage::GarageSetup { progression: a.progression, lift: a.lift, ..DEFAULT_SETTINGS.garage };
+    Sim::new(SimConfig { seed: a.seed, seeds: DEFAULT_SEEDS, settings, biome: a.biome, weather: a.weather })
 }
 
 fn main() {

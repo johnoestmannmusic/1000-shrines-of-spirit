@@ -241,6 +241,41 @@ pub struct Settings {
     /// joined part-way: the audio is fast-forwarded exactly, the visuals and
     /// weather simply begin at that time.
     pub start_s: u16,
+    /// The microsound mode's pulse, grains, pips and dropouts (ignored by
+    /// the other modes).
+    pub micro: crate::micro::MicroSetup,
+}
+
+impl Settings {
+    /// What suits each mode, when nothing was chosen by hand: (tempo,
+    /// scale, chord count). Garage lives around 130 BPM in a plain major
+    /// scale on a four-chord loop; microsound around 120 in a gapped
+    /// pentatonic, so its sine pips can never clash, on two slow chords.
+    pub fn mode_defaults(pace: Pace) -> (u16, Scale, u8) {
+        match pace {
+            Pace::HalfTime | Pace::Jungle => (DEFAULT_SETTINGS.bpm, DEFAULT_SETTINGS.scale, DEFAULT_SETTINGS.chords),
+            Pace::Garage => (132, Scale::Ionian, 4),
+            Pace::Micro => (120, Scale::PentatonicMinor, 2),
+        }
+    }
+
+    /// Switch to `pace`. Tempo, scale and chord count that were still at the
+    /// old mode's defaults move to the new mode's; anything chosen by hand
+    /// is kept.
+    pub fn set_mode(&mut self, pace: Pace) {
+        let (bpm, scale, chords) = Settings::mode_defaults(self.pace);
+        let (nbpm, nscale, nchords) = Settings::mode_defaults(pace);
+        if self.bpm == bpm {
+            self.bpm = nbpm;
+        }
+        if self.scale == scale {
+            self.scale = nscale;
+        }
+        if self.chords == chords {
+            self.chords = nchords;
+        }
+        self.pace = pace;
+    }
 }
 
 /// The latest start offset, in seconds (the audio must be fast-forwarded to
@@ -279,6 +314,7 @@ pub const DEFAULT_SETTINGS: Settings =
         wildlife: false,
         garage: crate::garage::GarageSetup::DEFAULT,
         start_s: 0,
+        micro: crate::micro::MicroSetup::DEFAULT,
     };
 
 /// 0010's sound: the default settings with no atmosphere loops.
@@ -297,6 +333,18 @@ const GARAGE_STAB_DUCK: f64 = 0.3;
 const STAB_SEND: f64 = 0.35;
 /// How far the garage reverb send dips before each change.
 const GARAGE_SEND_DIP: f64 = 0.7;
+/// Microsound's balance: the thin drone well back, the glitches forward,
+/// less of everything in the reverb, the whole about 3 dB quieter (which
+/// keeps the output stage clear of saturation), the pips' reverb send.
+const MICRO_DRONE: f64 = 0.4;
+const MICRO_GLITCH: f64 = 1.25;
+const MICRO_SEND: f64 = 0.5;
+const MICRO_WET: f64 = 0.7;
+const MICRO_LEVEL: f64 = 0.7;
+const PIP_SEND: f64 = 0.25;
+/// How much of the loops stays as it is, sparse .. dense grains, and the cloud's level.
+const MICRO_BED_DRY: [f64; 2] = [0.8, 0.35];
+const CLOUD_LEVEL: f64 = 0.9;
 const ECHO_SIXTEENTHS: u64 = 3;
 /// The drums' tape echo delay, in drum sixteenths.
 const TAPE_SIXTEENTHS: u64 = 3;
@@ -467,6 +515,10 @@ pub struct Track {
     pub(crate) bassline: Option<crate::bass::BassLine>,
     /// 2-step garage's chord stabs.
     pub(crate) stabs: Option<crate::stabs::Stabs>,
+    /// Microsound's sine pips, sub pulse and grain cloud.
+    pub(crate) pips: Option<crate::pips::Pips>,
+    pub(crate) sub_pulse: Option<crate::bass::SubPulse>,
+    pub(crate) cloud: Option<crate::grains::Cloud>,
     /// 2-step garage: how far the drone (and the pitched glitches) step back
     /// under a chord that rubs against the drone's open fifth.
     pub(crate) pedal_gain: f64,
@@ -521,10 +573,11 @@ impl Track {
             let beats = crate::atmos::loop_beats(tempo.beat(), LOOP_SECONDS[i], (i > 0).then_some(avoid));
             avoid = avoid.wrapping_mul(beats);
         }
-        let mut drums = if settings.pace == Pace::Garage {
-            Drums::garage(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.garage.swing_fraction())
-        } else {
-            Drums::new(seeds.s5, settings.kit, settings.space, &harmony, tempo)
+        let micro = settings.pace == Pace::Micro;
+        let mut drums = match settings.pace {
+            Pace::Garage => Drums::garage(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.garage.swing_fraction()),
+            Pace::Micro => Drums::micro(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.micro),
+            Pace::HalfTime | Pace::Jungle => Drums::new(seeds.s5, settings.kit, settings.space, &harmony, tempo),
         };
         drums.set_reverse(settings.drum_reverse);
         Track {
@@ -559,7 +612,7 @@ impl Track {
                 )
             }),
             loop_windows: [1.0; 4],
-            drone: Drone::new(seeds.s1, drone_harmony, first, rest),
+            drone: if micro { Drone::thin(seeds.s1, drone_harmony, first, rest) } else { Drone::new(seeds.s1, drone_harmony, first, rest) },
             drone_rhythm: crate::drone_rhythm::DroneRhythm::new(seeds.s7, settings.bpm),
             drone_filter: [Svf::new(1000.0, 0.7, sr), Svf::new(1000.0, 0.7, sr)],
             drone_tone_filter: [Svf::new(8_000.0, 0.7, sr), Svf::new(8_000.0, 0.7, sr)],
@@ -574,6 +627,10 @@ impl Track {
             stabs: (settings.pace == Pace::Garage && settings.garage.stabs != crate::garage::Stabs::Off).then(|| {
                 crate::stabs::Stabs::new(seeds.s6, settings.garage.stabs, settings.garage.tone, tempo, settings.garage.swing_fraction())
             }),
+            pips: (micro && settings.micro.pips != crate::micro::Pips::Off)
+                .then(|| crate::pips::Pips::new(seeds.s6, settings.micro.pips, tempo)),
+            sub_pulse: (micro && settings.micro.pulse != crate::micro::Pulse::Off).then(|| crate::bass::SubPulse::new(seeds.s4, tempo)),
+            cloud: micro.then(|| crate::grains::Cloud::new(seeds.s6, settings.micro.grains.amount())),
             reverb: Reverb::new(),
             dc: Default::default(),
             meters: Meters::default(),
@@ -697,6 +754,8 @@ impl Track {
             self.pedal_gain += (self.pedal_target - self.pedal_gain) * 0.0004;
             let g = GARAGE_DRONE * self.pedal_gain;
             (dl * g, dr * g)
+        } else if self.settings.pace == Pace::Micro {
+            (dl * MICRO_DRONE, dr * MICRO_DRONE)
         } else {
             (dl, dr)
         };
@@ -712,6 +771,9 @@ impl Track {
         // Garage: the glitches (which chop the drone) step back with it.
         let (g1, g2) = if self.settings.pace == Pace::Garage {
             let k = 0.4 + 0.6 * self.pedal_gain;
+            ((g1.0 * k, g1.1 * k), (g2.0 * k, g2.1 * k))
+        } else if self.settings.pace == Pace::Micro {
+            let k = MICRO_GLITCH;
             ((g1.0 * k, g1.1 * k), (g2.0 * k, g2.1 * k))
         } else {
             (g1, g2)
@@ -739,6 +801,35 @@ impl Track {
                 };
             }
         }
+
+        // Microsound: the bed is listened to and scattered back as grains;
+        // the loops themselves step back to make room for their cloud.
+        let cloud = match self.cloud.as_mut() {
+            Some(c) => {
+                let bed = (0..4).fold((dl * 0.5, dr * 0.5), |(x, y), k| (x + a[k].0 * LOOP_DRY[k], y + a[k].1 * LOOP_DRY[k]));
+                let (cl, cr) = c.process(bed.0, bed.1);
+                let g = self.settings.micro.grains.amount();
+                let keep = MICRO_BED_DRY[0] + (MICRO_BED_DRY[1] - MICRO_BED_DRY[0]) * g;
+                for x in a.iter_mut() {
+                    *x = (x.0 * keep, x.1 * keep);
+                }
+                Some((cl * CLOUD_LEVEL, cr * CLOUD_LEVEL))
+            }
+            None => None,
+        };
+        // Microsound: the pips and the sub pulse play when the pulse does
+        // (the pips also through the clicks-only sections).
+        let micro = (self.settings.pace == Pace::Micro).then(|| {
+            let section = self.drums.plan_now().map(|plan| plan.section);
+            match section {
+                Some(s) => (matches!(s, Section::Pulse | Section::Fracture), matches!(s, Section::Clicks | Section::Pulse | Section::Fracture)),
+                None => (!self.drums.enabled(), !self.drums.enabled()),
+            }
+        });
+        let pip = match (self.pips.as_mut(), micro) {
+            (Some(p), Some((_, on))) => Some(p.next(clock, &self.harmony, on)),
+            _ => None,
+        };
 
         // 4: bass, gliding to each chord's root during the morph bar. The bass
         // leaves with the drone: one arrangement, one envelope.
@@ -770,6 +861,13 @@ impl Track {
             // its fifth is the chord's own (a flat fifth on a m7b5).
             let fifth = (self.harmony.chords[chord].tones[2] as f64 - self.harmony.chords[chord].tones[0] as f64).rem_euclid(12.0);
             line.next(clock, root, next_root, fifth, changing && self.harmony.starts_pass(next), active, &m) * (1.0 - GARAGE_BASS_DUCK * punch)
+        } else if let Some((active, _)) = micro {
+            // Microsound has no drone bass: only the sub pulse, if any.
+            let root = self.harmony.chords[self.harmony.at(clock).chord].bass;
+            match self.sub_pulse.as_mut() {
+                Some(sp) => sp.next(clock, root, active) * window,
+                None => 0.0,
+            }
         } else {
             if clock % 32 == 0 {
                 let p = self.harmony.at(clock);
@@ -788,6 +886,11 @@ impl Track {
         };
         let loop_send = |k: usize| -> f64 { (0..4).map(|j| [a[j].0, a[j].1][k] * LOOP_SEND[j]).sum() };
         let send = |x: f64, k: usize| {
+            if micro.is_some() {
+                let p = pip.map_or(0.0, |p| [p.0, p.1][k]);
+                let c = cloud.map_or(0.0, |c| [c.0, c.1][k]);
+                return (x + p * PIP_SEND + c * LOOP_SEND[0]) * MICRO_SEND;
+            }
             if garage.is_none() {
                 return x;
             }
@@ -846,6 +949,17 @@ impl Track {
         if let Some((sl, sr_)) = stab {
             l += sl;
             r += sr_;
+        }
+        if micro.is_some() {
+            // Less room, the pips and the cloud on top.
+            l -= rl * REVERB_WET * (1.0 - MICRO_WET);
+            r -= rr * REVERB_WET * (1.0 - MICRO_WET);
+            for (x, y) in [pip, cloud].into_iter().flatten() {
+                l += x;
+                r += y;
+            }
+            l *= MICRO_LEVEL;
+            r *= MICRO_LEVEL;
         }
 
         let fade_len = FADE_IN_SECONDS * crate::SAMPLE_RATE as u64;

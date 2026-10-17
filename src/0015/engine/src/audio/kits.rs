@@ -636,6 +636,82 @@ pub fn clap(p: &KitParams, vel: f64, rng: &mut Rng) -> Vec<f64> {
     v
 }
 
+/// Microsound's kick: a pure sub sine (42–58 Hz from the kit's own kick)
+/// with the barest pitch dip and a short decay, so the beat is felt more than
+/// heard. No click of its own; the pulse adds one when asked.
+pub fn sub_kick(p: &KitParams, vel: f64) -> Vec<f64> {
+    let to = p.kick_to.clamp(42.0, 58.0);
+    let len = (0.12 * SR) as usize;
+    let amp_k = decay_coef(0.045, SR);
+    let mut dive = Dive::new(to * 1.6, to, 0.008);
+    let (mut amp, mut ph) = (1.0, 0.0);
+    (0..len)
+        .map(|i| {
+            let f = dive.next();
+            let attack = (i as f64 / 96.0).min(1.0);
+            let s = sin_turns(ph) * amp * attack;
+            ph += f / SR;
+            ph -= ph.floor();
+            amp *= amp_k;
+            // The last 4 ms fade, so the tail never ends on a step.
+            let tail = ((len - i) as f64 / 192.0).min(1.0);
+            s * tail * vel
+        })
+        .collect()
+}
+
+/// Microsound's click: one to three samples of impulse, rung through a
+/// very short high resonance. `bright` lifts it toward the top of hearing.
+pub fn micro_click(p: &KitParams, vel: f64, bright: bool, rng: &mut Rng) -> Vec<f64> {
+    let centre = if bright { rng.range(7_000.0, 12_000.0) } else { rng.range(2_500.0, 6_000.0) };
+    let mut bp = Svf::new(centre, rng.range(2.0, 5.0), SR);
+    let width = 1 + rng.below(3);
+    let len = 96;
+    let crushed = matches!(p.kit, Kit::Crush | Kit::DataDust | Kit::PulseCode);
+    let mut v: Vec<f64> = (0..len)
+        .map(|i| {
+            let x = if i < width { if i % 2 == 0 { 1.0 } else { -0.6 } } else { 0.0 };
+            let ring = bp.process(x).band;
+            (x * 0.5 + ring * 1.5) * vel
+        })
+        .collect();
+    if crushed {
+        for x in v.iter_mut() {
+            *x = crush(*x, 6.0);
+        }
+    }
+    v
+}
+
+/// Microsound's grain: 2–8 ms under a smooth window, either a sliver of
+/// band-passed noise or a high sine, panned by the caller.
+pub fn micro_grain(p: &KitParams, vel: f64, rng: &mut Rng) -> Vec<f64> {
+    let len = (rng.range(0.002, 0.008) * SR) as usize;
+    let tone = rng.chance(0.45);
+    let f = if tone {
+        // The kit's metal partials, lifted into the air.
+        rng.pick(&p.metal) * rng.pick(&[8.0, 12.0, 16.0])
+    } else {
+        rng.range(1_500.0, 9_000.0)
+    };
+    let mut bp = Svf::new(f.min(16_000.0), 3.0, SR);
+    let mut ph = rng.unit();
+    (0..len)
+        .map(|i| {
+            let w = sin_turns(0.5 * i as f64 / len as f64);
+            let s = if tone {
+                let s = sin_turns(ph);
+                ph += f / SR;
+                ph -= ph.floor();
+                s
+            } else {
+                bp.process(rng.bipolar()).band * 2.5
+            };
+            s * w * w * vel
+        })
+        .collect()
+}
+
 pub fn snare(p: &KitParams, vel: f64, ghost: bool, rng: &mut Rng) -> Vec<f64> {
     let decay = if ghost { p.snare_decay * 0.4 } else { p.snare_decay };
     let len = ((decay * 1.6 + 0.05) * SR) as usize;

@@ -147,10 +147,13 @@ pub enum Pace {
     /// 2-step garage: chords change every two drum bars (as half-time), and
     /// the drums, bass and stabs play the garage way.
     Garage,
+    /// Microsound: clicks, grains and sine pips on a faint pulse; chords
+    /// change slowly (as half-time), everything plays small and exact.
+    Micro,
 }
 
 /// The modes, in setup order.
-pub const PACES: [Pace; 3] = [Pace::HalfTime, Pace::Jungle, Pace::Garage];
+pub const PACES: [Pace; 4] = [Pace::HalfTime, Pace::Jungle, Pace::Garage, Pace::Micro];
 
 impl Pace {
     pub fn name(self) -> &'static str {
@@ -158,6 +161,7 @@ impl Pace {
             Pace::HalfTime => "half-time",
             Pace::Jungle => "jungle",
             Pace::Garage => "2-step garage",
+            Pace::Micro => "microsound",
         }
     }
 
@@ -165,7 +169,7 @@ impl Pace {
     pub fn from_name(name: &str) -> Option<Pace> {
         let key = |s: &str| s.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect::<String>();
         let want = key(name);
-        PACES.into_iter().find(|p| key(p.name()) == want || (want == "garage" && *p == Pace::Garage))
+        PACES.into_iter().find(|p| key(p.name()) == want || (want == "garage" && *p == Pace::Garage) || (want == "micro" && *p == Pace::Micro))
     }
 
     /// Recipe value.
@@ -174,6 +178,7 @@ impl Pace {
             Pace::HalfTime => 0,
             Pace::Jungle => 1,
             Pace::Garage => 2,
+            Pace::Micro => 3,
         }
     }
 
@@ -183,6 +188,7 @@ impl Pace {
             Pace::HalfTime => 4 * beat,
             Pace::Jungle => 2 * beat,
             Pace::Garage => 4 * beat,
+            Pace::Micro => 4 * beat,
         }
     }
 }

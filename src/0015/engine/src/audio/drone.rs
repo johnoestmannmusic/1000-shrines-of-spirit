@@ -26,6 +26,8 @@ pub const HOP: usize = N / 4;
 const DRONE_RMS: f64 = 0.16;
 /// Bins below this are left empty (sub rumble is the bass's job).
 const LOW_CUT_HZ: f64 = 110.0;
+/// The thin (microsound) drone leaves more room below.
+const THIN_LOW_CUT_HZ: f64 = 220.0;
 
 /// Building one frame is split into small work units, one every
 /// `UNIT_SPACING` samples through the hop, so no single moment carries a
@@ -111,15 +113,34 @@ impl Drone {
     /// `first` must be the stream chord 1's voicing was drawn from (it goes
     /// on to choose chord 1's FM recipes, exactly as in 0009); `rest` serves
     /// the other chords.
-    pub fn new(seed: u64, harmony: Harmony, mut first: Rng, mut rest: Rng) -> Self {
+    pub fn new(seed: u64, harmony: Harmony, first: Rng, rest: Rng) -> Self {
+        Drone::build(seed, harmony, first, rest, false)
+    }
+
+    /// Microsound's drone: the same chords frozen from pure sines (every FM
+    /// index at zero), with the low end cut higher, so it is a thin, still
+    /// cluster of partials rather than a thick cloud.
+    pub fn thin(seed: u64, harmony: Harmony, first: Rng, rest: Rng) -> Self {
+        Drone::build(seed, harmony, first, rest, true)
+    }
+
+    fn build(seed: u64, harmony: Harmony, mut first: Rng, mut rest: Rng, thin: bool) -> Self {
         let fft = Fft::new(N);
         let window: Vec<f64> = (0..N).map(|i| 0.5 - 0.5 * cos_turns(i as f64 / N as f64)).collect();
-        let low_bin = (LOW_CUT_HZ * N as f64 / crate::SAMPLE_RATE as f64) as usize;
+        let low_cut = if thin { THIN_LOW_CUT_HZ } else { LOW_CUT_HZ };
+        let low_bin = (low_cut * N as f64 / crate::SAMPLE_RATE as f64) as usize;
         let mut mags = Vec::new();
         let mut all_recipes = Vec::new();
         for (i, chord) in harmony.chords.iter().enumerate() {
             let rng = if i == 0 { &mut first } else { &mut rest };
-            let recipes = recipes_for(rng, &chord.notes);
+            let mut recipes = recipes_for(rng, &chord.notes);
+            if thin {
+                for (_, [_, _, i2, i3], fb) in recipes.iter_mut() {
+                    *i2 = 0.0;
+                    *i3 = 0.0;
+                    *fb = 0.0;
+                }
+            }
             let left = render_chord(rng, &chord.notes, &recipes);
             let right = render_chord(rng, &chord.notes, &recipes);
             let mut mag_l = average_magnitudes(&fft, &window, &left);
