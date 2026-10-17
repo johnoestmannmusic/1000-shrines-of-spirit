@@ -23,7 +23,7 @@ use crate::track::{DroneArc, KeyChoice, LoopDesign, Seeds, Settings};
 use crate::weather::WeatherKind;
 use crate::{DEFAULT_SEEDS, DEFAULT_SETTINGS};
 
-pub const VERSION: u32 = 15;
+pub const VERSION: u32 = 16;
 
 /// Encode a configuration.
 pub fn encode(config: &SimConfig) -> Vec<u32> {
@@ -50,7 +50,7 @@ pub fn encode(config: &SimConfig) -> Vec<u32> {
 
     w.push(s.scale.index() as u32);
     w.push(s.chords as u32);
-    w.push(if s.pace == Pace::Jungle { 1 } else { 0 });
+    w.push(s.pace.index());
     w.push(s.kit.index() as u32);
     w.push(s.space.index() as u32);
     w.push(s.bpm as u32);
@@ -90,6 +90,8 @@ pub fn encode(config: &SimConfig) -> Vec<u32> {
     // Bit 0: the drone. Bit 1: the same rhythm on the atmosphere loops.
     // Bit 2: wildlife (an older recipe has it clear, so it decodes as off).
     w.push(s.drone_rhythm as u32 | ((s.loop_rhythm as u32) << 1) | ((s.wildlife as u32) << 2));
+    // Version 16: the 2-step garage setup.
+    w.push(s.garage.word());
     for word in s.model.words() {
         w.push(word);
     }
@@ -121,7 +123,11 @@ pub fn decode(words: &[u32]) -> SimConfig {
 
     let scale = Scale::from_index(c.next() as usize);
     let chords = (c.next() as u8).clamp(1, 4);
-    let pace = if c.next() == 1 { Pace::Jungle } else { Pace::HalfTime };
+    let pace = match c.next() {
+        1 => Pace::Jungle,
+        2 => Pace::Garage,
+        _ => Pace::HalfTime,
+    };
     let kit = KITS[(c.next() as usize) % KITS.len()];
     let space = SPACES[(c.next() as usize) % SPACES.len()];
     let bpm = (c.next() as u16).max(1);
@@ -192,6 +198,8 @@ pub fn decode(words: &[u32]) -> SimConfig {
     } else {
         (false, false, false)
     };
+    // Version 16 added 2-step garage's own settings.
+    let garage = if version >= 16 { crate::garage::GarageSetup::from_word(c.next()) } else { crate::garage::GarageSetup::DEFAULT };
     let model = if version >= 14 {
         let words: Vec<u32> = (0..crate::shrine_model::WORDS as u32).map(|_| c.next()).collect();
         crate::shrine_model::ShrineModel::from_words(&words)
@@ -241,6 +249,7 @@ pub fn decode(words: &[u32]) -> SimConfig {
             drone_rhythm,
             loop_rhythm,
             wildlife,
+            garage,
         },
         biome,
         weather,

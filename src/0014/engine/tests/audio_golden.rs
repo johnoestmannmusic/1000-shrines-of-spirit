@@ -157,6 +157,7 @@ fn each_setting_changes_the_output() {
         Settings { scale: Scale::Dorian, ..DEFAULT_SETTINGS },
         Settings { chords: 1, ..DEFAULT_SETTINGS },
         Settings { pace: Pace::Jungle, ..DEFAULT_SETTINGS },
+        Settings { pace: Pace::Garage, ..DEFAULT_SETTINGS },
         Settings { kit: shrine0014::kits::Kit::FmMetal, ..DEFAULT_SETTINGS },
         Settings { bpm: 160, ..DEFAULT_SETTINGS },
         Settings { drone_tone: 1200, ..DEFAULT_SETTINGS },

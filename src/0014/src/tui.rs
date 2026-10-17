@@ -19,7 +19,7 @@ use shrine0014::shrine::kind as tile_kind;
 use shrine0014::shrine_model::ShrineModel;
 use shrine0014::glitch_setup::{GlitchSetup, RATES};
 use shrine0014::framebuffer::Framebuffer;
-use shrine0014::harmony::{key_name, Pace, SCALES};
+use shrine0014::harmony::{key_name, Pace, PACES, SCALES};
 use shrine0014::kits::{KITS, SPACES};
 use shrine0014::plants::Biome;
 use shrine0014::scene::Quality;
@@ -79,6 +79,7 @@ enum Kind {
     Key,
     Chords,
     Pace,
+    Swing,
     Bpm,
     Kit,
     Space,
@@ -577,7 +578,15 @@ impl App {
         field("Scale".into(), s.scale.name().to_string(), Kind::Scale, &mut rows);
         field("Root note".into(), key_label(s.key), Kind::Key, &mut rows);
         field("Chords".into(), s.chords.to_string(), Kind::Chords, &mut rows);
-        field("Pace".into(), if s.pace == Pace::Jungle { "jungle".into() } else { "half-time".into() }, Kind::Pace, &mut rows);
+        field("Mode".into(), s.pace.name().to_string(), Kind::Pace, &mut rows);
+        if s.pace == Pace::Garage {
+            field(
+                "Swing".into(),
+                format!("{}%{}", s.garage.swing, if s.garage.swing == 50 { " · straight" } else { "" }),
+                Kind::Swing,
+                &mut rows,
+            );
+        }
         field("Tempo".into(), format!("{} BPM", s.bpm), Kind::Bpm, &mut rows);
         field("Kit".into(), s.kit.name().to_string(), Kind::Kit, &mut rows);
         field("Space".into(), s.space.name().to_string(), Kind::Space, &mut rows);
@@ -700,7 +709,17 @@ impl App {
                 self.config.settings.chords = if forward { (c % 4) + 1 } else { ((c + 2) % 4) + 1 };
             }
             Kind::Pace => {
-                self.config.settings.pace = if self.config.settings.pace == Pace::Jungle { Pace::HalfTime } else { Pace::Jungle };
+                let s = &mut self.config.settings;
+                s.pace = cycle(&PACES, s.pace, forward);
+                // Garage lives around 130 BPM: move off the jungle default.
+                if s.pace == Pace::Garage && s.bpm == shrine0014::tempo::DEFAULT_BPM {
+                    s.bpm = 132;
+                }
+            }
+            Kind::Swing => {
+                let g = &mut self.config.settings.garage;
+                let step = if shift { 4 } else { 1 };
+                g.swing = if forward { (g.swing + step).min(shrine0014::garage::MAX_SWING) } else { g.swing.saturating_sub(step).max(shrine0014::garage::MIN_SWING) };
             }
             Kind::Bpm => {
                 let b = self.config.settings.bpm;
@@ -889,6 +908,7 @@ impl App {
             Kind::SeedN(i) => seed_value(&self.config, i).to_string(),
             Kind::Chords => s.chords.to_string(),
             Kind::Bpm => s.bpm.to_string(),
+            Kind::Swing => s.garage.swing.to_string(),
             Kind::Transpose => s.loop_transpose.to_string(),
             Kind::LayerArc(i) => s.loop_arcs[i].cycle_s.to_string(),
             Kind::LayerHold(i) => s.loop_arcs[i].hold_s.to_string(),
@@ -923,6 +943,7 @@ impl App {
             Kind::SeedN(i) => set_seed(c, i, n.max(0) as u64),
             Kind::Chords => c.settings.chords = n.clamp(1, 4) as u8,
             Kind::Bpm => c.settings.bpm = n.clamp(70, 180) as u16,
+            Kind::Swing => c.settings.garage.swing = n.clamp(shrine0014::garage::MIN_SWING as i64, shrine0014::garage::MAX_SWING as i64) as u8,
             Kind::Transpose => c.settings.loop_transpose = n.clamp(-12, 12) as i8,
             Kind::LayerArc(i) => c.settings.loop_arcs[i].cycle_s = clamp_arc(n),
             Kind::LayerHold(i) => {

@@ -50,6 +50,13 @@ fn custom() -> SimConfig {
                 shrine0014::glitch_setup::GlitchSetup { enabled: false, kinds: [true, false, true, false, true, false], ..shrine0014::glitch_setup::GlitchSetup::DEFAULT_1 },
             ],
             camera_speed: -45,
+            pace: shrine0014::harmony::Pace::Garage,
+            garage: shrine0014::garage::GarageSetup {
+                swing: 63,
+                bass: shrine0014::garage::BassMode::Drone,
+                stabs: shrine0014::garage::Stabs::Busy,
+                tone: shrine0014::garage::StabTone::Dark,
+            },
             drone_rhythm: true,
             loop_rhythm: true,
             model: {
@@ -92,7 +99,25 @@ fn a_recipe_round_trips_exactly() {
         assert_eq!(back.seeds, config.seeds);
         assert_eq!(back.settings.drone_rhythm, config.settings.drone_rhythm);
         assert_eq!(back.settings.loop_rhythm, config.settings.loop_rhythm);
+        assert_eq!(back.settings.pace, config.settings.pace);
+        assert_eq!(back.settings.garage, config.settings.garage);
     }
+}
+
+#[test]
+fn a_version_15_recipe_keeps_its_mode_and_gets_the_garage_defaults() {
+    // Version 15 had no garage word: strip it out of a version-16 encoding
+    // and the rest must decode exactly as before.
+    let mut config = custom();
+    config.settings.pace = shrine0014::harmony::Pace::Jungle;
+    config.settings.garage = shrine0014::garage::GarageSetup::DEFAULT;
+    let mut words = recipe::encode(&config);
+    let garage_at = words.len() - shrine0014::shrine_model::WORDS - shrine0014::name::CAP / 4 - 1;
+    words.remove(garage_at);
+    words[0] = 15;
+    let back = recipe::decode(&words);
+    assert_eq!(back.settings, config.settings);
+    assert_eq!((back.seed, back.seeds, back.biome, back.weather), (config.seed, config.seeds, config.biome, config.weather));
 }
 
 #[test]
@@ -100,7 +125,7 @@ fn encoding_twice_is_stable() {
     let a = recipe::encode(&custom());
     let b = recipe::encode(&custom());
     assert_eq!(a, b);
-    assert_eq!(a.len(), 165);
+    assert_eq!(a.len(), 166);
 }
 
 #[test]

@@ -201,7 +201,7 @@ fn header(config: &SimConfig) -> String {
         weather = config.weather.name(),
         scale = s.scale.name(),
         chords = s.chords,
-        pace = if s.pace == shrine0014::harmony::Pace::Jungle { "jungle" } else { "half-time" },
+        pace = s.pace.name(),
         bpm = s.bpm,
         key = match s.key {
             shrine0014::track::KeyChoice::Seed => "seed picks".to_string(),
@@ -251,7 +251,7 @@ pub fn info(config: &SimConfig, build: u32) -> String {
         format!("scale      {}", s.scale.name()),
         format!("root note  {key}"),
         format!("chords     {}", s.chords),
-        format!("pace       {}", if s.pace == shrine0014::harmony::Pace::Jungle { "jungle" } else { "half-time" }),
+        format!("mode       {}", s.pace.name()),
         format!("tempo      {} BPM", s.bpm),
         format!("kit        {}", s.kit.name()),
         format!("space      {}", s.space.name()),

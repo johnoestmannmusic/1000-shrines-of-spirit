@@ -125,14 +125,45 @@ pub enum Pace {
     HalfTime,
     /// Bars at the drum tempo (≈1.43 s at 168 BPM), the drums' own bar.
     Jungle,
+    /// 2-step garage: chords change every two drum bars (as half-time), and
+    /// the drums, bass and stabs play the garage way.
+    Garage,
 }
 
+/// The modes, in setup order.
+pub const PACES: [Pace; 3] = [Pace::HalfTime, Pace::Jungle, Pace::Garage];
+
 impl Pace {
+    pub fn name(self) -> &'static str {
+        match self {
+            Pace::HalfTime => "half-time",
+            Pace::Jungle => "jungle",
+            Pace::Garage => "2-step garage",
+        }
+    }
+
+    /// The mode called `name` (case and spacing ignored; "garage" is enough).
+    pub fn from_name(name: &str) -> Option<Pace> {
+        let key = |s: &str| s.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect::<String>();
+        let want = key(name);
+        PACES.into_iter().find(|p| key(p.name()) == want || (want == "garage" && *p == Pace::Garage))
+    }
+
+    /// Recipe value.
+    pub fn index(self) -> u32 {
+        match self {
+            Pace::HalfTime => 0,
+            Pace::Jungle => 1,
+            Pace::Garage => 2,
+        }
+    }
+
     /// A bar's length, given one half-time beat (`Tempo::beat`) in samples.
     pub fn bar_samples(self, beat: u64) -> u64 {
         match self {
             Pace::HalfTime => 4 * beat,
             Pace::Jungle => 2 * beat,
+            Pace::Garage => 4 * beat,
         }
     }
 }

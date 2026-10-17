@@ -24,6 +24,7 @@ pub mod drums;
 pub mod fft;
 pub mod filter;
 pub mod fm;
+pub mod garage;
 pub mod glitch;
 pub mod glitch_setup;
 pub mod harmony;

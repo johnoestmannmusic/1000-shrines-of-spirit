@@ -233,6 +233,9 @@ pub struct Settings {
     /// Whether the shrine's wildlife (chosen by the seed and biome) is heard
     /// and seen. Off by default.
     pub wildlife: bool,
+    /// The 2-step garage mode's swing, bass and stabs (ignored by the other
+    /// modes).
+    pub garage: crate::garage::GarageSetup,
 }
 
 pub const DEFAULT_SETTINGS: Settings =
@@ -265,6 +268,7 @@ pub const DEFAULT_SETTINGS: Settings =
         drone_rhythm: false,
         loop_rhythm: false,
         wildlife: false,
+        garage: crate::garage::GarageSetup::DEFAULT,
     };
 
 /// 0010's sound: the default settings with no atmosphere loops.
@@ -468,7 +472,11 @@ impl Track {
             let beats = crate::atmos::loop_beats(tempo.beat(), LOOP_SECONDS[i], (i > 0).then_some(avoid));
             avoid = avoid.wrapping_mul(beats);
         }
-        let mut drums = Drums::new(seeds.s5, settings.kit, settings.space, &harmony, tempo);
+        let mut drums = if settings.pace == Pace::Garage {
+            Drums::garage(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.garage.swing_fraction())
+        } else {
+            Drums::new(seeds.s5, settings.kit, settings.space, &harmony, tempo)
+        };
         drums.set_reverse(settings.drum_reverse);
         Track {
             seeds,

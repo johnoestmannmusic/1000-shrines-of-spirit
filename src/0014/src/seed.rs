@@ -7,6 +7,7 @@
 //! Host-only. The artifact itself carries the recipe as words (`recipe.rs`).
 
 use shrine0014::atmos::LOOP_TIMBRES;
+use shrine0014::garage::{BASS_MODES, MAX_SWING, MIN_SWING, STABS, STAB_TONES};
 use shrine0014::harmony::{key_name, Pace, SCALES};
 use shrine0014::kits::{KITS, SPACES};
 use shrine0014::plants::Biome;
@@ -106,7 +107,12 @@ pub fn to_text(config: &SimConfig) -> String {
     out.push_str(&format!("scale={}\n", s.scale.name()));
     out.push_str(&format!("key={}\n", key_label(s.key)));
     out.push_str(&format!("chords={}\n", s.chords));
-    out.push_str(&format!("pace={}\n", if s.pace == Pace::Jungle { "jungle" } else { "half-time" }));
+    out.push_str(&format!("pace={}\n", s.pace.name()));
+    out.push_str("# 2-step garage only: swing 50-66 %, bass drone|rhythmic, stabs off|sparse|busy, stab tone dark|bright\n");
+    out.push_str(&format!("garage_swing={}\n", s.garage.swing));
+    out.push_str(&format!("garage_bass={}\n", s.garage.bass.name()));
+    out.push_str(&format!("garage_stabs={}\n", s.garage.stabs.name()));
+    out.push_str(&format!("garage_stab_tone={}\n", s.garage.tone.name()));
     out.push_str(&format!("kit={}\n", s.kit.name()));
     out.push_str(&format!("space={}\n", s.space.name()));
     out.push_str(&format!("drum_reverse={}\n", if s.drum_reverse { "on" } else { "off" }));
@@ -246,8 +252,32 @@ pub fn from_text(text: &str) -> Option<SimConfig> {
                 }
             }
             "pace" => {
-                config.settings.pace = if eq(value, "jungle") { Pace::Jungle } else { Pace::HalfTime };
+                config.settings.pace = Pace::from_name(value).unwrap_or(Pace::HalfTime);
                 found = true;
+            }
+            "garage_swing" => {
+                if let Ok(n) = value.trim_end_matches('%').trim().parse::<u8>() {
+                    config.settings.garage.swing = n.clamp(MIN_SWING, MAX_SWING);
+                    found = true;
+                }
+            }
+            "garage_bass" => {
+                if let Some(b) = BASS_MODES.into_iter().find(|b| eq(b.name(), value)) {
+                    config.settings.garage.bass = b;
+                    found = true;
+                }
+            }
+            "garage_stabs" => {
+                if let Some(b) = STABS.into_iter().find(|b| eq(b.name(), value)) {
+                    config.settings.garage.stabs = b;
+                    found = true;
+                }
+            }
+            "garage_stab_tone" => {
+                if let Some(b) = STAB_TONES.into_iter().find(|b| eq(b.name(), value)) {
+                    config.settings.garage.tone = b;
+                    found = true;
+                }
             }
             "kit" => {
                 if let Some(k) = KITS.into_iter().find(|k| eq(k.name(), value)) {
@@ -703,7 +733,7 @@ mod tests {
         let s = &mut c.settings;
         s.scale = r.pick(&SCALES);
         s.chords = r.int(1, 4) as u8;
-        s.pace = if r.chance(0.5) { Pace::Jungle } else { Pace::HalfTime };
+        s.pace = r.pick(&shrine0014::harmony::PACES);
         s.kit = r.pick(&KITS);
         s.space = r.pick(&SPACES);
         s.bpm = r.int(MIN_BPM as u64, MAX_BPM as u64) as u16;
@@ -772,6 +802,12 @@ mod tests {
         s.drone_rhythm = r.chance(0.5);
         s.loop_rhythm = r.chance(0.5);
         s.wildlife = r.chance(0.5);
+        s.garage = shrine0014::garage::GarageSetup {
+            swing: r.int(MIN_SWING as u64, MAX_SWING as u64) as u8,
+            bass: r.pick(&BASS_MODES),
+            stabs: r.pick(&STABS),
+            tone: r.pick(&STAB_TONES),
+        };
         c
     }
 

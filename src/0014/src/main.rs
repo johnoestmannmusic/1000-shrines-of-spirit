@@ -29,7 +29,7 @@ fn usage() {
     println!("  (no arguments)   interactive menu and live preview");
     println!("  --preview [SEED] [--biome NAME] [--weather NAME] [--out FILE]");
     println!("  --cover   [SEED] [--biome NAME] [--weather NAME] [--out FILE]   a 1600×1600 PNG");
-    println!("  --wav     [SEED] [SECONDS] [--biome NAME] [--weather NAME] [--out FILE]");
+    println!("  --wav     [SEED] [SECONDS] [--biome NAME] [--weather NAME] [--mode NAME] [--bpm N] [--out FILE]");
     println!("  --serve   [PORT]   serve web/ locally (default 8080)");
     println!("  --emit    [--seed N] [--biome NAME] [--weather NAME] [--out FILE]   write the self-contained artifact");
     println!("  --export  [FILE]   write the stored settings as a .shrineseed file");
@@ -42,6 +42,10 @@ fn usage() {
         "    weather: {}",
         WeatherKind::ALL.iter().map(|w| w.name()).collect::<Vec<_>>().join(", ")
     );
+    println!(
+        "    modes:   {}",
+        shrine0014::harmony::PACES.iter().map(|p| p.name()).collect::<Vec<_>>().join(", ")
+    );
 }
 
 /// Parse the shared `[SEED] [--biome] [--weather]` arguments.
@@ -51,6 +55,9 @@ struct Args {
     weather: WeatherKind,
     seconds: f64,
     out: Option<String>,
+    /// The music's mode and tempo, if given (else the defaults).
+    mode: Option<shrine0014::harmony::Pace>,
+    bpm: Option<u16>,
 }
 
 fn parse(args: &[String]) -> Args {
@@ -59,6 +66,8 @@ fn parse(args: &[String]) -> Args {
     let mut weather: Option<WeatherKind> = None;
     let mut out: Option<String> = None;
     let mut seconds: f64 = 20.0;
+    let mut mode = None;
+    let mut bpm = None;
 
     let mut it = args.iter().skip(1);
     let mut positional = 0;
@@ -73,6 +82,8 @@ fn parse(args: &[String]) -> Args {
                     .and_then(|name| WeatherKind::ALL.iter().copied().find(|w| w.name().eq_ignore_ascii_case(name)));
             }
             "--out" => out = it.next().cloned(),
+            "--mode" => mode = it.next().and_then(|n| shrine0014::harmony::Pace::from_name(n)),
+            "--bpm" => bpm = it.next().and_then(|n| n.parse::<u16>().ok()),
             "--seconds" => {
                 if let Some(n) = it.next().and_then(|s| s.parse::<f64>().ok()) {
                     seconds = n.clamp(0.5, 3600.0);
@@ -101,6 +112,8 @@ fn parse(args: &[String]) -> Args {
         weather: weather.unwrap_or(WeatherKind::ALL[(seed / 3 % 5) as usize]),
         seconds,
         out,
+        mode,
+        bpm,
     }
 }
 
@@ -108,7 +121,12 @@ fn sim_for(a: &Args) -> Sim {
     Sim::new(SimConfig {
         seed: a.seed,
         seeds: DEFAULT_SEEDS,
-        settings: DEFAULT_SETTINGS,
+        settings: shrine0014::Settings {
+            pace: a.mode.unwrap_or(DEFAULT_SETTINGS.pace),
+            // Garage sits around 132 BPM unless told otherwise.
+            bpm: a.bpm.unwrap_or(if a.mode == Some(shrine0014::harmony::Pace::Garage) { 132 } else { DEFAULT_SETTINGS.bpm }),
+            ..DEFAULT_SETTINGS
+        },
         biome: a.biome,
         weather: a.weather,
     })

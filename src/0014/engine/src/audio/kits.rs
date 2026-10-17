@@ -597,6 +597,45 @@ pub fn kick(p: &KitParams, vel: f64, rng: &mut Rng) -> Vec<f64> {
     v
 }
 
+/// A hand clap: four quick bursts of band-passed noise (several hands, a
+/// hair apart), then a short diffuse tail. Its colour follows the kit's
+/// snare wires, so it still belongs to the kit. Used by 2-step garage, layered
+/// over the kit's own snare.
+pub fn clap(p: &KitParams, vel: f64, rng: &mut Rng) -> Vec<f64> {
+    let len = (0.3 * SR) as usize;
+    let centre = (p.snare_wire * 0.6).clamp(900.0, 1800.0);
+    let mut bp = Svf::new(centre, 1.4, SR);
+    let mut air = Svf::new(centre * 2.4, 0.9, SR);
+    // Burst onsets (seconds) and their levels, nudged a little per hit.
+    let gaps = [0.0, 0.0095, 0.0185, 0.029];
+    let jit: [f64; 4] = core::array::from_fn(|_| rng.range(-0.0012, 0.0012));
+    let burst_k = decay_coef(0.0032, SR);
+    let tail_k = decay_coef(0.11, SR);
+    let mut bursts = [0.0f64; 4];
+    let mut tail = 0.0;
+    let mut v: Vec<f64> = (0..len)
+        .map(|i| {
+            let t = i as f64 / SR;
+            let n = rng.bipolar();
+            for k in 0..4 {
+                let on = (gaps[k] + jit[k]).max(0.0);
+                if t >= on && t - 1.0 / SR < on {
+                    bursts[k] = [0.75, 0.65, 0.85, 1.0][k];
+                }
+                bursts[k] *= burst_k;
+            }
+            if t >= gaps[3] && t - 1.0 / SR < gaps[3] {
+                tail = 0.55;
+            }
+            tail *= tail_k;
+            let env = bursts.iter().sum::<f64>() + tail;
+            (bp.process(n).band * 1.6 + air.process(n).band * 0.5) * env * vel
+        })
+        .collect();
+    shape(&mut v, 0.4 * p.punch, 3.0, p.snare_drive, 0.0);
+    v
+}
+
 pub fn snare(p: &KitParams, vel: f64, ghost: bool, rng: &mut Rng) -> Vec<f64> {
     let decay = if ghost { p.snare_decay * 0.4 } else { p.snare_decay };
     let len = ((decay * 1.6 + 0.05) * SR) as usize;

@@ -13,6 +13,16 @@
 //! Every bar's slice plan is a pure function of seed 5, the bar number and
 //! the slow LFOs, so playback never depends on block size or history.
 //! The kit "Off" switches the drums off.
+//!
+//! **2-step garage** plays the same machine differently. The loop is played
+//! at the track's own tempo (no pitch-up), shuffled by the swing setting,
+//! from rules rather than a record: a kick on the one and a second that
+//! *skips* past beat three to land just after it, claps on two and four,
+//! rimshots pushing the off-beats, shuffled sixteenth hats with an open hat
+//! on each off-beat eighth. Its edits lean toward the glitch: hat stutters,
+//! reversed claps sucking into the snare, kicks dropping out, pitched-down
+//! tails; and its sections breathe between hats, a kick-less breakdown, the
+//! full 2-step, and 2-step with the glitches let loose.
 
 use crate::filter::{OnePole, Svf};
 use crate::harmony::Harmony;
@@ -81,6 +91,12 @@ pub enum Section {
     Full,
     /// Full, with many more edits and rolls.
     Rolls,
+    /// 2-step garage: the kick filtered away, claps and hats floating.
+    Breakdown,
+    /// 2-step garage: the full groove.
+    TwoStep,
+    /// 2-step garage, with stutters and reversals let loose.
+    Shuffle,
 }
 
 impl Section {
@@ -91,6 +107,9 @@ impl Section {
             Section::HalfTime => "half-time",
             Section::Full => "full break",
             Section::Rolls => "full + rolls",
+            Section::Breakdown => "breakdown",
+            Section::TwoStep => "2-step",
+            Section::Shuffle => "2-step + glitch",
         }
     }
 }
@@ -164,6 +183,12 @@ pub struct Drums {
     plans: [Option<Plan>; 2],
     highpass: [Svf; 2],
     hp_mix: f64,
+    /// 2-step garage: the swing (the first sixteenth's share of each pair,
+    /// 0.5 = straight), or `None` for jungle.
+    swing: Option<f64>,
+    /// The garage breakdown's low cut, and how far it is in.
+    low_cut: [Svf; 2],
+    lc_mix: f64,
     // Display-only.
     last_hits: Vec<Voice>,
     hit_count: u64,
@@ -177,9 +202,24 @@ impl Drums {
     }
 
     pub fn new(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo) -> Self {
-        let params = KitParams::new(seed, kit, harmony);
-        let src16 = (60.0 / params.source_bpm / 4.0 * SR).round() as usize;
+        Drums::styled(seed, kit, space, harmony, tempo, None)
+    }
+
+    /// 2-step garage drums, shuffled by `swing` (0.5 straight .. about 0.66).
+    pub fn garage(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo, swing: f64) -> Self {
+        Drums::styled(seed, kit, space, harmony, tempo, Some(swing.clamp(0.5, 0.72)))
+    }
+
+    fn styled(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo, swing: Option<f64>) -> Self {
+        let mut params = KitParams::new(seed, kit, harmony);
+        if swing.is_some() {
+            // A rounder, shorter kick that leaves room for a moving bassline.
+            params.kick_decay = params.kick_decay.min(0.3);
+            params.kick_drop *= 0.8;
+        }
         let six = tempo.drum16;
+        // Garage plays its loop at the track's own tempo, unpitched.
+        let src16 = if swing.is_some() { six as usize } else { (60.0 / params.source_bpm / 4.0 * SR).round() as usize };
         let mut d = Drums {
             enabled: kit != crate::kits::Kit::Off,
             reverse: true,
@@ -198,6 +238,9 @@ impl Drums {
             plans: [None, None],
             highpass: [Svf::new(5000.0, 0.7, SR), Svf::new(5000.0, 0.7, SR)],
             hp_mix: 0.0,
+            swing,
+            low_cut: [Svf::new(260.0, 0.7, SR), Svf::new(260.0, 0.7, SR)],
+            lc_mix: 0.0,
             last_hits: Vec::new(),
             hit_count: 0,
             step: 0,
@@ -212,18 +255,14 @@ impl Drums {
         SLICES * self.src16
     }
 
-    /// Plays and samples the break (once, at start-up).
-    fn record_break(&mut self) {
-        let mut rng = Rng::stream(self.seed, 0xB4EA);
+    /// The jungle break's hits: one of the classic patterns, played with
+    /// human timing at the source tempo. (Its draws on `rng` are exactly the
+    /// break's original ones, so the break never changes.)
+    fn jungle_hits(&mut self, rng: &mut Rng) -> Vec<(usize, Voice, f64)> {
         let (name, kicks, snares, ghosts) = PATTERNS[rng.below(PATTERNS.len())];
         self.pattern = name;
-        let p = self.params.clone();
+        let p = &self.params;
         let src16 = self.src16;
-        let len = self.break_len() + SR as usize;
-        let (mut buf, mut buf_r, mut perc) = (vec![0.0; len], vec![0.0; len], vec![0.0; len]);
-        // Panning has its own random stream, so it never shifts the break itself.
-        let mut pan_rng = Rng::stream(self.seed, 0x9A4);
-        let space = self.space;
         let swing = (src16 as f64 * 0.05) as usize;
         let mut hits: Vec<(usize, Voice, f64)> = Vec::new();
         let at = |step: usize, rng: &mut Rng| {
@@ -234,30 +273,115 @@ impl Drums {
         };
         for s in 0..SLICES {
             if kicks.contains(&s) || (s % 8 == 6 && rng.chance(0.08)) {
-                hits.push((at(s, &mut rng), Voice::Kick, rng.range(0.85, 1.0)));
+                hits.push((at(s, rng), Voice::Kick, rng.range(0.85, 1.0)));
             }
             if snares.contains(&s) {
-                hits.push((at(s, &mut rng), Voice::Snare, rng.range(0.9, 1.0)));
+                hits.push((at(s, rng), Voice::Snare, rng.range(0.9, 1.0)));
             } else if ghosts.contains(&s) || (s % 2 == 1 && rng.chance(0.12)) {
-                hits.push((at(s, &mut rng), Voice::Ghost, rng.range(0.22, 0.38)));
+                hits.push((at(s, rng), Voice::Ghost, rng.range(0.22, 0.38)));
             }
             // The 8ths on the ride or closed hats (accents alternate), some off-16th hats,
             // and an open hat to close bar 2.
             if s % 2 == 0 {
                 let accent = if s % 4 == 0 { 0.75 } else { 0.45 } * rng.range(0.85, 1.0);
                 let v = if p.ride_on_8ths { Voice::Ride } else { Voice::Hat };
-                hits.push((at(s, &mut rng), v, accent));
+                hits.push((at(s, rng), v, accent));
             } else if rng.chance(p.hat_density) {
-                hits.push((at(s, &mut rng), Voice::Hat, rng.range(0.25, 0.45)));
+                hits.push((at(s, rng), Voice::Hat, rng.range(0.25, 0.45)));
             }
             if s == 30 {
-                hits.push((at(s, &mut rng), Voice::OpenHat, 0.5));
+                hits.push((at(s, rng), Voice::OpenHat, 0.5));
             }
         }
         hits.sort_by_key(|h| h.0);
+        hits
+    }
+
+    /// The 2-step garage loop's hits, at the track's own tempo, from the
+    /// genre's rules with seed 5 choosing within them.
+    fn garage_hits(&mut self, rng: &mut Rng) -> Vec<(usize, Voice, f64)> {
+        let six = self.src16;
+        let p = &self.params;
+        let swing = self.swing.unwrap_or(0.5);
+        // Each odd sixteenth is pushed late by the swing.
+        let push = ((2.0 * swing - 1.0) * six as f64) as usize;
+        let at = |step: usize, rng: &mut Rng| {
+            let jitter = (rng.bipolar() * 24.0) as i64;
+            let base = step * six + if step % 2 == 1 { push } else { 0 };
+            (base as i64 + jitter).max(0) as usize
+        };
+        // The skip: bar A's second kick lands just past beat three (the "and"
+        // or the "a"), bar B's anywhere from just before to well after it.
+        let skip_a = rng.pick(&[10usize, 11]);
+        let skip_b = rng.pick(&[9usize, 10, 11, 14]);
+        let pickup = rng.chance(0.45);
+        let ghost_kick = if rng.chance(0.4) { Some(rng.pick(&[3usize, 7])) } else { None };
+        let rim_a = rng.pick(&[6usize, 7, 14]);
+        let rim_b = rng.pick(&[6usize, 14, 15]);
+        // Open hats on the off-beat eighths: always on two of them.
+        let open: [bool; 4] = [true, rng.chance(0.7), true, rng.chance(0.7)];
+        let name = match (skip_a, pickup) {
+            (10, false) => "2-step: skip on the and of 3",
+            (10, true) => "2-step: skip on the and of 3, pickup",
+            (_, false) => "2-step: skip on the a of 3",
+            (_, true) => "2-step: skip on the a of 3, pickup",
+        };
+        let mut hits: Vec<(usize, Voice, f64)> = Vec::new();
+        for s in 0..SLICES {
+            let (b, second) = (s % STEPS, s >= STEPS);
+            let kick = b == 0 || (!second && b == skip_a) || (second && b == skip_b);
+            if kick {
+                hits.push((at(s, rng), Voice::Kick, rng.range(0.9, 1.0)));
+            } else if second && pickup && b == 15 {
+                hits.push((at(s, rng), Voice::Kick, rng.range(0.55, 0.7)));
+            } else if !second && ghost_kick == Some(b) {
+                hits.push((at(s, rng), Voice::Kick, rng.range(0.4, 0.5)));
+            }
+            if b == 4 || b == 12 {
+                hits.push((at(s, rng), Voice::Snare, rng.range(0.88, 1.0)));
+            } else if (!second && b == rim_a) || (second && b == rim_b) || (b % 2 == 1 && rng.chance(0.08)) {
+                hits.push((at(s, rng), Voice::Ghost, rng.range(0.25, 0.4)));
+            }
+            // Shuffled sixteenth hats, an open hat on the off-beat eighths.
+            if b % 4 == 2 && open[b / 4] {
+                hits.push((at(s, rng), Voice::OpenHat, rng.range(0.42, 0.55)));
+            } else if b % 2 == 0 {
+                let accent = if b % 4 == 0 { 0.5 } else { 0.4 } * rng.range(0.85, 1.0);
+                hits.push((at(s, rng), Voice::Hat, accent));
+            } else if rng.chance(0.55 + 0.4 * p.hat_density) {
+                hits.push((at(s, rng), Voice::Hat, rng.range(0.2, 0.34)));
+            }
+        }
+        self.pattern = name;
+        hits.sort_by_key(|h| h.0);
+        hits
+    }
+
+    /// Plays and samples the break (once, at start-up).
+    fn record_break(&mut self) {
+        let garage = self.swing.is_some();
+        let mut rng = Rng::stream(self.seed, if garage { 0x2577 } else { 0xB4EA });
+        let hits = if garage { self.garage_hits(&mut rng) } else { self.jungle_hits(&mut rng) };
+        let p = self.params.clone();
+        let len = self.break_len() + SR as usize;
+        let (mut buf, mut buf_r, mut perc) = (vec![0.0; len], vec![0.0; len], vec![0.0; len]);
+        // Panning has its own random stream, so it never shifts the break itself.
+        let mut pan_rng = Rng::stream(self.seed, 0x9A4);
+        let space = self.space;
         for (i, (pos, voice, vel)) in hits.iter().enumerate() {
             let sound = match voice {
                 Voice::Kick => crate::kits::kick(&p, *vel, &mut rng),
+                Voice::Snare if garage => {
+                    // A clap over the kit's snare, set a little back.
+                    let mut c = crate::kits::clap(&p, *vel, &mut rng);
+                    let s = crate::kits::snare(&p, *vel * 0.7, false, &mut rng);
+                    for (k, x) in s.iter().enumerate() {
+                        if let Some(y) = c.get_mut(k) {
+                            *y += 0.45 * x;
+                        }
+                    }
+                    c
+                }
                 Voice::Snare => crate::kits::snare(&p, *vel, false, &mut rng),
                 Voice::Ghost => crate::kits::snare(&p, *vel, true, &mut rng),
                 v => {
@@ -364,6 +488,9 @@ impl Drums {
         if p == SILENT_PHRASES {
             return Section::HatsOnly;
         }
+        if self.swing.is_some() {
+            return self.garage_section(p, mods);
+        }
         let energy = mods.at(p * PHRASE_BARS * self.bar).drums;
         let mut rng = Rng::stream(self.seed, 0x5EC0 ^ p);
         let e = (energy + rng.range(-0.12, 0.12)).clamp(0.0, 1.0);
@@ -374,6 +501,72 @@ impl Drums {
             x if x < 0.8 => Section::Full,
             _ => Section::Rolls,
         }
+    }
+
+    /// A garage phrase's section: hats, the breakdown, the 2-step, or the
+    /// 2-step with its glitches, by the same energy LFO as jungle's.
+    fn garage_section(&self, p: u64, mods: &Mods) -> Section {
+        let energy = mods.at(p * PHRASE_BARS * self.bar).drums;
+        let mut rng = Rng::stream(self.seed, 0x2577_5EC0 ^ p);
+        let e = (energy + rng.range(-0.12, 0.12)).clamp(0.0, 1.0);
+        match e {
+            x if x < 0.2 => Section::Out,
+            x if x < 0.32 => Section::HatsOnly,
+            x if x < 0.46 => Section::Breakdown,
+            x if x < 0.8 => Section::TwoStep,
+            _ => Section::Shuffle,
+        }
+    }
+
+    /// The slice plan for a garage bar (pure): the loop in order, with
+    /// glitch edits on top.
+    fn garage_plan(&self, bar: u64, mods: &Mods) -> Plan {
+        let section = self.section(bar / PHRASE_BARS, mods);
+        let fill = bar % PHRASE_BARS == PHRASE_BARS - 1;
+        let half = (bar % 2) as usize * STEPS;
+        let mut steps = [Step { slice: 0, op: Op::Play }; STEPS];
+        for (i, s) in steps.iter_mut().enumerate() {
+            *s = Step { slice: (half + i) as u8, op: Op::Play };
+        }
+        let mut rng = Rng::stream(self.seed, 0x2577_BA40_0000 ^ bar);
+        let p = match section {
+            Section::Out => 0.0,
+            Section::HatsOnly => 0.06,
+            Section::Breakdown => 0.1,
+            Section::Shuffle => 0.26,
+            _ => 0.08,
+        } + if fill && section != Section::Out { 0.15 } else { 0.0 };
+        let strong = self.strong_slices();
+        // Slices holding only hats and rims: what a stutter or a dropped kick borrows.
+        let weak: Vec<u8> = (0..SLICES as u8).filter(|s| !strong.contains(s)).collect();
+        for (i, s) in steps.iter_mut().enumerate().skip(1) {
+            if rng.chance(p) {
+                *s = match rng.weighted(&[0.35, 0.2, 0.2, 0.25]) {
+                    // A hat stutter.
+                    0 if !weak.is_empty() => Step { slice: rng.pick(&weak), op: Op::Roll },
+                    // A clap reversed into the beat after it.
+                    1 if self.reverse => Step { slice: if i % 8 == 3 { s.slice + 1 } else { s.slice }, op: Op::Reverse },
+                    // The kick drops out for a beat.
+                    2 if strong.contains(&s.slice) && !weak.is_empty() => Step { slice: rng.pick(&weak), op: Op::Play },
+                    3 => Step { slice: s.slice, op: Op::PitchDown },
+                    _ => *s,
+                };
+            }
+            // Fill: a reversed clap and a stutter into the next phrase.
+            if fill && section != Section::Out {
+                if i == STEPS - 2 && self.reverse && rng.chance(0.6) {
+                    *s = Step { slice: (half + 12) as u8, op: Op::Reverse };
+                } else if i == STEPS - 1 && rng.chance(0.6) {
+                    *s = Step { slice: s.slice, op: Op::Roll };
+                }
+            }
+        }
+        let mut join = [false; STEPS];
+        for i in 1..STEPS {
+            let (a, b) = (steps[i - 1], steps[i]);
+            join[i] = a.op == Op::Play && b.op == Op::Play && b.slice == a.slice + 1;
+        }
+        Plan { bar, section, fill, steps, join }
     }
 
     /// Slices containing a kick or a snare: what jungle edits love to move around.
@@ -390,6 +583,9 @@ impl Drums {
 
     /// The slice plan for bar `bar` (pure).
     pub fn plan(&self, bar: u64, mods: &Mods) -> Plan {
+        if self.swing.is_some() {
+            return self.garage_plan(bar, mods);
+        }
         let section = self.section(bar / PHRASE_BARS, mods);
         let fill = bar % PHRASE_BARS == PHRASE_BARS - 1;
         let half = (bar % 2) as usize * STEPS;
@@ -407,6 +603,8 @@ impl Drums {
             Section::HatsOnly => 0.08,
             Section::Full => 0.14,
             Section::Rolls => 0.32,
+            // Garage sections never reach the jungle plan.
+            Section::Breakdown | Section::TwoStep | Section::Shuffle => 0.0,
         } + if fill && section != Section::Out { 0.2 } else { 0.0 };
         let strong = self.strong_slices();
         for (i, s) in steps.iter_mut().enumerate().skip(1) {
@@ -547,7 +745,17 @@ impl Drums {
         let high = x - low;
         let low_r = self.highpass[1].process(xr).low;
         let high_r = xr - low_r;
-        (x + (high - x) * self.hp_mix, xr + (high_r - xr) * self.hp_mix, xp * (1.0 - self.hp_mix))
+        let (mut l, mut r) = (x + (high - x) * self.hp_mix, xr + (high_r - xr) * self.hp_mix);
+        if self.swing.is_some() {
+            // The garage breakdown: the kick and the bass end of the loop
+            // filtered away, so the claps and hats float.
+            let target = if section == Section::Breakdown { 1.0 } else { 0.0 };
+            self.lc_mix += (target - self.lc_mix) * 0.0004;
+            let (ll, lr) = (self.low_cut[0].process(l).low, self.low_cut[1].process(r).low);
+            l -= ll * self.lc_mix;
+            r -= lr * self.lc_mix;
+        }
+        (l, r, xp * (1.0 - self.hp_mix))
     }
 }
 
@@ -563,6 +771,11 @@ impl Drums {
 
     pub fn pattern_name(&self) -> &'static str {
         self.pattern
+    }
+
+    /// Every hit of the recorded loop: (source position in samples, voice).
+    pub fn hits(&self) -> &[(usize, Voice)] {
+        &self.hits
     }
 
     /// A sixteenth and a bar at the track's tempo, in samples.
