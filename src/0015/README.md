@@ -196,6 +196,36 @@ cargo run -- --serve            # open http://127.0.0.1:8080/
 readable file), `artifacts/ShrineGen-<seed>.shrineseed` (the settings), compiles
 it to `web/shrine.wasm`, and leaves the page ready.
 
+### Learn mode
+
+**Learn how it's made** (beside View Source) turns the page into a full-screen
+explainer. The live shrine shrinks to a tile in the corner and keeps playing;
+click it to play or pause. Fifteen lessons follow.
+
+- **The music:** the score, harmony, the drone, atmosphere loops, glitch
+  layers, drums, bass, stabs and pips, space, and the mix.
+- **The picture:** the shrine, biome and palette, light and weather, how the
+  music moves the picture, and one seed that sounds and looks the same everywhere.
+
+Each lesson has a live diagram of this piece's real data: its frozen spectrum
+and the moving filter, the break's slices with the step now playing, the chord
+on a pitch circle, the loops as rings, the meters. It explains how the part is
+made here, with this piece's own values, and gives a tool-agnostic *Recreate
+it* checklist. Where a lesson is about one layer, **Hear it alone** solos that
+layer. Soloing only changes what you hear; the music carries on underneath
+exactly as before.
+
+`Esc` closes, and `↑↓` changes the lesson. A link can open Learn directly:
+`#learn` for the first lesson, or `#learn-3` for the third.
+
+It is built from four exports, all display-only:
+- `shrine_learn_ptr/len`: the piece described as JSON (`engine/src/learn.rs`,
+  built once on first ask, in about a second);
+- `shrine_learn_state`: 48 numbers of live state, posted by the worklet while
+  Learn is open;
+- `shrine_learn_weather`: the weather now;
+- `shrine_set_solo`.
+
 ## Releasing
 
 ```sh

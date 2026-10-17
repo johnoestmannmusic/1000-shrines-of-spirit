@@ -18,6 +18,10 @@ pub struct Player {
     camera: Camera,
     transparent_sky: bool,
     last_sky: ([u8; 4], [u8; 4]),
+    /// The Learn page's description (built once, on first ask) and live state.
+    learn: Option<String>,
+    learn_state: Vec<f64>,
+    weather: [f64; 6],
 }
 
 impl Player {
@@ -30,6 +34,9 @@ impl Player {
             camera: Camera::default(),
             transparent_sky: false,
             last_sky,
+            learn: None,
+            learn_state: vec![0.0; crate::learn::STATE_LEN],
+            weather: [0.0; 6],
         }
     }
 
@@ -55,6 +62,36 @@ impl Player {
     /// Nudge the camera from the pointer, in `[-1, 1]` on each axis.
     pub fn set_camera(&mut self, yaw: f64, pitch: f64) {
         self.camera = Camera { yaw: yaw.clamp(-1.0, 1.0), pitch: pitch.clamp(-1.0, 1.0) };
+    }
+
+    /// Everything the Learn page explains about this shrine, as UTF-8 JSON.
+    /// Built on first ask (it sets up the music engine once, without playing it).
+    pub fn learn_json(&mut self) -> &[u8] {
+        let config = &self.sim.config;
+        self.learn.get_or_insert_with(|| crate::learn::json(config)).as_bytes()
+    }
+
+    /// The music's moving parts now (see `learn::STATE_LEN`); all zero for a
+    /// visuals-only instance.
+    pub fn learn_state(&mut self) -> &[f64] {
+        if let Some(track) = self.sim.track_mut() {
+            crate::learn::state(track, &mut self.learn_state);
+        }
+        &self.learn_state
+    }
+
+    /// The weather at `sample_clock`, for the Learn page: (wind, gust, rain,
+    /// snow, fog, light), each 0..1.
+    pub fn weather_now(&mut self, sample_clock: u64) -> &[f64] {
+        let w = self.sim.state(sample_clock as f64 / SAMPLE_RATE as f64 + self.sim.start_offset()).weather;
+        self.weather = [w.wind_strength, w.gust, w.rain, w.snow, w.fog, w.light];
+        &self.weather
+    }
+
+    /// Hear one layer alone: 1.. = `learn::SOLOS`, 0 = the full mix.
+    pub fn set_solo(&mut self, n: u32) {
+        let solo = (n as usize).checked_sub(1).and_then(|i| crate::learn::SOLOS.get(i).copied());
+        self.sim.set_solo(solo);
     }
 
     /// Render `frames` stereo samples and return the interleaved buffer.

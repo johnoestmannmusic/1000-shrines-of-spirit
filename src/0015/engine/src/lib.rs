@@ -36,6 +36,7 @@ pub mod future;
 pub mod grid;
 pub mod iso;
 pub mod layout;
+pub mod learn;
 pub mod light;
 pub mod material;
 pub mod math;

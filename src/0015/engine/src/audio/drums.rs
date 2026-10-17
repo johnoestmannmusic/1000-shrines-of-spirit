@@ -152,11 +152,12 @@ pub struct Plan {
 }
 
 /// The break's original patterns, at 32 sixteenths over two bars:
-/// (name, kicks, snares, ghosts). Hats and ride are added on top.
+/// (name, kicks, snares, ghosts). Hats and ride are added on top. The names
+/// describe the shape only (`HC002`): they never reach the sound.
 const PATTERNS: [(&str, &[usize], &[usize], &[usize]); 3] = [
-    ("Amen-style", &[0, 2, 10, 11, 16, 18, 26], &[4, 12, 20, 28], &[7, 9, 15, 23, 25, 31]),
-    ("Think-style", &[0, 6, 10, 16, 23, 26], &[4, 12, 20, 28], &[14, 30]),
-    ("Apache-style", &[0, 3, 8, 10, 16, 19, 24], &[4, 12, 20, 28], &[13, 29, 31]),
+    ("busy break: doubled kicks, many ghosts", &[0, 2, 10, 11, 16, 18, 26], &[4, 12, 20, 28], &[7, 9, 15, 23, 25, 31]),
+    ("open break: sparse, late kicks", &[0, 6, 10, 16, 23, 26], &[4, 12, 20, 28], &[14, 30]),
+    ("rolling break: pushed kicks", &[0, 3, 8, 10, 16, 19, 24], &[4, 12, 20, 28], &[13, 29, 31]),
 ];
 
 const SR: f64 = crate::SAMPLE_RATE as f64;

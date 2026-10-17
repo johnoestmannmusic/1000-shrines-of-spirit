@@ -64,6 +64,12 @@ pub struct Sim {
     audio_samples: u64,
     /// Samples output since a mid-piece start, for its fade-in.
     since_start: u64,
+    /// Whether a solo has been asked for: then the output is the track's
+    /// monitor (the soloed layer) until it has faded back to the full mix.
+    /// Never set, the output is exactly the plain render.
+    soloing: bool,
+    /// The mix the monitor is rendered beside (scratch).
+    split: Vec<f32>,
 }
 
 /// A start part-way through fades in over this long, so it never begins
@@ -83,7 +89,7 @@ impl Sim {
         let wildlife = config.settings.wildlife.then(|| Wildlife::new(config.seed, config.biome));
         scene.wildlife = wildlife.clone();
         let weather_bed = Some(WeatherBed::new(config.seed, hard, wildlife).roofed(config.biome.roofed()));
-        let mut sim = Sim { config, scene, track, weather_bed, audio_samples: 0, since_start: 0 };
+        let mut sim = Sim { config, scene, track, weather_bed, audio_samples: 0, since_start: 0, soloing: false, split: Vec::new() };
         sim.fast_forward();
         sim
     }
@@ -113,7 +119,7 @@ impl Sim {
         let mut scene = Scene::new(config.seed, config.biome, config.weather);
         scene.author(&config.settings.model);
         scene.wildlife = config.settings.wildlife.then(|| Wildlife::new(config.seed, config.biome));
-        Sim { config, scene, track: None, weather_bed: None, audio_samples: 0, since_start: 0 }
+        Sim { config, scene, track: None, weather_bed: None, audio_samples: 0, since_start: 0, soloing: false, split: Vec::new() }
     }
 
     /// The shared state at `t` seconds. Pure: the same `t` always yields the
@@ -177,16 +183,54 @@ impl Sim {
     }
 
     fn render_raw(&mut self, out: &mut [f32]) {
-        if let Some(track) = &mut self.track {
-            track.render(out);
-        } else {
-            out.fill(0.0);
+        // The weather steps back while a layer is soloed (its share of the
+        // monitor, as the solo fades in and out).
+        let mut bed_gain = 1.0f32;
+        match &mut self.track {
+            Some(track) if self.soloing => {
+                bed_gain = 1.0 - track.solo().1 as f32;
+                self.split.resize(out.len(), 0.0);
+                // The mix is rendered and set aside, so the music runs on
+                // exactly as it would; what is heard is the monitor.
+                track.render_split(&mut self.split, out);
+                let (current, amount) = track.solo();
+                if current.is_none() && amount == 0.0 && track.solo_target().is_none() {
+                    self.soloing = false;
+                }
+            }
+            Some(track) => track.render(out),
+            None => out.fill(0.0),
         }
         if let Some(bed) = &mut self.weather_bed {
             let weather = &self.scene.weather;
-            bed.render_from(self.audio_samples, out, weather);
+            if bed_gain == 1.0 {
+                bed.render_from(self.audio_samples, out, weather);
+            } else {
+                let mut wet = vec![0f32; out.len()];
+                bed.render_from(self.audio_samples, &mut wet, weather);
+                for (o, w) in out.iter_mut().zip(wet) {
+                    *o += w * bed_gain;
+                }
+            }
         }
         self.audio_samples += out.len() as u64 / 2;
+    }
+
+    /// Hear one layer on its own (`None` = the full mix). Only what is heard
+    /// changes: the music underneath carries on exactly as it would.
+    pub fn set_solo(&mut self, solo: Option<crate::track::Solo>) {
+        if let Some(track) = &mut self.track {
+            track.set_solo(solo);
+            if solo.is_some() {
+                self.soloing = true;
+            }
+        }
+    }
+
+    /// The music engine, for the Learn page's live views (`None` for a
+    /// visuals-only instance).
+    pub fn track_mut(&mut self) -> Option<&mut crate::track::Track> {
+        self.track.as_mut()
     }
 }
 

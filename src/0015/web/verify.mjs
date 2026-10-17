@@ -114,6 +114,32 @@ for (const config of fixture.configs) {
 	exports.shrine_dealloc(ptr, words.length * 4);
 }
 
+// 0015: the Learn page's exports describe the piece and read its moving parts.
+if (typeof exports.shrine_learn_ptr === "function") {
+	const v = exports.shrine_new(0, 0, 2);
+	const len = exports.shrine_learn_len(v);
+	const text = new TextDecoder().decode(new Uint8Array(exports.memory.buffer, exports.shrine_learn_ptr(v), len));
+	try {
+		const d = JSON.parse(text);
+		console.log(`learn          ${len} bytes, ${d.chords.length} chords, ${d.spectra.length} spectra`);
+	} catch (e) {
+		console.error(`  LEARN JSON INVALID: ${e.message}`);
+		failed = true;
+	}
+	exports.shrine_free(v);
+	const a = exports.shrine_new(0, 0, 1);
+	exports.shrine_render_audio(a, 4800);
+	const st = new Float64Array(exports.memory.buffer, exports.shrine_learn_state(a), exports.shrine_learn_state_len());
+	if (st[0] !== 4800) {
+		console.error(`  LEARN STATE clock ${st[0]}, expected 4800`);
+		failed = true;
+	}
+	exports.shrine_free(a);
+} else {
+	console.error("  no Learn exports");
+	failed = true;
+}
+
 if (failed) {
 	console.error("NATIVE/WASM PARITY FAILED");
 	process.exit(1);

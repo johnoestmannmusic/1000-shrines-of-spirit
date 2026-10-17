@@ -718,6 +718,11 @@ impl Track {
         self.monitor.target = solo;
     }
 
+    /// The layer asked for (the monitor fades to it).
+    pub fn solo_target(&self) -> Option<Solo> {
+        self.monitor.target
+    }
+
     /// The layer currently soloed on the monitor, and how far faded in (0..1).
     pub fn solo(&self) -> (Option<Solo>, f64) {
         (self.monitor.current, self.monitor.amount)

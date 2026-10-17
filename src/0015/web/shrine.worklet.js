@@ -3,6 +3,10 @@
 // Plain WebAssembly only (HC006): the module is instantiated here and asked for
 // interleaved stereo samples. It never knows about blocks, so native and browser
 // output are identical.
+//
+// The page's Learn mode can ask for two more things, neither of which changes
+// the music: the engine's moving parts (posted now and then while it is
+// watching), and to hear one layer on its own.
 
 class ShrineGen extends AudioWorkletProcessor {
   constructor(options) {
@@ -14,6 +18,14 @@ class ShrineGen extends AudioWorkletProcessor {
     // Mode 1: audio only. Default recipe until the artifact bakes its own.
     this.player = this.shrine.shrine_new(0, 0, 1);
     this.samples = 0;
+    this.live = false;
+    this.port.onmessage = (e) => {
+      const m = e.data || {};
+      if (typeof m.live === "boolean") this.live = m.live;
+      if (typeof m.solo === "number" && typeof this.shrine.shrine_set_solo === "function") {
+        this.shrine.shrine_set_solo(this.player, m.solo);
+      }
+    };
     this.port.postMessage("ready");
   }
 
@@ -29,7 +41,14 @@ class ShrineGen extends AudioWorkletProcessor {
     }
     this.samples += frames;
     // Report the clock now and then, so the page can keep the visuals in step.
-    if (this.samples % 4096 < frames) this.port.postMessage(this.samples);
+    if (this.samples % 4096 < frames) {
+      this.port.postMessage(this.samples);
+      if (this.live && typeof this.shrine.shrine_learn_state === "function") {
+        const n = this.shrine.shrine_learn_state_len();
+        const s = new Float64Array(this.shrine.memory.buffer, this.shrine.shrine_learn_state(this.player), n);
+        this.port.postMessage({ state: Float64Array.from(s) });
+      }
+    }
     return true;
   }
 }

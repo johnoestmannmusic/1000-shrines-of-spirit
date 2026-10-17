@@ -149,6 +149,63 @@ pub extern "C" fn shrine_name_len() -> u32 {
     0
 }
 
+/// The Learn page's description of this shrine: UTF-8 JSON, `shrine_learn_len` bytes.
+///
+/// # Safety
+/// `player` must come from [`shrine_new`].
+#[no_mangle]
+pub unsafe extern "C" fn shrine_learn_ptr(player: *mut Player) -> *const u8 {
+    let p = unsafe { &mut *player };
+    p.learn_json().as_ptr()
+}
+
+/// Length of the description in bytes.
+///
+/// # Safety
+/// `player` must come from [`shrine_new`].
+#[no_mangle]
+pub unsafe extern "C" fn shrine_learn_len(player: *mut Player) -> u32 {
+    let p = unsafe { &mut *player };
+    p.learn_json().len() as u32
+}
+
+/// The music's moving parts now: `shrine_learn_state_len` f64s (layout in
+/// `learn::STATE_LEN`). Display only.
+///
+/// # Safety
+/// `player` must come from [`shrine_new`].
+#[no_mangle]
+pub unsafe extern "C" fn shrine_learn_state(player: *mut Player) -> *const f64 {
+    let p = unsafe { &mut *player };
+    p.learn_state().as_ptr()
+}
+
+#[no_mangle]
+pub extern "C" fn shrine_learn_state_len() -> u32 {
+    crate::learn::STATE_LEN as u32
+}
+
+/// The weather at `sample_clock`: 6 f64s (wind, gust, rain, snow, fog, light).
+///
+/// # Safety
+/// `player` must come from [`shrine_new`].
+#[no_mangle]
+pub unsafe extern "C" fn shrine_learn_weather(player: *mut Player, sample_clock: u64) -> *const f64 {
+    let p = unsafe { &mut *player };
+    p.weather_now(sample_clock).as_ptr()
+}
+
+/// Hear one layer alone (1 drone, 2–3 glitch layers, 4 bass, 5 drums, 6–9
+/// atmosphere loops, 10 the echo and reverb), or 0 for the full mix.
+///
+/// # Safety
+/// `player` must come from [`shrine_new`].
+#[no_mangle]
+pub unsafe extern "C" fn shrine_set_solo(player: *mut Player, layer: u32) {
+    let p = unsafe { &mut *player };
+    p.set_solo(layer);
+}
+
 /// Release a player.
 ///
 /// # Safety

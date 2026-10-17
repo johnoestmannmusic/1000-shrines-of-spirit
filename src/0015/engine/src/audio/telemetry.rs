@@ -205,7 +205,9 @@ fn layer_snapshot(layer: &Layer, clock: u64, density: f64) -> LayerSnapshot {
 impl Track {
     pub fn describe(&self) -> Description {
         let (delay, feedback) = self.echo.settings();
-        let chords = self.harmony.chords.len();
+        // The drone's own chords (in 2-step garage it holds one pedal chord
+        // under the progression).
+        let chords = self.drone.harmony().chords.len();
         Description {
             seeds: self.seeds,
             settings: self.settings,
