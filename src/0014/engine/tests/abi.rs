@@ -112,7 +112,9 @@ fn a_version_15_recipe_keeps_its_mode_and_gets_the_garage_defaults() {
     config.settings.pace = shrine0014::harmony::Pace::Jungle;
     config.settings.garage = shrine0014::garage::GarageSetup::DEFAULT;
     let mut words = recipe::encode(&config);
-    let garage_at = words.len() - shrine0014::shrine_model::WORDS - shrine0014::name::CAP / 4 - 1;
+    // (and version 16 had no start offset, the word after it).
+    let garage_at = words.len() - shrine0014::shrine_model::WORDS - shrine0014::name::CAP / 4 - 2;
+    words.remove(garage_at + 1);
     words.remove(garage_at);
     words[0] = 15;
     let back = recipe::decode(&words);
@@ -125,7 +127,7 @@ fn encoding_twice_is_stable() {
     let a = recipe::encode(&custom());
     let b = recipe::encode(&custom());
     assert_eq!(a, b);
-    assert_eq!(a.len(), 166);
+    assert_eq!(a.len(), 167);
 }
 
 #[test]

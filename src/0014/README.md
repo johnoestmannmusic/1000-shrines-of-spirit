@@ -54,6 +54,62 @@ roofs, ashlar footings and flagstones, carved friezes and glowing rune panels,
 cracks, chipped edges and creeping moss. Every texture is fixed to its block,
 and every weather lights it differently — its own sun, sky light, cast shadows,
 occlusion, rim light and altar glow — in stepped, ordered-dither shading.
+
+**Four built futures** join the three wild biomes (Moss, Verdant, Fungal). Each
+re-makes the same blocks in its own materials, lays its own ground out around
+the shrine, furnishes it with props, and adjusts the weather's light:
+
+- **Near Future** — a bright city block. Pastel tiled buildings with window
+  bands, roller-shuttered shops and narrow lit signs, a vending-machine altar;
+  roads with centre lines, zebra crossings and manholes, sidewalks with curbs
+  and yellow tactile paving; street lamps, utility poles strung with sagging
+  wires, traffic signals, bollards and small parked cars.
+- **Research Lab** — brushed steel, glass curtain walls and blue-green neon
+  columns, a UI-screen altar, a floor with glowing light lines, server racks,
+  terminals and glass partitions, under a steel-and-glass ceiling.
+- **Ecofuture** — white titanium panels with vents and status lights, living
+  walls, green roofs and solar tiles, a glowing bio-reactor altar; mown lawns
+  with curving white paths, wind turbines turning with the wind, round trees,
+  sensor masts, hydroponic pods and a hovering drone.
+- **Greenhouse** — a glass atrium on minimal steel scaffolding: glazing with
+  plants pressed against it, a pool altar, terracotta tiles, gravel and
+  planting beds, tree ferns, misting heads and hanging baskets, sun shafts
+  slanting through the pitched glass roof.
+
+Lab and Greenhouse are **roofed**: rain splashes land on the glass (the same
+splashes the sound plays), beads run down the panes, snow settles on the roof
+as frost, nothing inside gets wet, and the weather is heard muffled through
+glass. Lights and screens are lit from within, so they stay bright in a storm.
+Seeds chosen on the command line still land on a wild biome; the futures are
+picked by name (`--biome near-future`, `research-lab`, `ecofuture`, `greenhouse`).
+
+**Mode** sets how the music moves: *half-time* and *jungle* (the chopped
+break), or **2-step garage** — melodic, optimistic, swung. In garage:
+
+- the drums play a 2-step loop at the track's own tempo: a kick on the one and
+  a second that skips past beat three, claps on two and four, rimshots on the
+  pushes, shuffled hats with open hats on the off-beats; sections move between
+  hats, a kick-less breakdown, the full 2-step and 2-step with glitch edits
+  (hat stutters, reversed claps, dropped kicks), all swung by **Swing**
+  (50–66 %);
+- the chords follow a genre progression picked by the seed (the royal road
+  IV–V–iii–vi, ii–V–I–vi and others; minor-key ones in minor scales), changing
+  every two bars on the downbeat, while the drone holds an open fifth on the
+  tonic beneath (no third or colour notes to rub against the chords);
+- **Bass** *rhythmic* plays a syncopated, swung bassline on the chord roots,
+  octaves and fifths that walks into the top of the loop (*drone* keeps the
+  sustained bass);
+- **Stabs** (*off / sparse / busy*) play voice-led seventh chords on the pushes
+  in a call and answer, in a *dark* electric-piano or *bright* bell-organ
+  **Stab tone**, through a dotted-eighth echo;
+- the drone steps back and the atmosphere loops come forward, voiced as open
+  shells (root, fifth, tenth) above the stabs; bells and glitch pings keep to
+  whole-number overtones, the glitch layers pitch only to the root, second and
+  fifth, and at each change the stab echo clears and the reverb send dips, so
+  no chord rings over the next.
+
+Choosing garage moves a default tempo to 132 BPM, Lydian to Ionian and three
+chords to four; anything set by hand is kept.
 **Camera · Rotation speed** orbits
 the whole viewport around the shrine, in degrees per second (default 0); the
 **Code plane** setting puts the scrolling source on a *static* plane, a *flat*
@@ -119,8 +175,14 @@ cargo run -- --import shrine.shrineseed
 
 ## Determinism
 
-Identical settings produce bit-identical audio and frames. This is locked by
-tests:
+Identical settings produce bit-identical audio and frames, however the audio is
+cut into blocks (the browser's 128 frames or the exporters' 4096). That is what
+makes **Start at** work: a start offset (0–600 s) is the very same piece joined
+part-way. The audio is fast-forwarded exactly at startup — about a second or
+two per minute of offset in the browser — then fades in over 1.5 s; the visuals,
+weather and wildlife simply begin at that time. The offset is part of the
+recipe, so the page, the audition, previews and WAV exports all start there.
+This is locked by tests:
 
 ```sh
 cargo test --workspace          # includes the golden hashes
@@ -128,8 +190,10 @@ node web/verify.mjs             # native <-> WASM parity (after ./build-web.sh)
 ```
 
 `engine/tests/audio_golden.rs` fixes the music, `engine/tests/parity_golden.rs`
-fixes the coupled audio and the rendered frames, and `web/verify.mjs` proves the
-browser matches Rust exactly.
+fixes the coupled audio and the rendered frames — including each built future
+playing 2-step garage, whose recipes and hashes it also writes to
+`web/parity-futures.json` — and `web/verify.mjs` proves the browser matches
+Rust exactly.
 
 ## Commands
 
@@ -137,7 +201,7 @@ browser matches Rust exactly.
 cargo run                                   interactive setup + live preview
 cargo run -- --preview [SEED] [--biome] [--weather] [--out FILE]
 cargo run -- --cover  [SEED] …              1600×1600 PNG
-cargo run -- --wav    [SEED] [SECONDS] …    plain WAV
+cargo run -- --wav    [SEED] [SECONDS] … [--mode garage] [--bpm N]   plain WAV
 cargo run -- --emit   [--seed N] [--biome] [--weather] [--out FILE]
 cargo run -- --export / --import FILE.shrineseed
 cargo run -- --serve  [PORT]                serve web/ locally

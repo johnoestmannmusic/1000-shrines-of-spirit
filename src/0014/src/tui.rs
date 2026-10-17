@@ -113,6 +113,7 @@ enum Kind {
     ArchOffY,
     ArchOffZ,
     Name,
+    StartAt,
     SeedN(usize),
     SavePng,
     CoverPng,
@@ -555,6 +556,12 @@ impl App {
             Kind::Name,
             &mut rows,
         );
+        field(
+            "Start at".into(),
+            if s.start_s == 0 { "the beginning".into() } else { format!("{} s · {}:{:02} in", s.start_s, s.start_s / 60, s.start_s % 60) },
+            Kind::StartAt,
+            &mut rows,
+        );
 
         head("Shrine", &mut rows);
         field("Seed".into(), c.seed.to_string(), Kind::Seed, &mut rows);
@@ -827,6 +834,11 @@ impl App {
                 let i = self.config.settings.code.plane as i32 + if forward { 1 } else { -1 };
                 self.config.settings.code.plane = i.rem_euclid(n) as u8;
             }
+            Kind::StartAt => {
+                let step = if shift { 30 } else { 5 };
+                let v = self.config.settings.start_s as i32 + if forward { step } else { -step };
+                self.config.settings.start_s = v.clamp(0, shrine0014::track::MAX_START_S as i32) as u16;
+            }
             Kind::CameraSpeed => {
                 let step = if shift { 15 } else { 5 };
                 let v = self.config.settings.camera_speed as i32 + if forward { step } else { -step };
@@ -951,6 +963,7 @@ impl App {
             Kind::CodeAngle => s.code.angle.to_string(),
             Kind::CodeOffset => s.code.offset.to_string(),
             Kind::CameraSpeed => s.camera_speed.to_string(),
+            Kind::StartAt => s.start_s.to_string(),
             Kind::ArchRotX => s.arch.rot_x.to_string(),
             Kind::ArchRotY => s.arch.rot_y.to_string(),
             Kind::ArchRotZ => s.arch.rot_z.to_string(),
@@ -1001,6 +1014,7 @@ impl App {
                     n.clamp(CodeOverlay::MIN_OFFSET as i64, CodeOverlay::MAX_OFFSET as i64) as i16;
             }
             Kind::CameraSpeed => c.settings.camera_speed = n.clamp(-180, 180) as i16,
+            Kind::StartAt => c.settings.start_s = n.clamp(0, shrine0014::track::MAX_START_S as i64) as u16,
             Kind::ArchRotX => c.settings.arch.rot_x = clamp_rot(n),
             Kind::ArchRotY => c.settings.arch.rot_y = clamp_rot(n),
             Kind::ArchRotZ => c.settings.arch.rot_z = clamp_rot(n),
@@ -1967,7 +1981,8 @@ fn run_wav_export(config: SimConfig, opts: wav::WavOptions, tx: Sender<Progress>
 
     let _ = tx.send(Progress::Fraction(0.85, "rendering cover".to_string()));
     let mut fb = Framebuffer::logical();
-    let state = sim.state(0.0);
+    // The cover shows where the piece starts.
+    let state = sim.state(sim.start_offset());
     sim.scene.render_state(&mut fb, &state, Quality::High);
     let cover = preview::cover_png(&fb, COVER_SIZE);
 
@@ -2226,6 +2241,8 @@ mod tests {
     #[test]
     fn the_glitch_screen_edits_the_open_layer() {
         let mut app = App::new();
+        // Start from a known layer, whatever the saved settings say.
+        app.config.settings.glitch[1].enabled = true;
         app.sel = app.rows().iter().position(|r| r.kind == Kind::Glitch(1)).unwrap();
         app.activate();
         assert_eq!(app.screen, Screen::Glitch);

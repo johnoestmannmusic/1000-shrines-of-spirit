@@ -9,7 +9,9 @@
 
 import { readFile } from "node:fs/promises";
 
-const AUDIO_GOLDEN = 0x31c60f66e2392f4dn;
+// Re-locked in 0014: the weather bed is now block-independent (see
+// AUDIO_GOLDEN in engine/tests/parity_golden.rs).
+const AUDIO_GOLDEN = 0x4431b25653cbda5cn;
 // Re-locked when `raster::fill_face` was fixed (side faces had been drawn with
 // x and y swapped), for the weather rework (FEAT-40), for the textured, lit
 // architecture (FEAT-44), and for its paler palette (FEAT-45). These mirror
@@ -72,6 +74,44 @@ for (let i = 0; i < VISUAL_GOLDEN.length; i++) {
 	}
 }
 exports.shrine_free(visual);
+
+// 0014: the built futures playing 2-step garage, from the recipes and
+// native hashes in parity-futures.json (written by engine/tests/parity_golden.rs).
+const fixture = JSON.parse(await readFile(new URL("./parity-futures.json", import.meta.url), "utf8"));
+for (const config of fixture.configs) {
+	const words = Uint32Array.from(config.words);
+	const ptr = exports.shrine_alloc(words.length * 4);
+	new Uint32Array(exports.memory.buffer, ptr, words.length).set(words);
+	const a = exports.shrine_new(ptr, words.length, 1);
+	let h = OFFSET;
+	let left = fixture.audio_seconds * SR;
+	while (left > 0) {
+		const frames = Math.min(4096, left);
+		const out = exports.shrine_render_audio(a, frames);
+		h = fnv(new Uint8Array(exports.memory.buffer, out, frames * 2 * 4), 0, frames * 2 * 4, h);
+		left -= frames;
+	}
+	exports.shrine_free(a);
+	const got = h.toString(16).padStart(16, "0");
+	console.log(`${config.name.padEnd(20)} audio ${got}`);
+	if (got !== config.audio) {
+		console.error(`  MISMATCH — native ${config.audio}`);
+		failed = true;
+	}
+	const v = exports.shrine_new(ptr, words.length, 2);
+	fixture.frames.forEach((t, i) => {
+		const out = exports.shrine_render_visual(v, BigInt(Math.round(t * SR)));
+		const view = new Uint8Array(exports.memory.buffer, out, LOGICAL * LOGICAL * 4);
+		const fh = fnv(view, 0, view.length, OFFSET).toString(16).padStart(16, "0");
+		console.log(`${config.name.padEnd(20)} frame ${i} ${fh}`);
+		if (fh !== config.visual[i]) {
+			console.error(`  MISMATCH — native ${config.visual[i]}`);
+			failed = true;
+		}
+	});
+	exports.shrine_free(v);
+	exports.shrine_dealloc(ptr, words.length * 4);
+}
 
 if (failed) {
 	console.error("NATIVE/WASM PARITY FAILED");

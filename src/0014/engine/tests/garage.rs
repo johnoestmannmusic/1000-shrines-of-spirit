@@ -162,3 +162,36 @@ fn garage_chords_change_every_two_bars_on_the_downbeat() {
         }
     }
 }
+
+#[test]
+fn garage_layers_keep_out_of_each_others_way() {
+    let tempo = Tempo::new(132);
+    for scale in [Scale::Ionian, Scale::Dorian, Scale::Aeolian] {
+        for key in 0..12u8 {
+            // The drone is an open fifth on the tonic: nothing to rub against a chord.
+            let drone = Harmony::pedal(scale, tempo.beat(), key);
+            for n in &drone.chords[0].notes {
+                let iv = (*n as i64 - key as i64).rem_euclid(12);
+                assert!(iv == 0 || iv == 7, "{scale:?} key {key}: the drone holds {n}, not a root or fifth");
+            }
+            let g = Harmony::garage(scale, 4, tempo.beat(), key, &mut Rng::new(key as u64));
+            assert!(g.garage);
+            // The loops' shells sit above the stabs' middle register and below F6.
+            for c in &g.chords {
+                assert!(c.notes[0] >= 60.0 && c.notes.iter().all(|m| *m <= 87.0), "{scale:?}: loops at {:?}", c.notes);
+            }
+            // The glitch layers pitch only to the root, second and fifth.
+            let cfg = shrine0014::glitch_setup::GlitchSetup::DEFAULT_0.layer_config(0, &g, tempo);
+            assert_eq!(cfg.ping_ratio, 3.0);
+            let iv = scale.intervals();
+            for m in &cfg.notes {
+                let d = (*m as i64 - key as i64).rem_euclid(12) as u8;
+                assert!([iv[0], iv[1], iv[4]].contains(&d), "{scale:?}: glitch note {m}");
+            }
+        }
+    }
+    // The slow modes keep their inharmonic pings and every scale note.
+    let (mut a, mut b) = (Rng::stream(1, 0xD0), Rng::stream(1, 0xD7));
+    let h = Harmony::new(Scale::Lydian, 3, Pace::HalfTime, tempo.beat(), 2, &mut a, &mut b);
+    assert_eq!(shrine0014::glitch_setup::GlitchSetup::DEFAULT_0.layer_config(0, &h, tempo).ping_ratio, 0.0);
+}

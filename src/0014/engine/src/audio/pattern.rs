@@ -21,6 +21,9 @@ pub struct LayerConfig {
     /// Loops before mutating (min, max).
     pub repeats: (u64, u64),
     pub max_ratchet: u64,
+    /// The ping's upper partial, as a ratio of its note; 0 = the usual
+    /// inharmonic 2.756 (2-step garage uses a whole-number 3).
+    pub ping_ratio: f64,
 }
 
 const MAX_VOICES: usize = 8;
@@ -92,7 +95,7 @@ impl Layer {
                 let grain = ms(rng, 12.0, 90.0);
                 (grain * rng.int(2, 6) as u32, grain as f64, 1.0)
             }
-            Kind::Ping => (ms(rng, 300.0, 1600.0), 0.0, 0.8),
+            Kind::Ping => (ms(rng, 300.0, 1600.0), cfg.ping_ratio, 0.8),
             Kind::Click => (ms(rng, 3.0, 30.0), 0.0, 0.5),
             Kind::Crush => (ms(rng, 15.0, 80.0), rng.int(2, 40) as f64, 0.6),
         };

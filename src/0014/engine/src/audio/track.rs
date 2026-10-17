@@ -236,7 +236,16 @@ pub struct Settings {
     /// The 2-step garage mode's swing, bass and stabs (ignored by the other
     /// modes).
     pub garage: crate::garage::GarageSetup,
+    /// Where the piece starts, in seconds into the music (0 = the beginning).
+    /// Everything is deterministic, so starting later is the very same piece
+    /// joined part-way: the audio is fast-forwarded exactly, the visuals and
+    /// weather simply begin at that time.
+    pub start_s: u16,
 }
+
+/// The latest start offset, in seconds (the audio must be fast-forwarded to
+/// it, which takes a moment per minute).
+pub const MAX_START_S: u16 = 600;
 
 pub const DEFAULT_SETTINGS: Settings =
     Settings {
@@ -269,6 +278,7 @@ pub const DEFAULT_SETTINGS: Settings =
         loop_rhythm: false,
         wildlife: false,
         garage: crate::garage::GarageSetup::DEFAULT,
+        start_s: 0,
     };
 
 /// 0010's sound: the default settings with no atmosphere loops.
@@ -283,6 +293,8 @@ const GARAGE_LOOPS: f64 = 1.4;
 /// How far the stabs dip under each kick, and how much of them goes to the reverb.
 const GARAGE_STAB_DUCK: f64 = 0.3;
 const STAB_SEND: f64 = 0.35;
+/// How far the garage reverb send dips before each change.
+const GARAGE_SEND_DIP: f64 = 0.7;
 const ECHO_SIXTEENTHS: u64 = 3;
 /// The drums' tape echo delay, in drum sixteenths.
 const TAPE_SIXTEENTHS: u64 = 3;
@@ -480,7 +492,7 @@ impl Track {
         // one chord), while everything else follows the genre progression.
         let (harmony, drone_harmony) = if garage {
             let mut g = Rng::stream(seeds.s1, 0x6A4A_6E);
-            (Harmony::garage(settings.scale, chords, tempo.beat(), key, &mut g), harmony)
+            (Harmony::garage(settings.scale, chords, tempo.beat(), key, &mut g), Harmony::pedal(settings.scale, tempo.beat(), key))
         } else {
             (harmony.clone(), harmony)
         };
@@ -727,9 +739,22 @@ impl Track {
         };
 
         // Shared long reverb.
-        let send = |x: f64, k: usize| match stab {
-            Some(s) => x + [s.0, s.1][k] * STAB_SEND,
-            None => x,
+        // 2-step garage: in the beat before a change the stabs' and loops'
+        // reverb send dips, so the old chord doesn't build a tail over the new.
+        let dip = match garage {
+            Some(_) => 1.0 - GARAGE_SEND_DIP * self.harmony.at(clock).morph,
+            None => 1.0,
+        };
+        let loop_send = |k: usize| -> f64 { (0..4).map(|j| [a[j].0, a[j].1][k] * LOOP_SEND[j]).sum() };
+        let send = |x: f64, k: usize| {
+            if garage.is_none() {
+                return x;
+            }
+            let x = x - loop_send(k) * (1.0 - dip);
+            match stab {
+                Some(s) => x + [s.0, s.1][k] * STAB_SEND * dip,
+                None => x,
+            }
         };
         let (rl, rr) = self.reverb.process(
             send(dl * DRONE_SEND

@@ -73,7 +73,16 @@ pub struct Stabs {
     echo: PingPong,
     /// The progression's voicings, worked out on first use.
     voiced: Vec<Vec<f64>>,
+    /// The chord last heard, and when it last changed: the echo fades out,
+    /// empties and fades back in, so the old chord's repeats never ring over
+    /// the new one.
+    chord: usize,
+    changed_at: Option<u64>,
 }
+
+/// The echo's clean-out at a chord change: fade over this many samples,
+/// empty, fade back in over as many (about 20 ms in all).
+const CUT: u64 = 480;
 
 /// The seventh chord on each chord of the progression (root, third, fifth
 /// and seventh from the scale), in close position around middle C and
@@ -95,7 +104,7 @@ pub fn voicings(harmony: &Harmony) -> Vec<Vec<f64>> {
     // Every close-position stack of the chord with its lowest note in 50..62.
     let candidates = |p: &[i64]| -> Vec<Vec<f64>> {
         let mut out = Vec::new();
-        for low in 50i64..=62 {
+        for low in 55i64..=64 {
             if let Some(r) = p.iter().position(|c| *c == low.rem_euclid(12)) {
                 let mut stack = vec![low];
                 for k in 1..p.len() {
@@ -146,6 +155,8 @@ impl Stabs {
             plan: None,
             pending: None,
             voiced: Vec::new(),
+            chord: 0,
+            changed_at: None,
             echo: PingPong::new((ECHO_SIXTEENTHS * six) as usize, ECHO_FEEDBACK),
         }
     }
@@ -238,6 +249,13 @@ impl Stabs {
         if self.voiced.is_empty() {
             self.voiced = voicings(harmony);
         }
+        if clock % 32 == 0 {
+            let now = harmony.at(clock).chord;
+            if now != self.chord {
+                self.chord = now;
+                self.changed_at = Some(clock);
+            }
+        }
         if active {
             let hit = self.plan.as_ref().unwrap().1.iter().copied().find(|h| self.onset(h.step) == in_bar);
             if let Some(h) = hit {
@@ -273,7 +291,9 @@ impl Stabs {
             let s = if bright {
                 v.fenv *= 0.99955;
                 let bell = sin_turns(v.bell_phase) * 0.35 * v.fenv * v.fenv;
-                v.bell_phase += v.freq * 3.51 / sr;
+                // A whole-number overtone (an octave and a fifth): bell-like,
+                // but in tune with the chord.
+                v.bell_phase += v.freq * 3.0 / sr;
                 v.bell_phase -= v.bell_phase.floor();
                 sin_turns(v.phase) * 0.7 + sin_turns(2.0 * v.phase) * 0.25 + bell
             } else {
@@ -294,7 +314,16 @@ impl Stabs {
             r += x * gr;
         }
         let (el, er) = self.echo.process(l * ECHO_MIX, r * ECHO_MIX);
-        ((l + el) * LEVEL, (r + er) * LEVEL)
+        let gate = match self.changed_at {
+            Some(c) if clock - c < CUT => 1.0 - (clock - c) as f64 / CUT as f64,
+            Some(c) if clock - c == CUT => {
+                self.echo.clear();
+                0.0
+            }
+            Some(c) if clock - c < 2 * CUT => (clock - c - CUT) as f64 / CUT as f64,
+            _ => 1.0,
+        };
+        ((l + el * gate) * LEVEL, (r + er * gate) * LEVEL)
     }
 }
 

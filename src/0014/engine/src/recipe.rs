@@ -23,7 +23,7 @@ use crate::track::{DroneArc, KeyChoice, LoopDesign, Seeds, Settings};
 use crate::weather::WeatherKind;
 use crate::{DEFAULT_SEEDS, DEFAULT_SETTINGS};
 
-pub const VERSION: u32 = 16;
+pub const VERSION: u32 = 17;
 
 /// Encode a configuration.
 pub fn encode(config: &SimConfig) -> Vec<u32> {
@@ -92,6 +92,8 @@ pub fn encode(config: &SimConfig) -> Vec<u32> {
     w.push(s.drone_rhythm as u32 | ((s.loop_rhythm as u32) << 1) | ((s.wildlife as u32) << 2));
     // Version 16: the 2-step garage setup.
     w.push(s.garage.word());
+    // Version 17: the start offset.
+    w.push(s.start_s as u32);
     for word in s.model.words() {
         w.push(word);
     }
@@ -200,6 +202,8 @@ pub fn decode(words: &[u32]) -> SimConfig {
     };
     // Version 16 added 2-step garage's own settings.
     let garage = if version >= 16 { crate::garage::GarageSetup::from_word(c.next()) } else { crate::garage::GarageSetup::DEFAULT };
+    // Version 17 added the start offset; older recipes start at the beginning.
+    let start_s = if version >= 17 { c.next().min(crate::track::MAX_START_S as u32) as u16 } else { 0 };
     let model = if version >= 14 {
         let words: Vec<u32> = (0..crate::shrine_model::WORDS as u32).map(|_| c.next()).collect();
         crate::shrine_model::ShrineModel::from_words(&words)
@@ -250,6 +254,7 @@ pub fn decode(words: &[u32]) -> SimConfig {
             loop_rhythm,
             wildlife,
             garage,
+            start_s,
         },
         biome,
         weather,

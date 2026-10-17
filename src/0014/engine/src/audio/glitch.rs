@@ -176,7 +176,8 @@ impl Voice {
                 let s = 0.7 * sin_turns(self.phase) + 0.3 * sin_turns(self.phase2);
                 self.phase += ev.freq / sr;
                 self.phase -= self.phase.floor();
-                self.phase2 += ev.freq * 2.756 / sr;
+                let ratio = if ev.param > 0.0 { ev.param } else { 2.756 };
+                self.phase2 += ev.freq * ratio / sr;
                 self.phase2 -= self.phase2.floor();
                 let attack = (self.age.min(96) as f64) / 96.0;
                 let s = s * self.env * attack;

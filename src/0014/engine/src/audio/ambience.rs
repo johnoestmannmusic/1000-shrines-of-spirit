@@ -158,10 +158,15 @@ impl Ambience {
 
     /// Start a hit. `make` gets this ambience's random stream.
     pub fn trigger(&mut self, make: impl FnOnce(&mut Rng) -> Hit) {
+        let hit = make(&mut self.rng);
+        self.start(hit);
+    }
+
+    /// Start a hit made elsewhere (from its own event's random stream).
+    pub fn start(&mut self, hit: Hit) {
         if self.hits.len() >= MAX_HITS {
             self.hits.remove(0);
         }
-        let hit = make(&mut self.rng);
         self.hits.push(hit);
     }
 

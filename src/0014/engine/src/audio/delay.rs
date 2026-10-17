@@ -33,6 +33,12 @@ impl PingPong {
     }
 
     /// Input enters on the left and bounces right, left, right...
+    /// Empty the echo (its repeats stop).
+    pub fn clear(&mut self) {
+        self.left.iter_mut().for_each(|x| *x = 0.0);
+        self.right.iter_mut().for_each(|x| *x = 0.0);
+    }
+
     pub fn process(&mut self, in_l: f64, in_r: f64) -> (f64, f64) {
         let len = self.left.len();
         let read = (self.pos + len - self.delay) % len;

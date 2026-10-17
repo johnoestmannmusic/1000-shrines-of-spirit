@@ -112,12 +112,30 @@ impl GlitchSetup {
             steps: self.steps.clamp(MIN_STEPS, MAX_STEPS) as usize,
             step_len: tempo.glitch16() * RATES[(self.rate as usize).min(RATES.len() - 1)] as u64,
             weights,
-            notes: harmony.scale_notes(fixture.notes.0 + harmony.key as f64, fixture.notes.1),
+            notes: if harmony.garage {
+                // Over moving chords, only the notes that sit well on all of
+                // them: the key's root, second and fifth.
+                let iv = harmony.scale.intervals();
+                let safe: Vec<u8> = [0usize, 1, 4].iter().filter_map(|d| iv.get(*d).copied()).collect();
+                let notes: Vec<f64> = harmony
+                    .scale_notes(fixture.notes.0 + harmony.key as f64, fixture.notes.1)
+                    .into_iter()
+                    .filter(|m| safe.contains(&((*m as i64 - harmony.key as i64).rem_euclid(12) as u8)))
+                    .collect();
+                if notes.is_empty() {
+                    harmony.scale_notes(fixture.notes.0 + harmony.key as f64, fixture.notes.1)
+                } else {
+                    notes
+                }
+            } else {
+                harmony.scale_notes(fixture.notes.0 + harmony.key as f64, fixture.notes.1)
+            },
             fill: self.fill.min(MAX_FILL) as f64 / 100.0,
             gain: (fixture.gain.0 * level, fixture.gain.1 * level),
             pan_width: fixture.pan_width,
             repeats: (lo.min(hi) as u64, lo.max(hi) as u64),
             max_ratchet: self.ratchet.clamp(MIN_RATCHET, MAX_RATCHET) as u64,
+            ping_ratio: if harmony.garage { 3.0 } else { 0.0 },
         }
     }
 

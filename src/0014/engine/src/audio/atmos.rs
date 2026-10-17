@@ -210,6 +210,8 @@ pub struct Performance {
     pub waves: Vec<[f64; HARMONICS]>,
     /// Where in its cycle the slow in-loop movement starts (turns).
     pub offset: f64,
+    /// Keep the FM bells' overtones whole-number (2-step garage).
+    pub harmonic: bool,
 }
 
 pub const HARMONICS: usize = 12;
@@ -349,14 +351,14 @@ fn perform(timbre: LoopTimbre, rng: &mut Rng, chord: &[f64], beats: u64, beat: u
     } else {
         Vec::new()
     };
-    Performance { notes, strikes, waves, offset: rng.unit() }
+    Performance { notes, strikes, waves, offset: rng.unit(), harmonic: false }
 }
 
 /// An event layer's per-chord settings: a few chord tones for the Knock grains
 /// to strike, and a phase offset. The grid itself is the design.
 fn perform_events(rng: &mut Rng, chord: &[f64]) -> Performance {
     let notes = pick_notes(rng, chord, 3);
-    Performance { notes, strikes: Vec::new(), waves: Vec::new(), offset: rng.unit() }
+    Performance { notes, strikes: Vec::new(), waves: Vec::new(), offset: rng.unit(), harmonic: false }
 }
 
 /// Band-limited sawtooth (polyBLEP), phase in turns, `dt` = increment per sample.
@@ -442,7 +444,14 @@ fn render_channel(timbre: LoopTimbre, perf: &Performance, rng: &mut Rng, len: us
         LoopTimbre::Bells | LoopTimbre::BellPad => {
             let glass = timbre == LoopTimbre::Bells;
             let detune: Vec<f64> = perf.notes.iter().map(|_| rng.range(-4.0, 4.0) / 100.0).collect();
-            let (r2, r3, decay) = if glass { (3.5, 7.07, rng.range(1.6, 2.6)) } else { (3.0, 1.0, rng.range(0.7, 1.1)) };
+            let (r2, r3, decay) = if glass {
+                // Glass: inharmonic 3.5 and 7.07, or (in garage, against
+                // plain chords) the nearest whole-number ratios.
+                let (a, b) = if perf.harmonic { (3.0, 4.0) } else { (3.5, 7.07) };
+                (a, b, rng.range(1.6, 2.6))
+            } else {
+                (3.0, 1.0, rng.range(0.7, 1.1))
+            };
             let ring = (4.0 * SR) as usize;
             for &(n, at, vel) in &perf.strikes {
                 let hz = midi_hz(perf.notes[n] + detune[n]);
@@ -1019,6 +1028,7 @@ impl AtmosLoop {
                     LoopDesign::Sustained(t) => perform(t, &mut rng, &chord.notes, beats, beat),
                     LoopDesign::Events(_) => perform_events(&mut rng, &chord.notes),
                 };
+                perf.harmonic = harmony.garage;
                 if transpose != 0 {
                     for n in &mut perf.notes {
                         *n += transpose as f64;

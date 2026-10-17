@@ -12,9 +12,9 @@
 //         --crate-type cdylib shrine.rs -o shrine.wasm
 //
 // The shrine it draws and plays:
-//   seed 1000 · Near Future · Clear
-//   Ionian (major), 4 chord(s), 2-step garage, 132 BPM, root seed picks, kit Acoustic break
-//   drone arc 0s up 0s, tone 0
+//   seed 1003 · Near Future · Wind
+//   Ionian (major), 2 chord(s), 2-step garage, 132 BPM, root G#, kit Acoustic break
+//   drone arc 160s up 30s, tone 0
 //
 // Contents: crate docs and constants, then engine modules (iso, grid, render,
 // audio/…, sim), then the baked recipe and the C ABI. Read top to bottom.
@@ -5069,7 +5069,7 @@ use crate::track::{DroneArc, KeyChoice, LoopDesign, Seeds, Settings};
 use crate::weather::WeatherKind;
 use crate::{DEFAULT_SEEDS, DEFAULT_SETTINGS};
 
-pub const VERSION: u32 = 16;
+pub const VERSION: u32 = 17;
 
 /// Encode a configuration.
 pub fn encode(config: &SimConfig) -> Vec<u32> {
@@ -5138,6 +5138,8 @@ pub fn encode(config: &SimConfig) -> Vec<u32> {
     w.push(s.drone_rhythm as u32 | ((s.loop_rhythm as u32) << 1) | ((s.wildlife as u32) << 2));
     // Version 16: the 2-step garage setup.
     w.push(s.garage.word());
+    // Version 17: the start offset.
+    w.push(s.start_s as u32);
     for word in s.model.words() {
         w.push(word);
     }
@@ -5246,6 +5248,8 @@ pub fn decode(words: &[u32]) -> SimConfig {
     };
     // Version 16 added 2-step garage's own settings.
     let garage = if version >= 16 { crate::garage::GarageSetup::from_word(c.next()) } else { crate::garage::GarageSetup::DEFAULT };
+    // Version 17 added the start offset; older recipes start at the beginning.
+    let start_s = if version >= 17 { c.next().min(crate::track::MAX_START_S as u32) as u16 } else { 0 };
     let model = if version >= 14 {
         let words: Vec<u32> = (0..crate::shrine_model::WORDS as u32).map(|_| c.next()).collect();
         crate::shrine_model::ShrineModel::from_words(&words)
@@ -5296,6 +5300,7 @@ pub fn decode(words: &[u32]) -> SimConfig {
             loop_rhythm,
             wildlife,
             garage,
+            start_s,
         },
         biome,
         weather,
@@ -7301,8 +7306,16 @@ pub struct Sim {
     pub scene: Scene,
     track: Option<Track>,
     weather_bed: Option<WeatherBed>,
-    audio_time: f64,
+    /// Stereo frames rendered so far: an exact count, so the weather bed's
+    /// clock never depends on how the audio is cut into blocks.
+    audio_samples: u64,
+    /// Samples output since a mid-piece start, for its fade-in.
+    since_start: u64,
 }
+
+/// A start part-way through fades in over this long, so it never begins
+/// on the middle of a hit.
+const START_FADE_S: f64 = 1.5;
 
 impl Sim {
     pub fn new(config: SimConfig) -> Self {
@@ -7317,7 +7330,28 @@ impl Sim {
         let wildlife = config.settings.wildlife.then(|| Wildlife::new(config.seed, config.biome));
         scene.wildlife = wildlife.clone();
         let weather_bed = Some(WeatherBed::new(config.seed, hard, wildlife).roofed(config.biome.roofed()));
-        Sim { config, scene, track, weather_bed, audio_time: 0.0 }
+        let mut sim = Sim { config, scene, track, weather_bed, audio_samples: 0, since_start: 0 };
+        sim.fast_forward();
+        sim
+    }
+
+    /// Where the piece starts, in seconds.
+    pub fn start_offset(&self) -> f64 {
+        self.config.settings.start_s.min(crate::track::MAX_START_S) as f64
+    }
+
+    /// Render, and throw away, everything before the start offset. Rendering
+    /// does not depend on how it is cut into blocks, so what follows is
+    /// exactly what an unbroken run would play there.
+    fn fast_forward(&mut self) {
+        let frames = (self.start_offset() * SAMPLE_RATE as f64) as usize;
+        let mut scratch = vec![0f32; 4096 * 2];
+        let mut left = frames;
+        while left > 0 {
+            let n = left.min(4096);
+            self.render_raw(&mut scratch[..n * 2]);
+            left -= n;
+        }
     }
 
     /// A visuals-only instance: same scene, generated from the same recipe,
@@ -7326,7 +7360,7 @@ impl Sim {
         let mut scene = Scene::new(config.seed, config.biome, config.weather);
         scene.author(&config.settings.model);
         scene.wildlife = config.settings.wildlife.then(|| Wildlife::new(config.seed, config.biome));
-        Sim { config, scene, track: None, weather_bed: None, audio_time: 0.0 }
+        Sim { config, scene, track: None, weather_bed: None, audio_samples: 0, since_start: 0 }
     }
 
     /// The shared state at `t` seconds. Pure: the same `t` always yields the
@@ -7354,9 +7388,10 @@ impl Sim {
         }
     }
 
-    /// Draw the visual half at `t` seconds.
+    /// Draw the visual half `t` seconds after the piece starts (so at
+    /// `start offset + t` into it, in step with the audio).
     pub fn render_visual(&self, fb: &mut Framebuffer, t: f64, quality: Quality) {
-        self.scene.render_state(fb, &self.state(t), quality);
+        self.scene.render_state(fb, &self.state(t + self.start_offset()), quality);
     }
 
     /// Render the ported 0011 music alone. Bit-identical to 0011; used to prove
@@ -7372,6 +7407,23 @@ impl Sim {
     /// Render the full shrine: the music, with wind and rain mixed on top from
     /// the same weather state the visuals see.
     pub fn render_audio(&mut self, out: &mut [f32]) {
+        self.render_raw(out);
+        if self.config.settings.start_s > 0 {
+            let fade = (START_FADE_S * SAMPLE_RATE as f64) as u64;
+            for frame in out.chunks_mut(2) {
+                if self.since_start >= fade {
+                    break;
+                }
+                let x = self.since_start as f64 / fade as f64;
+                for s in frame.iter_mut() {
+                    *s *= (x * x) as f32;
+                }
+                self.since_start += 1;
+            }
+        }
+    }
+
+    fn render_raw(&mut self, out: &mut [f32]) {
         if let Some(track) = &mut self.track {
             track.render(out);
         } else {
@@ -7379,9 +7431,9 @@ impl Sim {
         }
         if let Some(bed) = &mut self.weather_bed {
             let weather = &self.scene.weather;
-            bed.render(out, self.audio_time, weather);
+            bed.render_from(self.audio_samples, out, weather);
         }
-        self.audio_time += out.len() as f64 / 2.0 / SAMPLE_RATE as f64;
+        self.audio_samples += out.len() as u64 / 2;
     }
 }
 
@@ -8703,10 +8755,15 @@ impl Ambience {
 
     /// Start a hit. `make` gets this ambience's random stream.
     pub fn trigger(&mut self, make: impl FnOnce(&mut Rng) -> Hit) {
+        let hit = make(&mut self.rng);
+        self.start(hit);
+    }
+
+    /// Start a hit made elsewhere (from its own event's random stream).
+    pub fn start(&mut self, hit: Hit) {
         if self.hits.len() >= MAX_HITS {
             self.hits.remove(0);
         }
-        let hit = make(&mut self.rng);
         self.hits.push(hit);
     }
 
@@ -8968,6 +9025,8 @@ pub struct Performance {
     pub waves: Vec<[f64; HARMONICS]>,
     /// Where in its cycle the slow in-loop movement starts (turns).
     pub offset: f64,
+    /// Keep the FM bells' overtones whole-number (2-step garage).
+    pub harmonic: bool,
 }
 
 pub const HARMONICS: usize = 12;
@@ -9107,14 +9166,14 @@ fn perform(timbre: LoopTimbre, rng: &mut Rng, chord: &[f64], beats: u64, beat: u
     } else {
         Vec::new()
     };
-    Performance { notes, strikes, waves, offset: rng.unit() }
+    Performance { notes, strikes, waves, offset: rng.unit(), harmonic: false }
 }
 
 /// An event layer's per-chord settings: a few chord tones for the Knock grains
 /// to strike, and a phase offset. The grid itself is the design.
 fn perform_events(rng: &mut Rng, chord: &[f64]) -> Performance {
     let notes = pick_notes(rng, chord, 3);
-    Performance { notes, strikes: Vec::new(), waves: Vec::new(), offset: rng.unit() }
+    Performance { notes, strikes: Vec::new(), waves: Vec::new(), offset: rng.unit(), harmonic: false }
 }
 
 /// Band-limited sawtooth (polyBLEP), phase in turns, `dt` = increment per sample.
@@ -9200,7 +9259,14 @@ fn render_channel(timbre: LoopTimbre, perf: &Performance, rng: &mut Rng, len: us
         LoopTimbre::Bells | LoopTimbre::BellPad => {
             let glass = timbre == LoopTimbre::Bells;
             let detune: Vec<f64> = perf.notes.iter().map(|_| rng.range(-4.0, 4.0) / 100.0).collect();
-            let (r2, r3, decay) = if glass { (3.5, 7.07, rng.range(1.6, 2.6)) } else { (3.0, 1.0, rng.range(0.7, 1.1)) };
+            let (r2, r3, decay) = if glass {
+                // Glass: inharmonic 3.5 and 7.07, or (in garage, against
+                // plain chords) the nearest whole-number ratios.
+                let (a, b) = if perf.harmonic { (3.0, 4.0) } else { (3.5, 7.07) };
+                (a, b, rng.range(1.6, 2.6))
+            } else {
+                (3.0, 1.0, rng.range(0.7, 1.1))
+            };
             let ring = (4.0 * SR) as usize;
             for &(n, at, vel) in &perf.strikes {
                 let hz = midi_hz(perf.notes[n] + detune[n]);
@@ -9777,6 +9843,7 @@ impl AtmosLoop {
                     LoopDesign::Sustained(t) => perform(t, &mut rng, &chord.notes, beats, beat),
                     LoopDesign::Events(_) => perform_events(&mut rng, &chord.notes),
                 };
+                perf.harmonic = harmony.garage;
                 if transpose != 0 {
                     for n in &mut perf.notes {
                         *n += transpose as f64;
@@ -10357,6 +10424,12 @@ impl PingPong {
     }
 
     /// Input enters on the left and bounces right, left, right...
+    /// Empty the echo (its repeats stop).
+    pub fn clear(&mut self) {
+        self.left.iter_mut().for_each(|x| *x = 0.0);
+        self.right.iter_mut().for_each(|x| *x = 0.0);
+    }
+
     pub fn process(&mut self, in_l: f64, in_r: f64) -> (f64, f64) {
         let len = self.left.len();
         let read = (self.pos + len - self.delay) % len;
@@ -12312,7 +12385,8 @@ impl Voice {
                 let s = 0.7 * sin_turns(self.phase) + 0.3 * sin_turns(self.phase2);
                 self.phase += ev.freq / sr;
                 self.phase -= self.phase.floor();
-                self.phase2 += ev.freq * 2.756 / sr;
+                let ratio = if ev.param > 0.0 { ev.param } else { 2.756 };
+                self.phase2 += ev.freq * ratio / sr;
                 self.phase2 -= self.phase2.floor();
                 let attack = (self.age.min(96) as f64) / 96.0;
                 let s = s * self.env * attack;
@@ -12456,12 +12530,30 @@ impl GlitchSetup {
             steps: self.steps.clamp(MIN_STEPS, MAX_STEPS) as usize,
             step_len: tempo.glitch16() * RATES[(self.rate as usize).min(RATES.len() - 1)] as u64,
             weights,
-            notes: harmony.scale_notes(fixture.notes.0 + harmony.key as f64, fixture.notes.1),
+            notes: if harmony.garage {
+                // Over moving chords, only the notes that sit well on all of
+                // them: the key's root, second and fifth.
+                let iv = harmony.scale.intervals();
+                let safe: Vec<u8> = [0usize, 1, 4].iter().filter_map(|d| iv.get(*d).copied()).collect();
+                let notes: Vec<f64> = harmony
+                    .scale_notes(fixture.notes.0 + harmony.key as f64, fixture.notes.1)
+                    .into_iter()
+                    .filter(|m| safe.contains(&((*m as i64 - harmony.key as i64).rem_euclid(12) as u8)))
+                    .collect();
+                if notes.is_empty() {
+                    harmony.scale_notes(fixture.notes.0 + harmony.key as f64, fixture.notes.1)
+                } else {
+                    notes
+                }
+            } else {
+                harmony.scale_notes(fixture.notes.0 + harmony.key as f64, fixture.notes.1)
+            },
             fill: self.fill.min(MAX_FILL) as f64 / 100.0,
             gain: (fixture.gain.0 * level, fixture.gain.1 * level),
             pan_width: fixture.pan_width,
             repeats: (lo.min(hi) as u64, lo.max(hi) as u64),
             max_ratchet: self.ratchet.clamp(MIN_RATCHET, MAX_RATCHET) as u64,
+            ping_ratio: if harmony.garage { 3.0 } else { 0.0 },
         }
     }
 
@@ -12730,6 +12822,9 @@ pub struct Harmony {
     /// How long each change's crossfade lasts (samples): a whole bar for
     /// the slow modes, a single beat in 2-step garage.
     morph_len: u64,
+    /// 2-step garage: plain chords, so the timbres keep to whole-number
+    /// (harmonic) overtones and the glitch pitches to the safest notes.
+    pub garage: bool,
     pub scale: Scale,
     /// Pitch class of the tonic, 0 = C.
     pub key: u8,
@@ -12814,7 +12909,31 @@ impl Harmony {
         }
         let bar_samples = pace.bar_samples(beat);
         let cycle = weights.iter().map(|b| *b as u64).sum::<u64>() * bar_samples;
-        Harmony { morph_len: bar_samples, scale, key, chords: out, bar_samples, cycle }
+        Harmony { morph_len: bar_samples, garage: false, scale, key, chords: out, bar_samples, cycle }
+    }
+
+    /// 2-step garage's drone: the tonic as an open fifth (root, fifth,
+    /// octave, fifth above) — no third, no colour notes — so it sits under
+    /// every chord of the progression without rubbing against it.
+    pub fn pedal(scale: Scale, beat: u64, key: u8) -> Harmony {
+        let iv = scale.intervals();
+        let fifth = if iv.len() == 7 { iv[4] as f64 } else { 7.0 };
+        let root = (48 + key as i32) as f64;
+        let notes = vec![root, root + fifth, root + 12.0, root + 12.0 + fifth];
+        let mut bass = (36 + key as i32) as f64;
+        if bass > 45.0 {
+            bass -= 12.0;
+        }
+        let bar_samples = Pace::Garage.bar_samples(beat);
+        Harmony {
+            morph_len: bar_samples,
+            garage: true,
+            scale,
+            key,
+            chords: vec![Chord { degree: 0, notes, bass, bars: 32 }],
+            bar_samples,
+            cycle: 32 * bar_samples,
+        }
     }
 
     /// 2-step garage's harmony: a genre progression, picked by the seed and
@@ -12855,8 +12974,9 @@ impl Harmony {
             }
         }
         let degrees = pool[rng.below(pool.len())];
-        // Room for the loops: a seventh chord, then its octave spread.
-        const SPREAD: [i32; 7] = [0, 2, 4, 6, 7, 9, 11];
+        // The loops' notes: an open shell over the stabs — root, fifth and
+        // tenth (the stabs carry the seventh).
+        const SPREAD: [i32; 3] = [0, 4, 9];
         let out: Vec<Chord> = degrees
             .iter()
             .map(|&d| {
@@ -12868,12 +12988,17 @@ impl Harmony {
                         note(degree as i32 + s)
                     })
                     .collect();
-                let shift = if notes[0] > 55.0 { -12.0 } else { 0.0 };
+                // Root between C4 and B4, so the shell opens out above the
+                // stabs' middle register and tops out below F6.
+                let mut shift = 0.0;
+                while notes[0] + shift < 60.0 {
+                    shift += 12.0;
+                }
+                while notes[0] + shift > 71.0 {
+                    shift -= 12.0;
+                }
                 for x in notes.iter_mut() {
                     *x += shift;
-                    while *x > 90.0 {
-                        *x -= 12.0;
-                    }
                 }
                 notes.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 notes.dedup();
@@ -12886,7 +13011,7 @@ impl Harmony {
             .collect();
         let bar_samples = Pace::Garage.bar_samples(beat);
         let cycle = out.len() as u64 * bar_samples;
-        Harmony { morph_len: bar_samples / 8, scale, key, chords: out, bar_samples, cycle }
+        Harmony { morph_len: bar_samples / 8, garage: true, scale, key, chords: out, bar_samples, cycle }
     }
 
     /// The progression at sample `t`. The last bar of each chord morphs into the next.
@@ -14244,6 +14369,9 @@ pub struct LayerConfig {
     /// Loops before mutating (min, max).
     pub repeats: (u64, u64),
     pub max_ratchet: u64,
+    /// The ping's upper partial, as a ratio of its note; 0 = the usual
+    /// inharmonic 2.756 (2-step garage uses a whole-number 3).
+    pub ping_ratio: f64,
 }
 
 const MAX_VOICES: usize = 8;
@@ -14315,7 +14443,7 @@ impl Layer {
                 let grain = ms(rng, 12.0, 90.0);
                 (grain * rng.int(2, 6) as u32, grain as f64, 1.0)
             }
-            Kind::Ping => (ms(rng, 300.0, 1600.0), 0.0, 0.8),
+            Kind::Ping => (ms(rng, 300.0, 1600.0), cfg.ping_ratio, 0.8),
             Kind::Click => (ms(rng, 3.0, 30.0), 0.0, 0.5),
             Kind::Crush => (ms(rng, 15.0, 80.0), rng.int(2, 40) as f64, 0.6),
         };
@@ -14679,7 +14807,16 @@ pub struct Stabs {
     echo: PingPong,
     /// The progression's voicings, worked out on first use.
     voiced: Vec<Vec<f64>>,
+    /// The chord last heard, and when it last changed: the echo fades out,
+    /// empties and fades back in, so the old chord's repeats never ring over
+    /// the new one.
+    chord: usize,
+    changed_at: Option<u64>,
 }
+
+/// The echo's clean-out at a chord change: fade over this many samples,
+/// empty, fade back in over as many (about 20 ms in all).
+const CUT: u64 = 480;
 
 /// The seventh chord on each chord of the progression (root, third, fifth
 /// and seventh from the scale), in close position around middle C and
@@ -14701,7 +14838,7 @@ pub fn voicings(harmony: &Harmony) -> Vec<Vec<f64>> {
     // Every close-position stack of the chord with its lowest note in 50..62.
     let candidates = |p: &[i64]| -> Vec<Vec<f64>> {
         let mut out = Vec::new();
-        for low in 50i64..=62 {
+        for low in 55i64..=64 {
             if let Some(r) = p.iter().position(|c| *c == low.rem_euclid(12)) {
                 let mut stack = vec![low];
                 for k in 1..p.len() {
@@ -14752,6 +14889,8 @@ impl Stabs {
             plan: None,
             pending: None,
             voiced: Vec::new(),
+            chord: 0,
+            changed_at: None,
             echo: PingPong::new((ECHO_SIXTEENTHS * six) as usize, ECHO_FEEDBACK),
         }
     }
@@ -14844,6 +14983,13 @@ impl Stabs {
         if self.voiced.is_empty() {
             self.voiced = voicings(harmony);
         }
+        if clock % 32 == 0 {
+            let now = harmony.at(clock).chord;
+            if now != self.chord {
+                self.chord = now;
+                self.changed_at = Some(clock);
+            }
+        }
         if active {
             let hit = self.plan.as_ref().unwrap().1.iter().copied().find(|h| self.onset(h.step) == in_bar);
             if let Some(h) = hit {
@@ -14879,7 +15025,9 @@ impl Stabs {
             let s = if bright {
                 v.fenv *= 0.99955;
                 let bell = sin_turns(v.bell_phase) * 0.35 * v.fenv * v.fenv;
-                v.bell_phase += v.freq * 3.51 / sr;
+                // A whole-number overtone (an octave and a fifth): bell-like,
+                // but in tune with the chord.
+                v.bell_phase += v.freq * 3.0 / sr;
                 v.bell_phase -= v.bell_phase.floor();
                 sin_turns(v.phase) * 0.7 + sin_turns(2.0 * v.phase) * 0.25 + bell
             } else {
@@ -14900,7 +15048,16 @@ impl Stabs {
             r += x * gr;
         }
         let (el, er) = self.echo.process(l * ECHO_MIX, r * ECHO_MIX);
-        ((l + el) * LEVEL, (r + er) * LEVEL)
+        let gate = match self.changed_at {
+            Some(c) if clock - c < CUT => 1.0 - (clock - c) as f64 / CUT as f64,
+            Some(c) if clock - c == CUT => {
+                self.echo.clear();
+                0.0
+            }
+            Some(c) if clock - c < 2 * CUT => (clock - c - CUT) as f64 / CUT as f64,
+            _ => 1.0,
+        };
+        ((l + el * gate) * LEVEL, (r + er * gate) * LEVEL)
     }
 }
 
@@ -15959,7 +16116,16 @@ pub struct Settings {
     /// The 2-step garage mode's swing, bass and stabs (ignored by the other
     /// modes).
     pub garage: crate::garage::GarageSetup,
+    /// Where the piece starts, in seconds into the music (0 = the beginning).
+    /// Everything is deterministic, so starting later is the very same piece
+    /// joined part-way: the audio is fast-forwarded exactly, the visuals and
+    /// weather simply begin at that time.
+    pub start_s: u16,
 }
+
+/// The latest start offset, in seconds (the audio must be fast-forwarded to
+/// it, which takes a moment per minute).
+pub const MAX_START_S: u16 = 600;
 
 pub const DEFAULT_SETTINGS: Settings =
     Settings {
@@ -15992,6 +16158,7 @@ pub const DEFAULT_SETTINGS: Settings =
         loop_rhythm: false,
         wildlife: false,
         garage: crate::garage::GarageSetup::DEFAULT,
+        start_s: 0,
     };
 
 /// 0010's sound: the default settings with no atmosphere loops.
@@ -16006,6 +16173,8 @@ const GARAGE_LOOPS: f64 = 1.4;
 /// How far the stabs dip under each kick, and how much of them goes to the reverb.
 const GARAGE_STAB_DUCK: f64 = 0.3;
 const STAB_SEND: f64 = 0.35;
+/// How far the garage reverb send dips before each change.
+const GARAGE_SEND_DIP: f64 = 0.7;
 const ECHO_SIXTEENTHS: u64 = 3;
 /// The drums' tape echo delay, in drum sixteenths.
 const TAPE_SIXTEENTHS: u64 = 3;
@@ -16203,7 +16372,7 @@ impl Track {
         // one chord), while everything else follows the genre progression.
         let (harmony, drone_harmony) = if garage {
             let mut g = Rng::stream(seeds.s1, 0x6A4A_6E);
-            (Harmony::garage(settings.scale, chords, tempo.beat(), key, &mut g), harmony)
+            (Harmony::garage(settings.scale, chords, tempo.beat(), key, &mut g), Harmony::pedal(settings.scale, tempo.beat(), key))
         } else {
             (harmony.clone(), harmony)
         };
@@ -16450,9 +16619,22 @@ impl Track {
         };
 
         // Shared long reverb.
-        let send = |x: f64, k: usize| match stab {
-            Some(s) => x + [s.0, s.1][k] * STAB_SEND,
-            None => x,
+        // 2-step garage: in the beat before a change the stabs' and loops'
+        // reverb send dips, so the old chord doesn't build a tail over the new.
+        let dip = match garage {
+            Some(_) => 1.0 - GARAGE_SEND_DIP * self.harmony.at(clock).morph,
+            None => 1.0,
+        };
+        let loop_send = |k: usize| -> f64 { (0..4).map(|j| [a[j].0, a[j].1][k] * LOOP_SEND[j]).sum() };
+        let send = |x: f64, k: usize| {
+            if garage.is_none() {
+                return x;
+            }
+            let x = x - loop_send(k) * (1.0 - dip);
+            match stab {
+                Some(s) => x + [s.0, s.1][k] * STAB_SEND * dip,
+                None => x,
+            }
         };
         let (rl, rr) = self.reverb.process(
             send(dl * DRONE_SEND
@@ -16619,6 +16801,7 @@ use crate::audio::rain::Rain;
 use crate::audio::thunder::Thunder;
 use crate::audio::wind::Wind;
 use crate::filter::OnePole;
+use crate::rng::Rng;
 use crate::weather::{EventKind, Weather, WeatherState};
 use crate::weather_fx::DRIP_S;
 use crate::wildlife::Wildlife;
@@ -16652,6 +16835,18 @@ pub struct WeatherBed {
     roofed: bool,
     state: Option<WeatherState>,
     tick: usize,
+    /// Sounds found by the schedule, waiting for their exact sample. They
+    /// start then (not at the top of the block that found them), so nothing
+    /// about the bed depends on how the audio is cut into blocks.
+    queue: Vec<(u64, Due)>,
+}
+
+/// A scheduled sound, waiting to start.
+#[derive(Clone)]
+enum Due {
+    Hit(Hit),
+    Call(crate::wildlife::Call),
+    Thunder { strength: f64, distance: f64, pan: f64, hash: u64 },
 }
 
 impl WeatherBed {
@@ -16670,6 +16865,7 @@ impl WeatherBed {
             roofed: false,
             state: None,
             tick: 0,
+            queue: Vec::new(),
         }
     }
 
@@ -16691,38 +16887,73 @@ impl WeatherBed {
         self.hard.get((gy * GRID_W as i64 + gx) as usize).copied().unwrap_or(false)
     }
 
-    /// Queue every event that sounds in `[t0, t1)`, at its sample offset.
-    fn schedule(&mut self, weather: &Weather, t0: f64, t1: f64) {
-        let offset = |at: f64| ((at - t0) * SR).max(0.0) as usize;
+    /// Queue every event that sounds in samples `[s0, s1)`, at its own
+    /// sample. Each sound's randomness comes from its event, never from a
+    /// stream shared with the bed's continuous noise.
+    fn schedule(&mut self, weather: &Weather, s0: u64, s1: u64) {
+        // Look a couple of samples wider than the block, then keep exactly
+        // the sounds whose own sample falls inside it: each sound belongs to
+        // one block by its sample number, never by a rounded time.
+        let pad = 2.0 / SR;
+        let (t0, t1) = (s0 as f64 / SR - pad, s1 as f64 / SR + pad);
+        let at_sample = |at: f64| (at.max(0.0) * SR) as u64;
+        let mut due: Vec<(u64, Due)> = Vec::new();
+        // Sounds owned by an event in this block but landing after it.
+        let mut spill: Vec<(u64, Due)> = Vec::new();
         for e in weather.events(EventKind::Splash, t0, t1) {
             let (x, y) = e.spot();
-            let (wait, pan, hard) = (offset(e.at), e.pan(), self.is_hard(x, y));
+            let (pan, hard) = (e.pan(), self.is_hard(x, y));
             let gain = e.rng().range(0.08, 0.22);
-            self.ambience.trigger(|r| if hard { Hit::plink(wait, r, pan, gain) } else { Hit::tap(wait, r, pan, gain * 1.4) });
+            let mut r = Rng::new(e.hash ^ 0x4849_5453);
+            let hit = if hard { Hit::plink(0, &mut r, pan, gain) } else { Hit::tap(0, &mut r, pan, gain * 1.4) };
+            due.push((at_sample(e.at), Due::Hit(hit)));
         }
         // A drip is heard when it lands, at the end of its fall.
         for e in weather.events(EventKind::Drip, t0 - DRIP_S, t1 - DRIP_S) {
-            let (wait, pan) = (offset(e.at + DRIP_S), e.pan());
-            self.ambience.trigger(|r| Hit::drip(wait, r, pan, 0.16));
+            let mut r = Rng::new(e.hash ^ 0x4452_4950);
+            due.push((at_sample(e.at + DRIP_S), Due::Hit(Hit::drip(0, &mut r, e.pan(), 0.16))));
         }
         for e in weather.events(EventKind::Spark, t0, t1) {
-            let (wait, pan) = (offset(e.at), e.pan());
+            let pan = e.pan();
             let mut r = e.rng();
+            // A spark's crackles belong to the spark, wherever they land.
+            if at_sample(e.at) < s0 || at_sample(e.at) >= s1 {
+                continue;
+            }
             for k in 0..r.int(2, 4) {
-                let w = wait + (k as f64 * r.range(0.006, 0.02) * SR) as usize;
-                self.ambience.trigger(|rr| Hit::crackle(w, rr, pan, 0.22));
+                let at = e.at + k as f64 * r.range(0.006, 0.02);
+                let mut rr = Rng::new(e.hash ^ 0x5350_4b00 ^ k);
+                spill.push((at_sample(at), Due::Hit(Hit::crackle(0, &mut rr, pan, 0.22))));
             }
         }
         if let Some(wildlife) = &self.wildlife {
             for call in wildlife.calls(weather.kind, t0, t1) {
-                self.creatures.trigger(&call, offset(call.at));
+                due.push((at_sample(call.at), Due::Call(call)));
             }
         }
         for e in weather.events(EventKind::Strike, t0 - 3.1, t1) {
             let at = e.thunder_at();
             if at >= t0 && at < t1 {
                 let (strength, distance) = e.strike();
-                self.thunder.add(offset(at), strength, distance, e.pan(), e.hash);
+                due.push((at_sample(at), Due::Thunder { strength, distance, pan: e.pan(), hash: e.hash }));
+            }
+        }
+        due.retain(|d| d.0 >= s0 && d.0 < s1);
+        due.extend(spill);
+        // Stable: sounds due on the same sample keep the schedule's order.
+        due.sort_by_key(|d| d.0);
+        self.queue.extend(due);
+        self.queue.sort_by_key(|d| d.0);
+    }
+
+    /// Start everything due at sample `s`.
+    fn start_due(&mut self, s: u64) {
+        while self.queue.first().is_some_and(|d| d.0 <= s) {
+            let (_, due) = self.queue.remove(0);
+            match due {
+                Due::Hit(hit) => self.ambience.start(hit),
+                Due::Call(call) => self.creatures.trigger(&call, 0),
+                Due::Thunder { strength, distance, pan, hash } => self.thunder.add(0, strength, distance, pan, hash),
             }
         }
     }
@@ -16730,16 +16961,24 @@ impl WeatherBed {
     /// Add the bed into `out`, starting at `t0` seconds. `out` must already hold
     /// the music mix; this only adds to it.
     pub fn render(&mut self, out: &mut [f32], t0: f64, weather: &Weather) {
+        self.render_from((t0 * SR).round() as u64, out, weather);
+    }
+
+    /// [`WeatherBed::render`] from sample `s0`: the exact clock, so the bed
+    /// is the same however the audio is cut into blocks.
+    pub fn render_from(&mut self, s0: u64, out: &mut [f32], weather: &Weather) {
         let frames = out.len() / 2;
-        self.schedule(weather, t0, t0 + frames as f64 / SR);
+        self.schedule(weather, s0, s0 + frames as u64);
         for i in 0..frames {
+            let s = s0 + i as u64;
+            self.start_due(s);
             if self.tick % CONTROL == 0 || self.state.is_none() {
-                let s = weather.state(t0 + i as f64 / SR);
+                let st = weather.state(s as f64 / SR);
                 for m in self.muffle.iter_mut() {
-                    let open = 9_000.0 - 6_800.0 * s.snow;
+                    let open = 9_000.0 - 6_800.0 * st.snow;
                     m.set_cutoff(if self.roofed { open * 0.4 } else { open }, SR);
                 }
-                self.state = Some(s);
+                self.state = Some(st);
             }
             self.tick = self.tick.wrapping_add(1);
             let s = self.state.expect("sampled above");
@@ -16829,7 +17068,7 @@ pub use self::track::*;
 // Baked recipe — this artifact is this shrine
 // ============================================================================
 /// `recipe::encode` of the settings the setup menu produced.
-const RECIPE: [u32; 166] = [16, 0, 1000, 0, 1000, 0, 9, 0, 1009, 0, 2026, 0, 168, 0, 11, 0, 7, 3, 0, 1, 4, 2, 5, 1, 132, 0, 12, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3358395905, 51380, 188928180, 133152, 13376511, 66404, 9721599, 49764, 178, 4, 5434, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 875638832, 0, 0, 0, 0, 0, 0, 0];
+const RECIPE: [u32; 167] = [17, 0, 1003, 0, 175, 0, 9, 0, 1009, 0, 2026, 0, 168, 0, 11, 0, 7, 3, 2, 1, 2, 2, 5, 2, 132, 9, 19, 160, 30, 0, 1, 11, 0, 0, 0, 40, 10, 1, 13, 0, 0, 0, 120, 30, 1, 7, 0, 0, 0, 80, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3358395905, 51370, 188928180, 133152, 5546119, 67368, 9721598, 49764, 178, 0, 2362, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 875638832, 0, 0, 0, 0, 0, 0, 0];
 
 /// Build date as `YYYYMMDD`, stamped when this file was emitted.
 const BUILD: u32 = 20261017;
@@ -16838,7 +17077,7 @@ const BUILD: u32 = 20261017;
 const CODE_OVERLAY: u32 = 3358395905;
 
 /// The overlay's tilt: positive leans the drift to the left.
-const CODE_ANGLE: i32 = 0;
+const CODE_ANGLE: i32 = -10;
 
 /// The overlay's vertical shift, percent of the canvas height.
 const CODE_OFFSET: i32 = 0;
@@ -16850,7 +17089,7 @@ const CAMERA_SPEED: i32 = -2;
 const NAME: &str = "0014";
 
 /// Everything needed to recreate this shrine.
-const INFO: &str = "ShrineGen  v20261017\n\nseed       1000\nbiome      Near Future\nweather    Clear\nwildlife   doves and cicadas\n\nscale      Ionian (major)\nroot note  seed picks\nchords     4\nmode       2-step garage\ntempo      132 BPM\nkit        Acoustic break\nspace      Wide\ndrum rev   off\nmaster fx  off\ncode over  on · 14% · speed 45 · text 200%\narch       centred, upright\ncamera     -2°/s\nglitch 1   6 kinds · 55% · ×1 · 7 steps\nglitch 2   6 kinds · 45% · ×2 · 11 steps\ntranspose  0 semitones\n\ndrone arc  always on\ndrone tone off\nlayer 1    Voices\n  arc 1    always on\nlayer 2    Bells\n  arc 2    always on\nlayer 3    Off\n  arc 3    always on\nlayer 4    Off\n  arc 4    always on\n\nseeds      1000 9 1009 2026 168 11 7\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone off · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
+const INFO: &str = "ShrineGen  v20261017\n\nseed       1003\nbiome      Near Future\nweather    Wind\nwildlife   off\n\nscale      Ionian (major)\nroot note  G#\nchords     2\nmode       2-step garage\ntempo      132 BPM\nstart      at the beginning\nkit        Acoustic break\nspace      Wide + tape echo\ndrum rev   off\nmaster fx  off\ncode over  on · 14% · speed 45 · text 200% · -10°\narch       centred, upright\ncamera     -2°/s\nglitch 1   2 kinds · 65% · ×4 · 11 steps\nglitch 2   off\ntranspose  7 semitones\n\ndrone arc  160s cycle, 30s up\ndrone tone off\nlayer 1    Drift\n  arc 1    40s cycle, 10s up\nlayer 2    Ember\n  arc 2    120s cycle, 30s up\nlayer 3    Shine\n  arc 3    80s cycle, 25s up\nlayer 4    Off\n  arc 4    always on\n\nseeds      175 9 1009 2026 168 11 7\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone off · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
 
 // ============================================================================
 // C ABI — plain extern "C", loadable with the standard WebAssembly API

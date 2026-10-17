@@ -59,8 +59,16 @@ pub struct Sim {
     pub scene: Scene,
     track: Option<Track>,
     weather_bed: Option<WeatherBed>,
-    audio_time: f64,
+    /// Stereo frames rendered so far: an exact count, so the weather bed's
+    /// clock never depends on how the audio is cut into blocks.
+    audio_samples: u64,
+    /// Samples output since a mid-piece start, for its fade-in.
+    since_start: u64,
 }
+
+/// A start part-way through fades in over this long, so it never begins
+/// on the middle of a hit.
+const START_FADE_S: f64 = 1.5;
 
 impl Sim {
     pub fn new(config: SimConfig) -> Self {
@@ -75,7 +83,28 @@ impl Sim {
         let wildlife = config.settings.wildlife.then(|| Wildlife::new(config.seed, config.biome));
         scene.wildlife = wildlife.clone();
         let weather_bed = Some(WeatherBed::new(config.seed, hard, wildlife).roofed(config.biome.roofed()));
-        Sim { config, scene, track, weather_bed, audio_time: 0.0 }
+        let mut sim = Sim { config, scene, track, weather_bed, audio_samples: 0, since_start: 0 };
+        sim.fast_forward();
+        sim
+    }
+
+    /// Where the piece starts, in seconds.
+    pub fn start_offset(&self) -> f64 {
+        self.config.settings.start_s.min(crate::track::MAX_START_S) as f64
+    }
+
+    /// Render, and throw away, everything before the start offset. Rendering
+    /// does not depend on how it is cut into blocks, so what follows is
+    /// exactly what an unbroken run would play there.
+    fn fast_forward(&mut self) {
+        let frames = (self.start_offset() * SAMPLE_RATE as f64) as usize;
+        let mut scratch = vec![0f32; 4096 * 2];
+        let mut left = frames;
+        while left > 0 {
+            let n = left.min(4096);
+            self.render_raw(&mut scratch[..n * 2]);
+            left -= n;
+        }
     }
 
     /// A visuals-only instance: same scene, generated from the same recipe,
@@ -84,7 +113,7 @@ impl Sim {
         let mut scene = Scene::new(config.seed, config.biome, config.weather);
         scene.author(&config.settings.model);
         scene.wildlife = config.settings.wildlife.then(|| Wildlife::new(config.seed, config.biome));
-        Sim { config, scene, track: None, weather_bed: None, audio_time: 0.0 }
+        Sim { config, scene, track: None, weather_bed: None, audio_samples: 0, since_start: 0 }
     }
 
     /// The shared state at `t` seconds. Pure: the same `t` always yields the
@@ -112,9 +141,10 @@ impl Sim {
         }
     }
 
-    /// Draw the visual half at `t` seconds.
+    /// Draw the visual half `t` seconds after the piece starts (so at
+    /// `start offset + t` into it, in step with the audio).
     pub fn render_visual(&self, fb: &mut Framebuffer, t: f64, quality: Quality) {
-        self.scene.render_state(fb, &self.state(t), quality);
+        self.scene.render_state(fb, &self.state(t + self.start_offset()), quality);
     }
 
     /// Render the ported 0011 music alone. Bit-identical to 0011; used to prove
@@ -130,6 +160,23 @@ impl Sim {
     /// Render the full shrine: the music, with wind and rain mixed on top from
     /// the same weather state the visuals see.
     pub fn render_audio(&mut self, out: &mut [f32]) {
+        self.render_raw(out);
+        if self.config.settings.start_s > 0 {
+            let fade = (START_FADE_S * SAMPLE_RATE as f64) as u64;
+            for frame in out.chunks_mut(2) {
+                if self.since_start >= fade {
+                    break;
+                }
+                let x = self.since_start as f64 / fade as f64;
+                for s in frame.iter_mut() {
+                    *s *= (x * x) as f32;
+                }
+                self.since_start += 1;
+            }
+        }
+    }
+
+    fn render_raw(&mut self, out: &mut [f32]) {
         if let Some(track) = &mut self.track {
             track.render(out);
         } else {
@@ -137,9 +184,9 @@ impl Sim {
         }
         if let Some(bed) = &mut self.weather_bed {
             let weather = &self.scene.weather;
-            bed.render(out, self.audio_time, weather);
+            bed.render_from(self.audio_samples, out, weather);
         }
-        self.audio_time += out.len() as f64 / 2.0 / SAMPLE_RATE as f64;
+        self.audio_samples += out.len() as u64 / 2;
     }
 }
 

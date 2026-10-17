@@ -215,6 +215,9 @@ pub struct Harmony {
     /// How long each change's crossfade lasts (samples): a whole bar for
     /// the slow modes, a single beat in 2-step garage.
     morph_len: u64,
+    /// 2-step garage: plain chords, so the timbres keep to whole-number
+    /// (harmonic) overtones and the glitch pitches to the safest notes.
+    pub garage: bool,
     pub scale: Scale,
     /// Pitch class of the tonic, 0 = C.
     pub key: u8,
@@ -299,7 +302,31 @@ impl Harmony {
         }
         let bar_samples = pace.bar_samples(beat);
         let cycle = weights.iter().map(|b| *b as u64).sum::<u64>() * bar_samples;
-        Harmony { morph_len: bar_samples, scale, key, chords: out, bar_samples, cycle }
+        Harmony { morph_len: bar_samples, garage: false, scale, key, chords: out, bar_samples, cycle }
+    }
+
+    /// 2-step garage's drone: the tonic as an open fifth (root, fifth,
+    /// octave, fifth above) — no third, no colour notes — so it sits under
+    /// every chord of the progression without rubbing against it.
+    pub fn pedal(scale: Scale, beat: u64, key: u8) -> Harmony {
+        let iv = scale.intervals();
+        let fifth = if iv.len() == 7 { iv[4] as f64 } else { 7.0 };
+        let root = (48 + key as i32) as f64;
+        let notes = vec![root, root + fifth, root + 12.0, root + 12.0 + fifth];
+        let mut bass = (36 + key as i32) as f64;
+        if bass > 45.0 {
+            bass -= 12.0;
+        }
+        let bar_samples = Pace::Garage.bar_samples(beat);
+        Harmony {
+            morph_len: bar_samples,
+            garage: true,
+            scale,
+            key,
+            chords: vec![Chord { degree: 0, notes, bass, bars: 32 }],
+            bar_samples,
+            cycle: 32 * bar_samples,
+        }
     }
 
     /// 2-step garage's harmony: a genre progression, picked by the seed and
@@ -340,8 +367,9 @@ impl Harmony {
             }
         }
         let degrees = pool[rng.below(pool.len())];
-        // Room for the loops: a seventh chord, then its octave spread.
-        const SPREAD: [i32; 7] = [0, 2, 4, 6, 7, 9, 11];
+        // The loops' notes: an open shell over the stabs — root, fifth and
+        // tenth (the stabs carry the seventh).
+        const SPREAD: [i32; 3] = [0, 4, 9];
         let out: Vec<Chord> = degrees
             .iter()
             .map(|&d| {
@@ -353,12 +381,17 @@ impl Harmony {
                         note(degree as i32 + s)
                     })
                     .collect();
-                let shift = if notes[0] > 55.0 { -12.0 } else { 0.0 };
+                // Root between C4 and B4, so the shell opens out above the
+                // stabs' middle register and tops out below F6.
+                let mut shift = 0.0;
+                while notes[0] + shift < 60.0 {
+                    shift += 12.0;
+                }
+                while notes[0] + shift > 71.0 {
+                    shift -= 12.0;
+                }
                 for x in notes.iter_mut() {
                     *x += shift;
-                    while *x > 90.0 {
-                        *x -= 12.0;
-                    }
                 }
                 notes.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 notes.dedup();
@@ -371,7 +404,7 @@ impl Harmony {
             .collect();
         let bar_samples = Pace::Garage.bar_samples(beat);
         let cycle = out.len() as u64 * bar_samples;
-        Harmony { morph_len: bar_samples / 8, scale, key, chords: out, bar_samples, cycle }
+        Harmony { morph_len: bar_samples / 8, garage: true, scale, key, chords: out, bar_samples, cycle }
     }
 
     /// The progression at sample `t`. The last bar of each chord morphs into the next.

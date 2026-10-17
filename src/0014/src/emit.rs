@@ -253,6 +253,7 @@ pub fn info(config: &SimConfig, build: u32) -> String {
         format!("chords     {}", s.chords),
         format!("mode       {}", s.pace.name()),
         format!("tempo      {} BPM", s.bpm),
+        format!("start      {}", if s.start_s == 0 { "at the beginning".to_string() } else { format!("{} s in", s.start_s) }),
         format!("kit        {}", s.kit.name()),
         format!("space      {}", s.space.name()),
         format!("drum rev   {}", if s.drum_reverse { "on" } else { "off" }),

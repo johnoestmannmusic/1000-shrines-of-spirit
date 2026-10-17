@@ -125,6 +125,8 @@ pub fn to_text(config: &SimConfig) -> String {
     out.push_str(&format!("drone_rhythm={}\n", if s.drone_rhythm { "on" } else { "off" }));
     out.push_str(&format!("loop_rhythm={}\n", if s.loop_rhythm { "on" } else { "off" }));
     out.push_str(&format!("wildlife={}\n", if s.wildlife { "on" } else { "off" }));
+    out.push_str("# where the piece starts, in seconds into the music (0-600)\n");
+    out.push_str(&format!("start_s={}\n", s.start_s));
     out.push_str(&format!("code_plane={}\n", shrine0014::overlay::CodeOverlay::PLANES[(s.code.plane as usize).min(2)]));
     out.push_str(&format!("code_angle={}\n", s.code.angle));
     out.push_str(&format!("code_offset={}\n", s.code.offset));
@@ -335,6 +337,12 @@ pub fn from_text(text: &str) -> Option<SimConfig> {
             "wildlife" => {
                 config.settings.wildlife = parse_bool(value);
                 found = true;
+            }
+            "start_s" => {
+                if let Ok(n) = value.trim_end_matches('s').trim().parse::<u16>() {
+                    config.settings.start_s = n.min(shrine0014::track::MAX_START_S);
+                    found = true;
+                }
             }
             "camera_speed" => {
                 if let Ok(n) = value.parse::<i16>() {
@@ -802,6 +810,7 @@ mod tests {
         s.drone_rhythm = r.chance(0.5);
         s.loop_rhythm = r.chance(0.5);
         s.wildlife = r.chance(0.5);
+        s.start_s = if r.chance(0.5) { 0 } else { r.int(0, shrine0014::track::MAX_START_S as u64) as u16 };
         s.garage = shrine0014::garage::GarageSetup {
             swing: r.int(MIN_SWING as u64, MAX_SWING as u64) as u8,
             bass: r.pick(&BASS_MODES),
