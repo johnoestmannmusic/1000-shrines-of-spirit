@@ -14,14 +14,15 @@ import { readFile } from "node:fs/promises";
 const AUDIO_GOLDEN = 0x4431b25653cbda5cn;
 // Re-locked when `raster::fill_face` was fixed (side faces had been drawn with
 // x and y swapped), for the weather rework (FEAT-40), for the textured, lit
-// architecture (FEAT-44), and for its paler palette (FEAT-45). These mirror
+// architecture (FEAT-44), for its paler palette (FEAT-45), and for the default
+// camera turning at -2°/s (frames 1-4). These mirror
 // VISUAL_GOLDEN in engine/tests/parity_golden.rs.
 const VISUAL_GOLDEN = [
 	0xba5ce76b7435b6f1n,
-	0xde72f8f08a9e529en,
-	0x060d07f0e87a200bn,
-	0xede3cdf9c0e2232cn,
-	0x61ec37f8bcc717e8n,
+	0x45d1c475b1940cfcn,
+	0xe3f880345775ef2en,
+	0x96f34aa3ec60d4fbn,
+	0xee7f6469f21fd637n,
 ];
 const SR = 48000;
 const LOGICAL = 300;

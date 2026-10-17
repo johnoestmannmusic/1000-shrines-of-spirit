@@ -116,11 +116,13 @@ pub fn to_text(config: &SimConfig) -> String {
     out.push_str("# progression: seed picks, or one of the named ones; key lift: off|every 4 loops|every 8 loops\n");
     out.push_str(&format!("garage_progression={}\n", s.garage.progression_name()));
     out.push_str(&format!("garage_key_lift={}\n", s.garage.lift.name()));
-    out.push_str("# microsound only: pulse off|sub|sub + click, grains sparse|medium|dense, pips off|sparse|busy, dropouts off|some|many\n");
+    out.push_str("# microsound only: pulse off|sub|sub + click, grains sparse|medium|dense, pips off|sparse|busy, dropouts off|some|many,\n#   chord rate slow|every 4 bars|every 2 bars|every bar, drone shift off|octaves|fifths|scale steps\n");
     out.push_str(&format!("micro_pulse={}\n", s.micro.pulse.name()));
     out.push_str(&format!("micro_grains={}\n", s.micro.grains.name()));
     out.push_str(&format!("micro_pips={}\n", s.micro.pips.name()));
     out.push_str(&format!("micro_dropouts={}\n", s.micro.dropouts.name()));
+    out.push_str(&format!("micro_chord_rate={}\n", s.micro.chords.name()));
+    out.push_str(&format!("micro_drone_shift={}\n", s.micro.shift.name()));
     out.push_str(&format!("kit={}\n", s.kit.name()));
     out.push_str(&format!("space={}\n", s.space.name()));
     out.push_str(&format!("drum_reverse={}\n", if s.drum_reverse { "on" } else { "off" }));
@@ -325,6 +327,18 @@ pub fn from_text(text: &str) -> Option<SimConfig> {
             "micro_dropouts" => {
                 if let Some(v) = shrine0015::micro::DROPOUTS.into_iter().find(|v| eq(v.name(), value)) {
                     config.settings.micro.dropouts = v;
+                    found = true;
+                }
+            }
+            "micro_chord_rate" => {
+                if let Some(v) = shrine0015::micro::CHORD_RATES.into_iter().find(|v| eq(v.name(), value)) {
+                    config.settings.micro.chords = v;
+                    found = true;
+                }
+            }
+            "micro_drone_shift" => {
+                if let Some(v) = shrine0015::micro::DRONE_SHIFTS.into_iter().find(|v| eq(v.name(), value)) {
+                    config.settings.micro.shift = v;
                     found = true;
                 }
             }
@@ -871,6 +885,8 @@ mod tests {
             grains: r.pick(&shrine0015::micro::GRAINS),
             pips: r.pick(&shrine0015::micro::PIPS),
             dropouts: r.pick(&shrine0015::micro::DROPOUTS),
+            chords: r.pick(&shrine0015::micro::CHORD_RATES),
+            shift: r.pick(&shrine0015::micro::DRONE_SHIFTS),
         };
         c
     }

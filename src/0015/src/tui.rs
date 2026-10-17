@@ -89,6 +89,8 @@ enum Kind {
     MicroGrains,
     MicroPips,
     MicroDropouts,
+    MicroChords,
+    MicroShift,
     Bpm,
     Kit,
     Space,
@@ -159,6 +161,140 @@ enum Screen {
     Fx,
     Glitch,
     Editor,
+}
+
+/// The setup is split into tabs; each is one or more of the menu's groups.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Tab {
+    Track,
+    Shrine,
+    Music,
+    Atmosphere,
+    Drone,
+    Glitch,
+    Look,
+    Export,
+}
+
+const TABS: [Tab; 8] = [Tab::Track, Tab::Shrine, Tab::Music, Tab::Atmosphere, Tab::Drone, Tab::Glitch, Tab::Look, Tab::Export];
+
+impl Tab {
+    fn name(self) -> &'static str {
+        match self {
+            Tab::Track => "Track",
+            Tab::Shrine => "Shrine",
+            Tab::Music => "Music",
+            Tab::Atmosphere => "Atmosphere",
+            Tab::Drone => "Drone & FX",
+            Tab::Glitch => "Glitch",
+            Tab::Look => "Look",
+            Tab::Export => "Export",
+        }
+    }
+
+    /// The tab a menu group (its header) belongs to.
+    fn of_group(header: &str) -> Tab {
+        match header {
+            "Track" => Tab::Track,
+            "Shrine" => Tab::Shrine,
+            "Music" => Tab::Music,
+            "Atmosphere" => Tab::Atmosphere,
+            "Drone" | "Master" => Tab::Drone,
+            "Glitches" => Tab::Glitch,
+            "Overlay" | "Camera" | "Architecture" => Tab::Look,
+            _ => Tab::Export,
+        }
+    }
+}
+
+/// The tab of every row.
+fn tabs_of(rows: &[Row]) -> Vec<Tab> {
+    let mut tab = Tab::Track;
+    rows.iter()
+        .map(|r| {
+            if r.kind == Kind::Header {
+                tab = Tab::of_group(&r.label);
+            }
+            tab
+        })
+        .collect()
+}
+
+/// A popup listing every value of one setting. Moving through it applies
+/// each value live (picture and audition); enter keeps it, esc puts back
+/// what was there when it opened.
+struct Picker {
+    kind: Kind,
+    title: String,
+    /// (label, one-line description, the configuration with that value).
+    options: Vec<(String, String, SimConfig)>,
+    sel: usize,
+    original: SimConfig,
+}
+
+/// What a row is for, in a line: shown under the menu for the selected row.
+fn row_help(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Header => "",
+        Kind::Name => "The track's name: the page heading and the WAV title. Enter to type it.",
+        Kind::StartAt => "Join the piece part-way in. The music is fast-forwarded exactly; the visuals start there too.",
+        Kind::Seed => "The seed builds the shrine, its plants, palette and weather. ←→ step, shift ±100, enter to type.",
+        Kind::Biome => "What grows around the shrine, or which built future surrounds it.",
+        Kind::Weather => "The weather: it moves the plants, the light and the sound of the bed.",
+        Kind::Wildlife => "Creatures of the biome, heard and seen. Enter to switch on or off.",
+        Kind::Audition => "Hear the music live while you choose. Enter to switch on or off.",
+        Kind::Scale => "Which notes exist. Every chord, bass note, pip and ping is drawn from it.",
+        Kind::Key => "The tonic: seed 1 picks it, or choose one.",
+        Kind::Chords => "How many chords the progression cycles through.",
+        Kind::Pace => "How the music moves. Each mode brings its own drums, bass and defaults.",
+        Kind::Swing => "2-step swing: how late every second sixteenth lands (50 % is straight).",
+        Kind::GarageProgression => "The chord loop: the seed's pick, or a named progression.",
+        Kind::GarageLift => "Step the whole progression up a whole tone for a while, then home.",
+        Kind::GarageBass => "A moving garage bassline, or the sustained bass of the other modes.",
+        Kind::GarageStabs => "How often chord stabs play on the pushes.",
+        Kind::GarageTone => "The stabs' colour.",
+        Kind::MicroPulse => "What carries the microsound beat: a sub kick and pulse, with or without clicks.",
+        Kind::MicroGrains => "How many ticks and grains, and how much of the bed becomes a grain cloud.",
+        Kind::MicroPips => "High sine pips on chord tones, a few milliseconds each.",
+        Kind::MicroDropouts => "Digital failure as edits: steps drop out, skip back or ratchet.",
+        Kind::MicroChords => "How often the chords change in microsound.",
+        Kind::MicroShift => "Transpose the drone's fragments by a repeating figure of four.",
+        Kind::Bpm => "The drum tempo; every ambient layer moves at exactly half of it.",
+        Kind::Kit => "How the drums are synthesised. Seed 5 sets each voice within the kit.",
+        Kind::Space => "Where the drums sit in the stereo field.",
+        Kind::DrumReverse => "Whether break edits may play slices backwards. Enter to switch.",
+        Kind::OpenFx => "End-of-chain master effects. Enter to open.",
+        Kind::Layer(_) => "One atmosphere loop: a sustained timbre, an event grid, or off.",
+        Kind::LayerArc(_) => "How the layer comes and goes: always on, or in and out over a cycle.",
+        Kind::LayerHold(_) => "How long the layer stays in, each cycle.",
+        Kind::Transpose => "Shift the atmosphere loops by semitones.",
+        Kind::DroneArc => "How the drone comes and goes: always on, or in and out over a cycle.",
+        Kind::DroneHold => "How long the drone stays in, each cycle.",
+        Kind::DroneTone => "A low-pass at the end of the drone's chain (off, or its cutoff).",
+        Kind::DroneRhythm => "A rhythmic swell on the drone, shaped by seed 7. Enter to switch.",
+        Kind::LoopRhythm => "The drone's rhythm on the atmosphere loops too. Enter to switch.",
+        Kind::Glitch(_) => "One glitch layer: which sounds, how often, how loud. Enter to open.",
+        Kind::CodeEnabled => "Scroll this shrine's own source code through the sky. Enter to switch.",
+        Kind::CodeOpacity => "How strongly the code shows.",
+        Kind::CodeSpeed => "How fast the code scrolls.",
+        Kind::CodeScale => "The code's text size.",
+        Kind::CodeAngle => "Tilt the code's drift.",
+        Kind::CodeOffset => "Move the code up or down the sky.",
+        Kind::CodePlane => "How the code answers the camera: pinned, sliding, or wrapped round you.",
+        Kind::CameraSpeed => "The camera's constant orbit, degrees per second (negative turns the other way).",
+        Kind::ArchRotX | Kind::ArchRotY | Kind::ArchRotZ => "Turn the architecture on one axis; the ground stays put.",
+        Kind::ArchOffX | Kind::ArchOffY | Kind::ArchOffZ => "Move the architecture, in cells or levels.",
+        Kind::EditArch => "Edit the shrine square by square. Enter to open.",
+        Kind::SeedN(_) => "One of the music's seeds. ←→ step, shift ±100, enter to type.",
+        Kind::SavePng => "Save the picture as it is now.",
+        Kind::CoverPng => "Save a 1600×1600 cover image.",
+        Kind::WavExport => "Render the music to a WAV with metadata and cover art.",
+        Kind::ExportSeed => "Write these settings to a .shrineseed file.",
+        Kind::ImportSeed => "Load settings from a .shrineseed file.",
+        Kind::Reset => "Start a fresh project from the defaults.",
+        Kind::Compile => "Build the self-contained web artifact from these settings.",
+        Kind::Quit => "Save the answers and leave.",
+    }
 }
 
 /// The master-effects toggles live in the settings; this only tracks the cursor.
@@ -501,6 +637,7 @@ struct App {
     fx: FxForm,
     gform: GlitchForm,
     edit: EditForm,
+    picker: Option<Picker>,
     quit: bool,
 }
 
@@ -518,7 +655,7 @@ impl App {
             time: 0.0,
             animate: true,
             sel: 1,
-            status: "ready — ←→ change · enter act · r random · q quit".to_string(),
+            status: "ready — tab section · enter choose · q quit".to_string(),
             job: None,
             prompt: None,
             audition: None,
@@ -527,6 +664,7 @@ impl App {
             gform: GlitchForm::new(),
             edit: EditForm::new(),
             fx: FxForm::new(),
+            picker: None,
             quit: false,
         }
     }
@@ -545,7 +683,11 @@ impl App {
     }
 
     fn rows(&self) -> Vec<Row> {
-        let c = &self.config;
+        self.rows_of(&self.config)
+    }
+
+    /// The menu for any configuration (a picker labels its options with it).
+    fn rows_of(&self, c: &SimConfig) -> Vec<Row> {
         let s = &c.settings;
         let mut rows: Vec<Row> = Vec::new();
         let head = |label: &str, rows: &mut Vec<Row>| {
@@ -626,6 +768,8 @@ impl App {
             field("Grains".into(), s.micro.grains.name().to_string(), Kind::MicroGrains, &mut rows);
             field("Pips".into(), s.micro.pips.name().to_string(), Kind::MicroPips, &mut rows);
             field("Dropouts".into(), s.micro.dropouts.name().to_string(), Kind::MicroDropouts, &mut rows);
+            field("Chord rate".into(), s.micro.chords.name().to_string(), Kind::MicroChords, &mut rows);
+            field("Drone shift".into(), s.micro.shift.name().to_string(), Kind::MicroShift, &mut rows);
         }
         field("Tempo".into(), format!("{} BPM", s.bpm), Kind::Bpm, &mut rows);
         field("Kit".into(), s.kit.name().to_string(), Kind::Kit, &mut rows);
@@ -715,17 +859,203 @@ impl App {
         rows
     }
 
+    /// The next selectable row within the selection's tab (wrapping).
     fn menu_step(&self, from: usize, dir: i32) -> usize {
         let rows = self.rows();
+        let tabs = tabs_of(&rows);
         let n = rows.len() as i32;
+        let tab = tabs[from.min(rows.len() - 1)];
         let mut i = from as i32;
         for _ in 0..n {
             i = (i + dir).rem_euclid(n);
-            if rows[i as usize].kind != Kind::Header {
+            if rows[i as usize].kind != Kind::Header && tabs[i as usize] == tab {
                 return i as usize;
             }
         }
         from
+    }
+
+    /// The tab the selection is in.
+    fn tab(&self) -> Tab {
+        let rows = self.rows();
+        tabs_of(&rows)[self.sel.min(rows.len() - 1)]
+    }
+
+    /// Select the first row of `tab`.
+    fn goto_tab(&mut self, tab: Tab) {
+        let rows = self.rows();
+        let tabs = tabs_of(&rows);
+        if let Some(i) = (0..rows.len()).find(|&i| tabs[i] == tab && rows[i].kind != Kind::Header) {
+            self.sel = i;
+        }
+    }
+
+    fn switch_tab(&mut self, dir: i32) {
+        let i = TABS.iter().position(|t| *t == self.tab()).unwrap_or(0) as i32;
+        self.goto_tab(TABS[(i + dir).rem_euclid(TABS.len() as i32) as usize]);
+    }
+
+    /// Every value a choice row can take, as whole configurations (in the
+    /// order of its list), or `None` for a row that is not a choice.
+    fn choices(&self, kind: Kind) -> Option<Vec<SimConfig>> {
+        let base = &self.config;
+        let each = |n: usize, set: &dyn Fn(&mut SimConfig, usize)| -> Vec<SimConfig> {
+            (0..n)
+                .map(|i| {
+                    let mut c = base.clone();
+                    set(&mut c, i);
+                    c
+                })
+                .collect()
+        };
+        use shrine0015::{garage as g, micro as m};
+        Some(match kind {
+            Kind::Biome => each(Biome::ALL.len(), &|c, i| c.biome = Biome::ALL[i]),
+            Kind::Weather => each(WeatherKind::ALL.len(), &|c, i| c.weather = WeatherKind::ALL[i]),
+            Kind::Scale => each(SCALES.len(), &|c, i| c.settings.scale = SCALES[i]),
+            Kind::Key => each(13, &|c, i| c.settings.key = key_from_index(i)),
+            Kind::Chords => each(4, &|c, i| c.settings.chords = i as u8 + 1),
+            Kind::Pace => each(PACES.len(), &|c, i| {
+                let s = &mut c.settings;
+                s.set_mode(PACES[i]);
+                if s.pace == Pace::Micro && !s.kit.is_light() && s.kit != shrine0015::kits::Kit::Off {
+                    s.kit = shrine0015::kits::Kit::MicroBlips;
+                }
+            }),
+            Kind::GarageProgression => each(shrine0015::harmony::PROGRESSIONS.len() + 1, &|c, i| {
+                c.settings.garage.progression = i as u8;
+                // A named progression needs all four chords.
+                if i > 0 {
+                    c.settings.chords = 4;
+                }
+            }),
+            Kind::GarageLift => each(g::KEY_LIFTS.len(), &|c, i| c.settings.garage.lift = g::KEY_LIFTS[i]),
+            Kind::GarageBass => each(g::BASS_MODES.len(), &|c, i| c.settings.garage.bass = g::BASS_MODES[i]),
+            Kind::GarageStabs => each(g::STABS.len(), &|c, i| c.settings.garage.stabs = g::STABS[i]),
+            Kind::GarageTone => each(g::STAB_TONES.len(), &|c, i| c.settings.garage.tone = g::STAB_TONES[i]),
+            Kind::MicroPulse => each(m::PULSES.len(), &|c, i| c.settings.micro.pulse = m::PULSES[i]),
+            Kind::MicroGrains => each(m::GRAINS.len(), &|c, i| c.settings.micro.grains = m::GRAINS[i]),
+            Kind::MicroPips => each(m::PIPS.len(), &|c, i| c.settings.micro.pips = m::PIPS[i]),
+            Kind::MicroDropouts => each(m::DROPOUTS.len(), &|c, i| c.settings.micro.dropouts = m::DROPOUTS[i]),
+            Kind::MicroChords => each(m::CHORD_RATES.len(), &|c, i| c.settings.micro.chords = m::CHORD_RATES[i]),
+            Kind::MicroShift => each(m::DRONE_SHIFTS.len(), &|c, i| c.settings.micro.shift = m::DRONE_SHIFTS[i]),
+            Kind::Kit => {
+                // Microsound only offers the light, small kits.
+                let micro = base.settings.pace == Pace::Micro;
+                let kits: Vec<_> = KITS.into_iter().filter(|k| !micro || k.is_light() || *k == shrine0015::kits::Kit::Off).collect();
+                each(kits.len(), &|c, i| c.settings.kit = kits[i])
+            }
+            Kind::Space => each(SPACES.len(), &|c, i| c.settings.space = SPACES[i]),
+            Kind::Layer(l) => each(LOOP_TIMBRES.len() + 1, &|c, i| {
+                // The event grid keeps a grid already drawn on this layer.
+                let keep = matches!(c.settings.loops[l], LoopDesign::Events(_)) && i == EVENT_GRID;
+                if !keep {
+                    c.settings.loops[l] = index_to_design(i);
+                }
+            }),
+            Kind::LayerArc(l) => each(ARCS.len(), &|c, i| c.settings.loop_arcs[l].cycle_s = ARCS[i]),
+            Kind::DroneArc => each(ARCS.len(), &|c, i| c.settings.drone.cycle_s = ARCS[i]),
+            Kind::DroneTone => each(TONES.len(), &|c, i| c.settings.drone_tone = TONES[i]),
+            Kind::CodePlane => each(CodeOverlay::PLANES.len(), &|c, i| c.settings.code.plane = i as u8),
+            _ => return None,
+        })
+    }
+
+    /// A one-line description of `kind`'s value in `c`, for its picker.
+    fn option_blurb(kind: Kind, c: &SimConfig) -> String {
+        let s = &c.settings;
+        match kind {
+            Kind::Biome => c.biome.blurb().to_string(),
+            Kind::Scale => s.scale.mood().to_string(),
+            Kind::Key => match s.key {
+                KeyChoice::Seed => "seed 1 chooses the tonic".to_string(),
+                KeyChoice::Note(_) => String::new(),
+            },
+            Kind::Chords => match s.chords {
+                1 => "one chord, held".to_string(),
+                n => format!("{n} chords in turn"),
+            },
+            Kind::Pace => s.pace.blurb().to_string(),
+            Kind::GarageProgression if s.garage.progression == 0 => "the seed picks one from the scale's family".to_string(),
+            Kind::GarageLift => s.garage.lift.blurb().to_string(),
+            Kind::GarageBass => s.garage.bass.blurb().to_string(),
+            Kind::GarageStabs => s.garage.stabs.blurb().to_string(),
+            Kind::GarageTone => s.garage.tone.blurb().to_string(),
+            Kind::MicroPulse => s.micro.pulse.blurb().to_string(),
+            Kind::MicroGrains => s.micro.grains.blurb().to_string(),
+            Kind::MicroPips => s.micro.pips.blurb().to_string(),
+            Kind::MicroDropouts => s.micro.dropouts.blurb().to_string(),
+            Kind::MicroChords => s.micro.chords.blurb().to_string(),
+            Kind::MicroShift => s.micro.shift.blurb().to_string(),
+            Kind::Kit => s.kit.blurb().to_string(),
+            Kind::Space => s.space.blurb().to_string(),
+            Kind::Layer(l) => s.loops[l].blurb(),
+            Kind::LayerArc(_) | Kind::DroneArc => "how long one in-and-out cycle lasts".to_string(),
+            Kind::DroneTone => "the low-pass cutoff (off leaves the drone open)".to_string(),
+            Kind::CodePlane => ["pinned to the frame", "a flat band that slides as the camera turns", "wrapped round the viewer"]
+                [(s.code.plane as usize).min(2)]
+                .to_string(),
+            _ => String::new(),
+        }
+    }
+
+    /// Open the picker for the selected row, if it is a choice.
+    fn open_picker(&mut self) -> bool {
+        let row = &self.rows()[self.sel];
+        let (kind, title) = (row.kind, row.label.clone());
+        let Some(configs) = self.choices(kind) else {
+            return false;
+        };
+        let label = |c: &SimConfig| self.rows_of(c).into_iter().find(|r| r.kind == kind).map(|r| r.value).unwrap_or_default();
+        let current = label(&self.config);
+        let options: Vec<(String, String, SimConfig)> =
+            configs.into_iter().map(|c| (label(&c), App::option_blurb(kind, &c), c)).collect();
+        let sel = options.iter().position(|o| o.0 == current).unwrap_or(0);
+        self.picker = Some(Picker { kind, title, options, sel, original: self.config.clone() });
+        true
+    }
+
+    /// Move the picker to option `i` and hear/see it straight away.
+    fn picker_to(&mut self, i: usize) {
+        let Some(p) = &mut self.picker else { return };
+        let i = i.min(p.options.len() - 1);
+        if i == p.sel && p.options[i].2.settings == self.config.settings {
+            return;
+        }
+        p.sel = i;
+        self.config = p.options[i].2.clone();
+        self.rebuild();
+    }
+
+    fn handle_picker_key(&mut self, code: KeyCode) {
+        let Some(p) = &self.picker else { return };
+        let (n, sel) = (p.options.len(), p.sel);
+        match code {
+            KeyCode::Up | KeyCode::Left => self.picker_to((sel + n - 1) % n),
+            KeyCode::Down | KeyCode::Right => self.picker_to((sel + 1) % n),
+            KeyCode::PageUp => self.picker_to(sel.saturating_sub(8)),
+            KeyCode::PageDown => self.picker_to(sel + 8),
+            KeyCode::Home => self.picker_to(0),
+            KeyCode::End => self.picker_to(n - 1),
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                let p = self.picker.take().unwrap();
+                self.status = format!("{} · {}", p.title, p.options[p.sel].0);
+            }
+            KeyCode::Esc | KeyCode::Char('q') => {
+                let p = self.picker.take().unwrap();
+                self.config = p.original;
+                self.rebuild();
+            }
+            // A letter jumps to the next option starting with it.
+            KeyCode::Char(ch) if ch.is_alphanumeric() => {
+                let want = ch.to_ascii_lowercase();
+                let hit = (1..=n).map(|k| (sel + k) % n).find(|&i| p.options[i].0.chars().next().is_some_and(|c| c.to_ascii_lowercase() == want));
+                if let Some(i) = hit {
+                    self.picker_to(i);
+                }
+            }
+            _ => {}
+        }
     }
 
     fn adjust(&mut self, forward: bool, shift: bool) {
@@ -816,6 +1146,14 @@ impl App {
             Kind::MicroDropouts => {
                 let m = &mut self.config.settings.micro;
                 m.dropouts = cycle(&shrine0015::micro::DROPOUTS, m.dropouts, forward);
+            }
+            Kind::MicroChords => {
+                let m = &mut self.config.settings.micro;
+                m.chords = cycle(&shrine0015::micro::CHORD_RATES, m.chords, forward);
+            }
+            Kind::MicroShift => {
+                let m = &mut self.config.settings.micro;
+                m.shift = cycle(&shrine0015::micro::DRONE_SHIFTS, m.shift, forward);
             }
             Kind::Space => self.config.settings.space = cycle(&SPACES, self.config.settings.space, forward),
             Kind::DrumReverse => self.config.settings.drum_reverse = !self.config.settings.drum_reverse,
@@ -948,6 +1286,10 @@ impl App {
         // arrows; both go through the same clamp, so they can never disagree.
         if let Some(value) = self.number_text(kind) {
             self.prompt = Some(Prompt { label, value, action: PromptAction::Number(kind) });
+            return;
+        }
+        // Every choice opens its list.
+        if self.open_picker() {
             return;
         }
         match kind {
@@ -1718,6 +2060,10 @@ impl App {
             }
             return self.quit;
         }
+        if self.picker.is_some() {
+            self.handle_picker_key(code);
+            return self.quit;
+        }
         if self.screen == Screen::Wav {
             return self.handle_wav_key(code);
         }
@@ -1740,6 +2086,9 @@ impl App {
             KeyCode::Left => self.adjust(false, mods.contains(KeyModifiers::SHIFT)),
             KeyCode::Right => self.adjust(true, mods.contains(KeyModifiers::SHIFT)),
             KeyCode::Enter | KeyCode::Char(' ') => self.activate(),
+            KeyCode::Tab => self.switch_tab(1),
+            KeyCode::BackTab => self.switch_tab(-1),
+            KeyCode::Char(d @ '1'..='8') => self.goto_tab(TABS[d as usize - '1' as usize]),
             KeyCode::Char('r') => self.randomize(),
             _ => {}
         }
@@ -1758,31 +2107,66 @@ impl App {
         if let Some(p) = &self.prompt {
             let area = f.area();
             let buf = f.buffer_mut();
-            let y = area.height.saturating_sub(1);
-            put(buf, area, 0, y, &format!("{}: {}▏  (enter confirm · esc cancel)", p.label, p.value), style(ACCENT));
+            let w = (p.label.chars().count().max(p.value.chars().count() + 2).max(34) as u16 + 4).min(area.width);
+            let rect = Rect::new((area.width - w) / 2, area.height / 2 - 2, w, 5.min(area.height));
+            let inner = draw_box(buf, rect, &p.label);
+            put(buf, inner, 1, 0, &format!("{}▏", p.value), style(SELECT).bg(color(POPUP)));
+            put(buf, inner, 1, 2, "enter confirm · esc cancel", style(FAINT).bg(color(POPUP)));
         }
     }
 
     fn draw_main(&self, f: &mut Frame) {
         let area = f.area();
         let buf = f.buffer_mut();
-        if area.width < 30 || area.height < 10 {
+        if area.width < 30 || area.height < 12 {
             put(buf, area, 0, 0, "terminal too small", style(TEXT));
             return;
         }
 
         let list_w = (area.width / 2).clamp(24, 46);
         let help_y = area.height - 1;
+        let about_y = area.height - 2;
 
         put(buf, area, 0, 0, concat!("ShrineGen · setup · v", env!("BUILD_DATE")), style(ACCENT).add_modifier(Modifier::BOLD));
         let status_x = area.width.saturating_sub(self.status.chars().count() as u16 + 1);
         put(buf, area, status_x, 0, &self.status, style(DIM));
 
+        // The tabs, across the top. Too narrow for all of them: the current
+        // one between arrows.
+        let tab = self.tab();
+        let full: u16 = TABS.iter().map(|t| t.name().chars().count() as u16 + 5).sum();
+        if full <= area.width {
+            let mut x = 0;
+            for (k, t) in TABS.iter().enumerate() {
+                let text = format!(" {} {} ", k + 1, t.name());
+                let st = if *t == tab {
+                    Style::new().fg(color((20, 20, 24))).bg(color(ACCENT)).add_modifier(Modifier::BOLD)
+                } else {
+                    style(DIM)
+                };
+                put(buf, area, x, 1, &text, st);
+                x += text.chars().count() as u16 + 1;
+            }
+        } else {
+            let k = TABS.iter().position(|t| *t == tab).unwrap_or(0);
+            put(buf, area, 0, 1, &format!("◂ {}/{} {} ▸", k + 1, TABS.len(), tab.name()), style(ACCENT).add_modifier(Modifier::BOLD));
+        }
+
+        // This tab's rows. A tab's first group heading is the tab itself, so
+        // only the later ones are shown.
         let rows = self.rows();
-        let list_h = (help_y.saturating_sub(1)) as usize;
-        let scroll = menu_scroll(self.sel, rows.len(), list_h);
-        for (i, row) in rows.iter().enumerate().skip(scroll).take(list_h) {
-            let y = 1 + (i - scroll) as u16;
+        let tabs = tabs_of(&rows);
+        let mut shown: Vec<usize> = (0..rows.len()).filter(|&i| tabs[i] == tab).collect();
+        if shown.first().is_some_and(|&i| rows[i].kind == Kind::Header) {
+            shown.remove(0);
+        }
+        let top = 3u16;
+        let list_h = about_y.saturating_sub(top + 1) as usize;
+        let at = shown.iter().position(|&i| i == self.sel).unwrap_or(0);
+        let scroll = menu_scroll(at, shown.len(), list_h);
+        for (k, &i) in shown.iter().enumerate().skip(scroll).take(list_h) {
+            let row = &rows[i];
+            let y = top + (k - scroll) as u16;
             let selected = i == self.sel;
             let marker = if selected { "›" } else { " " };
             match row.kind {
@@ -1791,17 +2175,36 @@ impl App {
                     let label_style = if selected { style(SELECT).add_modifier(Modifier::BOLD) } else { style(TEXT) };
                     put(buf, area, 0, y, &format!("{marker} {:<22}", row.label), label_style);
                     let vx = 24.min(list_w.saturating_sub(2));
-                    put(buf, area, vx, y, &row.value, style(if selected { SELECT } else { TEXT }));
+                    // A choice shows that it opens a list.
+                    let value = if self.choices(row.kind).is_some() { format!("{} ▾", row.value) } else { row.value.clone() };
+                    let vw = list_w.saturating_sub(vx + 1);
+                    let rect = Rect::new(area.x, area.y, area.x + vx + vw, area.height);
+                    put(buf, rect, vx, y, &value, style(if selected { SELECT } else { TEXT }));
                 }
             }
         }
 
-        let preview = Rect::new(list_w, 0, area.width - list_w, help_y);
+        let preview = Rect::new(list_w, top - 1, area.width - list_w, about_y.saturating_sub(top - 1));
         draw_preview(buf, preview, &self.frame);
+
+        // What the selected row is for.
+        if let Some(row) = rows.get(self.sel) {
+            put(buf, area, 0, about_y, &format!(" {}", row_help(row.kind)), style(DIM));
+        }
         if let Some(job) = &self.job {
             draw_progress(buf, area, help_y, job);
         } else {
-            put(buf, area, 0, help_y, "↑↓ row · ←→ change (shift = bigger) · enter act · r random · q quit", style(FAINT));
+            put(
+                buf,
+                area,
+                0,
+                help_y,
+                "↑↓ row · tab/1-8 section · enter choose · ←→ change (shift = bigger) · r random · q quit",
+                style(FAINT),
+            );
+        }
+        if let Some(p) = &self.picker {
+            draw_picker(buf, area, p);
         }
     }
 
@@ -1842,6 +2245,66 @@ impl App {
             put(buf, area, 0, help_y, "↑↓ row · enter edit/act · ←→ adjust · esc back", style(FAINT));
         }
     }
+}
+
+/// The popups' background.
+const POPUP: Rgb = (24, 23, 30);
+
+/// Clear `rect`, frame it with a titled border, and return the inside.
+fn draw_box(buf: &mut Buffer, rect: Rect, title: &str) -> Rect {
+    let bg = Style::new().bg(color(POPUP));
+    let edge = style(ACCENT).bg(color(POPUP));
+    for y in 0..rect.height {
+        for x in 0..rect.width {
+            let ch = match (x, y) {
+                (0, 0) => '┌',
+                (x, 0) if x == rect.width - 1 => '┐',
+                (0, y) if y == rect.height - 1 => '└',
+                (x, y) if x == rect.width - 1 && y == rect.height - 1 => '┘',
+                (_, 0) => '─',
+                (_, y) if y == rect.height - 1 => '─',
+                (0, _) => '│',
+                (x, _) if x == rect.width - 1 => '│',
+                _ => ' ',
+            };
+            put_char(buf, rect, x, y, ch, if ch == ' ' { bg } else { edge });
+        }
+    }
+    put(buf, rect, 2, 0, &format!(" {title} "), style(ACCENT).bg(color(POPUP)).add_modifier(Modifier::BOLD));
+    Rect::new(rect.x + 1, rect.y + 1, rect.width.saturating_sub(2), rect.height.saturating_sub(2))
+}
+
+/// A setting's list of values: each with its description, the highlighted
+/// one's in full underneath.
+fn draw_picker(buf: &mut Buffer, area: Rect, p: &Picker) {
+    let label_w = p.options.iter().map(|o| o.0.chars().count()).max().unwrap_or(4).min(40);
+    let blurb_w = p.options.iter().map(|o| o.1.chars().count()).max().unwrap_or(0).min(56);
+    let help_w = row_help(p.kind).chars().count() + 4;
+    let w = ((label_w + 4 + blurb_w + 3).max(p.title.chars().count() + 8).max(help_w).max(40) as u16).min(area.width);
+    let max_list = area.height.saturating_sub(10) as usize;
+    let list_h = p.options.len().min(max_list.max(3));
+    let h = (list_h as u16 + 5).min(area.height.saturating_sub(2));
+    let rect = Rect::new(0, 2.min(area.height), w, h);
+    let inner = draw_box(buf, rect, &p.title);
+    let bg = color(POPUP);
+    let scroll = menu_scroll(p.sel, p.options.len(), list_h);
+    for (k, (label, blurb, _)) in p.options.iter().enumerate().skip(scroll).take(list_h) {
+        let y = (k - scroll) as u16;
+        let on = k == p.sel;
+        let st = if on { Style::new().fg(color((20, 20, 24))).bg(color(SELECT)).add_modifier(Modifier::BOLD) } else { style(TEXT).bg(bg) };
+        let text: String = label.chars().take(label_w).collect();
+        put(buf, inner, 0, y, &format!("{} {:<label_w$} ", if on { "›" } else { " " }, text), st);
+        put(buf, inner, label_w as u16 + 3, y, blurb, style(if on { TEXT } else { DIM }).bg(bg));
+    }
+    if scroll > 0 {
+        put_char(buf, inner, inner.width.saturating_sub(1), 0, '▴', style(DIM).bg(bg));
+    }
+    if scroll + list_h < p.options.len() {
+        put_char(buf, inner, inner.width.saturating_sub(1), list_h as u16 - 1, '▾', style(DIM).bg(bg));
+    }
+    let foot = list_h as u16 + 1;
+    put(buf, inner, 1, foot, row_help(p.kind), style(DIM).bg(bg));
+    put(buf, inner, 1, foot + 1, "↑↓ choose (heard live) · type to jump · enter keep · esc put back", style(FAINT).bg(bg));
 }
 
 /// Show the logical buffer with upper half-blocks (2 pixels per cell), truecolor.
@@ -2083,6 +2546,8 @@ fn draw_progress(buf: &mut Buffer, area: Rect, y: u16, job: &Job) {
 mod tests {
     use super::*;
 
+    const DEFAULT_SETTINGS_FOR_TEST: shrine0015::Settings = shrine0015::DEFAULT_SETTINGS;
+
     /// An app whose architecture is procedural, with the editor open. Editor
     /// tests must not depend on whatever is stored on this machine.
     fn editor_app() -> App {
@@ -2264,11 +2729,128 @@ mod tests {
     }
 
     #[test]
-    fn a_non_numeric_row_still_cycles_rather_than_opening_an_editor() {
+    fn a_choice_row_opens_its_list_rather_than_an_editor() {
         let mut app = App::new();
         app.sel = app.rows().iter().position(|r| r.kind == Kind::Biome).unwrap();
         app.activate();
-        assert!(app.prompt.is_none(), "biome should cycle, not prompt");
+        assert!(app.prompt.is_none(), "biome should not prompt");
+        let p = app.picker.as_ref().expect("biome should open its list");
+        assert_eq!(p.options.len(), Biome::ALL.len());
+        assert_eq!(p.options[p.sel].2.biome, app.config.biome, "the list opens on the current value");
+    }
+
+    fn picker_on(app: &mut App, kind: Kind) {
+        app.sel = app.rows().iter().position(|r| r.kind == kind).unwrap();
+        app.picker = None;
+        assert!(app.open_picker(), "{kind:?} has no list");
+    }
+
+    #[test]
+    fn a_picker_applies_live_and_esc_puts_it_back() {
+        let mut app = App::new();
+        app.config.weather = WeatherKind::Clear;
+        let before = app.config.clone();
+        picker_on(&mut app, Kind::Weather);
+        app.handle_key(KeyCode::Down, KeyModifiers::NONE);
+        app.handle_key(KeyCode::Down, KeyModifiers::NONE);
+        assert_ne!(app.config.weather, before.weather, "moving through the list applies it");
+        app.handle_key(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(app.picker.is_none());
+        assert_eq!(shrine0015::recipe::encode(&app.config), shrine0015::recipe::encode(&before), "esc must put it all back");
+    }
+
+    #[test]
+    fn a_picker_keeps_the_choice_on_enter() {
+        let mut app = App::new();
+        app.config.settings.scale = SCALES[0];
+        picker_on(&mut app, Kind::Scale);
+        app.handle_key(KeyCode::End, KeyModifiers::NONE);
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(app.picker.is_none());
+        assert_eq!(app.config.settings.scale, *SCALES.last().unwrap());
+    }
+
+    #[test]
+    fn choosing_a_mode_in_its_list_moves_the_mode_defaults() {
+        let mut app = App::new();
+        app.config.settings = DEFAULT_SETTINGS_FOR_TEST;
+        picker_on(&mut app, Kind::Pace);
+        let micro = PACES.iter().position(|p| *p == Pace::Micro).unwrap();
+        app.picker_to(micro);
+        app.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(app.config.settings.pace, Pace::Micro);
+        assert_eq!(app.config.settings.bpm, shrine0015::Settings::mode_defaults(Pace::Micro).0);
+    }
+
+    #[test]
+    fn every_choice_row_lists_distinct_values_and_says_what_it_is() {
+        let mut app = App::new();
+        // Show every mode's rows in turn.
+        for pace in PACES {
+            app.config.settings.set_mode(pace);
+            for row in app.rows() {
+                if row.kind != Kind::Header {
+                    assert!(!row_help(row.kind).is_empty(), "{:?} has no help line", row.kind);
+                }
+                if app.choices(row.kind).is_none() {
+                    continue;
+                }
+                picker_on(&mut app, row.kind);
+                let p = app.picker.take().unwrap();
+                assert!(p.options.len() >= 2, "{:?} lists {} value(s)", row.kind, p.options.len());
+                let mut labels: Vec<&String> = p.options.iter().map(|o| &o.0).collect();
+                labels.dedup();
+                assert_eq!(labels.len(), p.options.len(), "{:?} lists a value twice", row.kind);
+            }
+        }
+    }
+
+    #[test]
+    fn tabs_keep_the_arrows_inside_them() {
+        let mut app = App::new();
+        for tab in TABS {
+            app.goto_tab(tab);
+            assert_eq!(app.tab(), tab);
+            let start = app.sel;
+            let mut i = start;
+            for _ in 0..80 {
+                i = app.menu_step(i, 1);
+                assert_eq!(tabs_of(&app.rows())[i], tab, "the arrows left {tab:?}");
+            }
+        }
+        app.goto_tab(Tab::Track);
+        app.handle_key(KeyCode::Tab, KeyModifiers::NONE);
+        assert_eq!(app.tab(), Tab::Shrine);
+        app.handle_key(KeyCode::BackTab, KeyModifiers::NONE);
+        app.handle_key(KeyCode::BackTab, KeyModifiers::NONE);
+        assert_eq!(app.tab(), Tab::Export, "tabs wrap");
+        app.handle_key(KeyCode::Char('3'), KeyModifiers::NONE);
+        assert_eq!(app.tab(), Tab::Music);
+    }
+
+    #[test]
+    fn the_setup_screen_draws_tabs_and_a_picker() {
+        use ratatui::backend::TestBackend;
+        let mut terminal = ratatui::Terminal::new(TestBackend::new(120, 36)).unwrap();
+        let mut app = App::new();
+        app.goto_tab(Tab::Music);
+        let mut screen = |app: &App| -> String {
+            terminal.draw(|f| app.draw(f)).unwrap();
+            let text: String = terminal.backend().buffer().content().iter().map(|c| c.symbol()).collect();
+            if std::env::var("SHRINE_PRINT_SCREEN").is_ok() {
+                for line in text.chars().collect::<Vec<_>>().chunks(120) {
+                    println!("{}", line.iter().collect::<String>().trim_end_matches(|c| c == '▀' || c == ' '));
+                }
+            }
+            text
+        };
+        let plain = screen(&app);
+        assert!(plain.contains("Mode"), "the Music tab shows its rows");
+        picker_on(&mut app, Kind::Scale);
+        let text = screen(&app);
+        assert!(text.contains("3 Music"));
+        assert!(text.contains(SCALES[0].name()));
+        assert!(text.contains("enter keep"));
     }
 
     #[test]

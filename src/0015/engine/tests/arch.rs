@@ -88,9 +88,15 @@ fn a_camera_orbit_turns_the_world_deterministically() {
 
 #[test]
 fn a_zero_camera_speed_is_the_plain_render() {
+    // (The default turns slowly, so the plain render is that frame with no orbit.)
     let mut config = SimConfig::default();
     config.settings.camera_speed = 0;
-    assert_eq!(frame_with(config), frame_with(SimConfig::default()));
+    let sim = Sim::new_visual(SimConfig::default());
+    let mut state = sim.state(1.0);
+    state.orbit_turns = 0.0;
+    let mut fb = Framebuffer::logical();
+    sim.scene.render_state(&mut fb, &state, Quality::High);
+    assert_eq!(frame_with(config), fb.hash());
 }
 
 #[test]
@@ -107,6 +113,8 @@ fn the_orbit_is_periodic_in_a_whole_turn() {
 fn buffer(arch: ArchTransform) -> Framebuffer {
     let mut config = SimConfig::default();
     config.settings.arch = arch;
+    // Upright, so the plateau's diamond is where the test expects it.
+    config.settings.camera_speed = 0;
     let sim = Sim::new_visual(config);
     let mut fb = Framebuffer::logical();
     sim.render_visual(&mut fb, 1.0, Quality::High);

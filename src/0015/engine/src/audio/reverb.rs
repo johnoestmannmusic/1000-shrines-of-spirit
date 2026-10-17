@@ -49,6 +49,12 @@ pub struct Reverb {
 
 impl Reverb {
     pub fn new() -> Self {
+        Reverb::with_decay(DECAY_SECONDS)
+    }
+
+    /// The same network with a different decay (seconds to fall 60 dB):
+    /// microsound's small, close room.
+    pub fn with_decay(decay_s: f64) -> Self {
         let sr = crate::SAMPLE_RATE as f64;
         Reverb {
             lines: LINES
@@ -56,7 +62,7 @@ impl Reverb {
                 .map(|&len| Line {
                     buf: vec![0.0; len],
                     pos: 0,
-                    gain: decay_gain(len as f64, DECAY_SECONDS, sr),
+                    gain: decay_gain(len as f64, decay_s, sr),
                     damp: OnePole::new(DAMP_HZ, sr),
                 })
                 .collect(),

@@ -48,16 +48,18 @@ const LOOP_RHYTHM_GOLDEN: u64 = 0xf885_744b_4745_15b7;
 // Re-locked for the textured, lit architecture (FEAT-44), its paler
 // palette with the white altar (FEAT-45), and the depth test on the turned
 // path (BUG-11).
-const ARCH_ROTATED_GOLDEN: [u64; 3] = [5606981425953137516, 190012420838077787, 17860756258834833913];
+// Re-locked (frames 1 and 2) when the default camera began turning at -2°/s.
+const ARCH_ROTATED_GOLDEN: [u64; 3] = [5606981425953137516, 11710460452663874062, 10617532798070711494];
 const VISUAL_GOLDEN: [u64; 5] = [
     // Re-locked when `raster::fill_face` was fixed (it drew side faces with x
     // and y swapped), for the weather rework (FEAT-40), for the textured, lit
-    // architecture (FEAT-44), and for its paler palette (FEAT-45).
+    // architecture (FEAT-44), for its paler palette (FEAT-45), and when the
+    // default camera began turning at -2°/s (frames 1-4; frame 0 is unturned).
     13428862637609170673,
-    16029147735766487710,
-    436013470198669323,
-    17141771079268836140,
-    7056076257641306088,
+    5031018268519042300,
+    16427020603127885614,
+    10877119592935773435,
+    17185565109265618487,
 ];
 
 #[test]
@@ -145,15 +147,18 @@ const FUTURE_AUDIO_SECONDS: usize = 36;
 const FUTURE_FRAMES: [f64; 2] = [0.0, 3.0];
 // Re-locked when garage's layers stopped clashing: an open-fifth drone,
 // whole-number overtones, separate registers and clean chord changes.
-const FUTURE_GOLDEN: [(u64, [u64; 2]); 4] = [
+const FUTURE_GOLDEN: [(u64, [u64; 2]); 5] = [
     // Re-locked when garage was tightened: the loops change on the downbeat
     // with the bass, every echo keeps its hit's place in the swing, the loops'
     // grains and the glitch ratchets swing with the drums, and the bass glides
-    // faster.
-    (0x49f2_ebac_73cd_214c, [6579003113373532395, 13247657374849648781]),
-    (0x8644_1f47_3bc4_2566, [13912267995583014935, 17051752384514558235]),
-    (0xb37b_73ba_d941_6b80, [3398551927623433174, 7995802616033956358]),
-    (0xec32_597d_0672_f60a, [15606822369550803988, 16286219466886564680]),
+    // faster. The second frames re-locked when the default camera began
+    // turning at -2°/s.
+    (0x49f2_ebac_73cd_214c, [6579003113373532395, 4395191951363905427]),
+    (0x8644_1f47_3bc4_2566, [13912267995583014935, 12835428784991641825]),
+    (0xb37b_73ba_d941_6b80, [3398551927623433174, 14924866735832440461]),
+    (0xec32_597d_0672_f60a, [15606822369550803988, 17043975138364091053]),
+    // 0015: microsound (locked after John's listen).
+    (0x8a62_c979_a2a9_f0bb, [13428862637609170673, 10877119592935773435]),
 ];
 
 fn future_configs() -> Vec<(&'static str, SimConfig)> {
@@ -174,6 +179,13 @@ fn future_configs() -> Vec<(&'static str, SimConfig)> {
     ]
     .into_iter()
     .map(|(name, biome, weather)| (name, SimConfig { biome, weather, settings, ..SimConfig::default() }))
+    .chain(std::iter::once({
+        // 0015: microsound, with the chords changing every bar.
+        let mut micro = shrine0015::DEFAULT_SETTINGS;
+        micro.set_mode(shrine0015::harmony::Pace::Micro);
+        micro.micro.chords = shrine0015::micro::ChordRate::EveryBar;
+        ("moss microsound", SimConfig { settings: micro, ..SimConfig::default() })
+    }))
     .collect()
 }
 
@@ -207,7 +219,7 @@ fn the_futures_and_garage_golden() {
         json.push_str(&format!(
             "    {{ \"name\": \"{name}\", \"words\": [{words}], \"audio\": \"{audio:016x}\", \"visual\": [{}] }}{}\n",
             frames.iter().map(|h| format!("\"{h:016x}\"")).collect::<Vec<_>>().join(", "),
-            if i + 1 < 4 { "," } else { "" }
+            if i + 1 < FUTURE_GOLDEN.len() { "," } else { "" }
         ));
     }
     json.push_str("  ]\n}\n");

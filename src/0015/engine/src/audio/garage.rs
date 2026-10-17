@@ -19,6 +19,14 @@ pub enum BassMode {
 pub const BASS_MODES: [BassMode; 2] = [BassMode::Drone, BassMode::Rhythmic];
 
 impl BassMode {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            BassMode::Drone => "the sustained bass the other modes use",
+            BassMode::Rhythmic => "a swung, syncopated bassline on roots, octaves and fifths",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             BassMode::Drone => "drone",
@@ -40,6 +48,15 @@ pub enum Stabs {
 pub const STABS: [Stabs; 3] = [Stabs::Off, Stabs::Sparse, Stabs::Busy];
 
 impl Stabs {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Stabs::Off => "no chord stabs",
+            Stabs::Sparse => "a stab or two a bar, on the pushes",
+            Stabs::Busy => "answering phrases, most bars",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Stabs::Off => "off",
@@ -61,6 +78,14 @@ pub enum StabTone {
 pub const STAB_TONES: [StabTone; 2] = [StabTone::Dark, StabTone::Bright];
 
 impl StabTone {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            StabTone::Dark => "a soft, round electric piano",
+            StabTone::Bright => "a glassy bell-organ",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             StabTone::Dark => "dark",
@@ -83,6 +108,15 @@ pub enum KeyLift {
 pub const KEY_LIFTS: [KeyLift; 3] = [KeyLift::Off, KeyLift::Every4, KeyLift::Every8];
 
 impl KeyLift {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            KeyLift::Off => "the progression stays in its key",
+            KeyLift::Every4 => "four loops at home, four a whole tone up",
+            KeyLift::Every8 => "eight loops at home, eight a whole tone up",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             KeyLift::Off => "off",

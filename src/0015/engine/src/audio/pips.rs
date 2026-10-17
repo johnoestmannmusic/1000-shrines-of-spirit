@@ -17,7 +17,7 @@ use crate::tempo::Tempo;
 const VOICES: usize = 8;
 const LEVEL: f64 = 0.16;
 const ECHO_MIX: f64 = 0.3;
-const ECHO_FEEDBACK: f64 = 0.3;
+const ECHO_FEEDBACK: f64 = 0.2;
 
 /// One pip in a bar.
 #[derive(Clone, Copy, Debug, PartialEq)]

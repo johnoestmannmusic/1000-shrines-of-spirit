@@ -12,9 +12,9 @@
 //         --crate-type cdylib shrine.rs -o shrine.wasm
 //
 // The shrine it draws and plays:
-//   seed 1003 · Near Future · Wind
-//   Ionian (major), 4 chord(s), 2-step garage, 132 BPM, root G#, kit Acoustic break
-//   drone arc 160s up 30s, tone 0
+//   seed 1000 · Moss · Clear
+//   Pentatonic minor, 2 chord(s), microsound, 120 BPM, root seed picks, kit Sub & clicks
+//   drone arc 0s up 0s, tone 0
 //
 // Contents: crate docs and constants, then engine modules (iso, grid, render,
 // audio/…, sim), then the baked recipe and the C ABI. Read top to bottom.
@@ -3431,6 +3431,19 @@ impl Biome {
             Biome::ResearchLab => "Research Lab",
             Biome::Ecofuture => "Ecofuture",
             Biome::Greenhouse => "Greenhouse",
+        }
+    }
+
+    /// A one-line sketch, for the setup screen and the Learn page.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Biome::Moss => "an old ruin softened by moss, ferns and grass",
+            Biome::Verdant => "a lush ruin, overgrown with leaves and flowers",
+            Biome::Fungal => "a damp ruin of mushrooms and glowing caps",
+            Biome::NearFuture => "a bright city block: roads, signs, a vending machine",
+            Biome::ResearchLab => "steel, glass and neon screens, under a ceiling",
+            Biome::Ecofuture => "parkland with white machines and solar tiles",
+            Biome::Greenhouse => "a glass atrium of plants on a steel frame",
         }
     }
 
@@ -12441,6 +12454,14 @@ pub enum BassMode {
 pub const BASS_MODES: [BassMode; 2] = [BassMode::Drone, BassMode::Rhythmic];
 
 impl BassMode {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            BassMode::Drone => "the sustained bass the other modes use",
+            BassMode::Rhythmic => "a swung, syncopated bassline on roots, octaves and fifths",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             BassMode::Drone => "drone",
@@ -12462,6 +12483,15 @@ pub enum Stabs {
 pub const STABS: [Stabs; 3] = [Stabs::Off, Stabs::Sparse, Stabs::Busy];
 
 impl Stabs {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Stabs::Off => "no chord stabs",
+            Stabs::Sparse => "a stab or two a bar, on the pushes",
+            Stabs::Busy => "answering phrases, most bars",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Stabs::Off => "off",
@@ -12483,6 +12513,14 @@ pub enum StabTone {
 pub const STAB_TONES: [StabTone; 2] = [StabTone::Dark, StabTone::Bright];
 
 impl StabTone {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            StabTone::Dark => "a soft, round electric piano",
+            StabTone::Bright => "a glassy bell-organ",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             StabTone::Dark => "dark",
@@ -12505,6 +12543,15 @@ pub enum KeyLift {
 pub const KEY_LIFTS: [KeyLift; 3] = [KeyLift::Off, KeyLift::Every4, KeyLift::Every8];
 
 impl KeyLift {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            KeyLift::Off => "the progression stays in its key",
+            KeyLift::Every4 => "four loops at home, four a whole tone up",
+            KeyLift::Every8 => "eight loops at home, eight a whole tone up",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             KeyLift::Off => "off",
@@ -12935,6 +12982,7 @@ impl GlitchSetup {
             ping_ratio: if harmony.garage { 3.0 } else { 0.0 },
             swing_push: harmony.swing_push,
             sixteenth: harmony.sixteenth,
+            len_scale: 1.0,
         }
     }
 
@@ -13101,6 +13149,126 @@ impl Cloud {
         self.write = (self.write + 1) % HISTORY;
         self.n += 1;
         (ol, or)
+    }
+}
+
+/// Microsound's fragment gate: a sustained sound (the drone, an atmosphere
+/// loop) heard only in short pieces, in a steady rhythm locked to the bar:
+/// on for a fixed number of sixteenths, off for a fixed number, the pattern
+/// always fitting a bar or two exactly so every fragment starts where the
+/// groove expects it. The seed picks the pattern from `patterns` and, for a
+/// pattern shorter than its turn, which beat it starts on. Opening takes
+/// 3 ms and closing 25 ms, so a fragment is cut cleanly rather than clicked.
+/// The gate is a pure function of the sample clock, so it never depends on
+/// how the audio is cut into blocks.
+pub struct Gate {
+    six: u64,
+    /// Sixteenths on, then off.
+    on: u64,
+    off: u64,
+    /// Where in its cycle the pattern starts, in sixteenths.
+    shift: u64,
+    env: f64,
+}
+
+const GATE_ATTACK: f64 = 1.0 / 144.0;
+const GATE_RELEASE: f64 = 1.0 / 1200.0;
+
+impl Gate {
+    /// `patterns`: (on, off) in sixteenths; each should add up to 16 or 32.
+    pub fn new(seed: u64, stream: u64, sixteenth: u64, patterns: &[(u64, u64)]) -> Self {
+        let mut rng = Rng::stream(seed, stream);
+        let (on, off) = rng.pick(patterns);
+        // Start on a beat of the cycle (layers that share a pattern then
+        // interlock instead of doubling each other).
+        let beats = ((on + off) / 4).max(1);
+        let shift = 4 * rng.below(beats as usize) as u64;
+        Gate { six: sixteenth.max(1), on: on.max(1), off, shift, env: 0.0 }
+    }
+
+    /// (on, off) in sixteenths, for display.
+    pub fn pattern(&self) -> (u64, u64) {
+        (self.on, self.off)
+    }
+
+    /// Which fragment `clock` falls in (counting from the first).
+    pub fn fragment(&self, clock: u64) -> u64 {
+        let period = (self.on + self.off) * self.six;
+        (clock + period - (self.shift * self.six) % period) / period
+    }
+
+    /// The gain at `clock` (call once per sample, in order).
+    pub fn next(&mut self, clock: u64) -> f64 {
+        let period = (self.on + self.off) * self.six;
+        let phase = (clock + period - (self.shift * self.six) % period) % period;
+        if phase < self.on * self.six {
+            self.env = (self.env + GATE_ATTACK).min(1.0);
+        } else {
+            self.env = (self.env - GATE_RELEASE).max(0.0);
+        }
+        // A smooth curve over the linear ramp.
+        self.env * self.env * (3.0 - 2.0 * self.env)
+    }
+}
+
+/// A plain delay-line pitch shifter: two read heads sweep through a 50 ms
+/// window at the shifted speed, each faded in and out so one is always
+/// smooth while the other jumps back. On a still, frozen drone it is clean;
+/// at no shift it passes the sound through untouched.
+pub struct Shifter {
+    buf: [Vec<f64>; 2],
+    write: usize,
+    phase: f64,
+    ratio: f64,
+}
+
+const SHIFT_BUF: usize = 4096;
+const SHIFT_WINDOW: f64 = 2400.0;
+
+impl Shifter {
+    pub fn new() -> Self {
+        Shifter { buf: [vec![0.0; SHIFT_BUF], vec![0.0; SHIFT_BUF]], write: 0, phase: 0.0, ratio: 1.0 }
+    }
+
+    /// Transpose by `semis` from now on.
+    pub fn set(&mut self, semis: f64) {
+        self.ratio = crate::math::exp2(semis / 12.0);
+    }
+
+    fn tap(&self, ch: usize, delay: f64) -> f64 {
+        let at = self.write as f64 + SHIFT_BUF as f64 - delay;
+        let i = at.floor();
+        let f = at - i;
+        let i = i as usize % SHIFT_BUF;
+        let b = &self.buf[ch];
+        b[i] + (b[(i + 1) % SHIFT_BUF] - b[i]) * f
+    }
+
+    pub fn process(&mut self, l: f64, r: f64) -> (f64, f64) {
+        self.buf[0][self.write] = l;
+        self.buf[1][self.write] = r;
+        let out = if self.ratio == 1.0 {
+            (l, r)
+        } else {
+            let p1 = self.phase;
+            let p2 = (p1 + 0.5) % 1.0;
+            let (d1, d2) = (1.0 + p1 * SHIFT_WINDOW, 1.0 + p2 * SHIFT_WINDOW);
+            // sin² windows half a cycle apart always sum to one.
+            let g1 = sin_turns(0.5 * p1);
+            let g2 = sin_turns(0.5 * p2);
+            let (g1, g2) = (g1 * g1, g2 * g2);
+            (self.tap(0, d1) * g1 + self.tap(0, d2) * g2, self.tap(1, d1) * g1 + self.tap(1, d2) * g2)
+        };
+        // A higher pitch reads faster than it writes, so the delay shrinks.
+        self.phase = (self.phase + (1.0 - self.ratio) / SHIFT_WINDOW).rem_euclid(1.0);
+        self.write = (self.write + 1) % SHIFT_BUF;
+        out
+    }
+}
+
+impl Default for Shifter {
+    fn default() -> Self {
+        Shifter::new()
     }
 }
 
@@ -13271,6 +13439,16 @@ impl Pace {
             Pace::Jungle => "jungle",
             Pace::Garage => "2-step garage",
             Pace::Micro => "microsound",
+        }
+    }
+
+    /// A one-line sketch, for the setup screen and the Learn page.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Pace::HalfTime => "slow chords and a half-speed break: drifting, spacious",
+            Pace::Jungle => "the chopped break at full speed under the slow bed",
+            Pace::Garage => "swung 2-step drums, a bassline and chord stabs: bright, melodic",
+            Pace::Micro => "clicks, grains and sine pips on a faint, exact pulse",
         }
     }
 
@@ -13575,6 +13753,18 @@ impl Harmony {
     }
 
     /// The progression at sample `t`. The last bar of each chord morphs into the next.
+    /// The same chords, each held for exactly `step` samples in turn (rather
+    /// than weighted over the slow cycle), crossfading over the last `morph`
+    /// samples of each: microsound's regular chord changes.
+    pub fn stepped(mut self, step: u64, morph: u64) -> Harmony {
+        let step = step.max(1);
+        self.sequence = (0..self.chords.len()).collect();
+        self.bar_samples = step;
+        self.morph_len = morph.clamp(1, step);
+        self.cycle = step * self.chords.len() as u64;
+        self
+    }
+
     pub fn at(&self, t: u64) -> Position {
         if !self.sequence.is_empty() {
             let step = (t / self.bar_samples) as usize % self.sequence.len();
@@ -14984,7 +15174,9 @@ pub mod micro {
 //! short sine pips, and silence, placed exactly. This mode keeps a faint
 //! pulse under them (the "clicks and cuts" way): a sub-sine kick on the beat,
 //! a sub pulse on the off-beats, ticks and grains on the sixteenths, digital
-//! dropouts as edits, the bed scattered into a grain cloud. The settings only
+//! dropouts as edits, the bed scattered into a grain cloud, and the drone in
+//! short fragments that keep time with the bar, its chords changing (and its
+//! fragments transposing) on a regular count. The settings only
 //! matter in microsound; the other modes ignore them, so their sound never
 //! moves.
 
@@ -15002,6 +15194,15 @@ pub enum Pulse {
 pub const PULSES: [Pulse; 3] = [Pulse::Off, Pulse::Sub, Pulse::SubClick];
 
 impl Pulse {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Pulse::Off => "no beat: only the ticks, grains and pips",
+            Pulse::Sub => "a sub-sine kick on each beat, a sub pulse between",
+            Pulse::SubClick => "the same, with a click on each kick",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Pulse::Off => "off",
@@ -15022,6 +15223,15 @@ pub enum Grains {
 pub const GRAINS: [Grains; 3] = [Grains::Sparse, Grains::Medium, Grains::Dense];
 
 impl Grains {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Grains::Sparse => "a few ticks and grains; the bed mostly itself",
+            Grains::Medium => "ticks on most sixteenths; half the bed a grain cloud",
+            Grains::Dense => "ticks everywhere; the bed almost all grains",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Grains::Sparse => "sparse",
@@ -15051,6 +15261,15 @@ pub enum Pips {
 pub const PIPS: [Pips; 3] = [Pips::Off, Pips::Sparse, Pips::Busy];
 
 impl Pips {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Pips::Off => "no sine pips",
+            Pips::Sparse => "a few high sine pips a bar",
+            Pips::Busy => "a scatter of pips, some in pairs",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Pips::Off => "off",
@@ -15072,6 +15291,15 @@ pub enum Dropouts {
 pub const DROPOUTS: [Dropouts; 3] = [Dropouts::Off, Dropouts::Some, Dropouts::Many];
 
 impl Dropouts {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Dropouts::Off => "the pulse never fails",
+            Dropouts::Some => "now and then a step drops, skips or ratchets",
+            Dropouts::Many => "the pulse keeps failing, like a skipping disc",
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Dropouts::Off => "off",
@@ -15090,31 +15318,132 @@ impl Dropouts {
     }
 }
 
+/// How often the chords change (all of them: the drone, the pips, the sub
+/// pulse and the loops follow).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChordRate {
+    /// The slow, weighted cycle the ambient modes use.
+    Slow,
+    Every4,
+    Every2,
+    EveryBar,
+}
+
+pub const CHORD_RATES: [ChordRate; 4] = [ChordRate::Slow, ChordRate::Every4, ChordRate::Every2, ChordRate::EveryBar];
+
+impl ChordRate {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            ChordRate::Slow => "the slow, weighted cycle of the ambient modes",
+            ChordRate::Every4 => "a new chord every four bars",
+            ChordRate::Every2 => "a new chord every two bars",
+            ChordRate::EveryBar => "a new chord every bar",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            ChordRate::Slow => "slow",
+            ChordRate::Every4 => "every 4 bars",
+            ChordRate::Every2 => "every 2 bars",
+            ChordRate::EveryBar => "every bar",
+        }
+    }
+
+    /// Drum bars per chord (0 = the slow cycle).
+    pub fn bars(self) -> u64 {
+        match self {
+            ChordRate::Slow => 0,
+            ChordRate::Every4 => 4,
+            ChordRate::Every2 => 2,
+            ChordRate::EveryBar => 1,
+        }
+    }
+}
+
+/// How the drone's fragments are transposed: a repeating figure of four,
+/// one transposition per fragment, so the movement keeps the groove.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DroneShift {
+    Off,
+    /// Up or down an octave.
+    Octaves,
+    /// Fifths and fourths (and the octave).
+    Fifths,
+    /// Steps of the scale.
+    Scale,
+}
+
+pub const DRONE_SHIFTS: [DroneShift; 4] = [DroneShift::Off, DroneShift::Octaves, DroneShift::Fifths, DroneShift::Scale];
+
+impl DroneShift {
+    /// A one-line sketch, for the setup screen.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            DroneShift::Off => "every drone fragment at home pitch",
+            DroneShift::Octaves => "fragments jump an octave up or down",
+            DroneShift::Fifths => "fragments move by fifths, fourths and octaves",
+            DroneShift::Scale => "fragments step through the scale",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            DroneShift::Off => "off",
+            DroneShift::Octaves => "octaves",
+            DroneShift::Fifths => "fifths",
+            DroneShift::Scale => "scale steps",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MicroSetup {
     pub pulse: Pulse,
     pub grains: Grains,
     pub pips: Pips,
     pub dropouts: Dropouts,
+    pub chords: ChordRate,
+    pub shift: DroneShift,
 }
 
 impl MicroSetup {
     pub const DEFAULT: MicroSetup =
-        MicroSetup { pulse: Pulse::SubClick, grains: Grains::Medium, pips: Pips::Sparse, dropouts: Dropouts::Some };
+        MicroSetup {
+            pulse: Pulse::SubClick,
+            grains: Grains::Medium,
+            pips: Pips::Sparse,
+            dropouts: Dropouts::Some,
+            chords: ChordRate::Every2,
+            shift: DroneShift::Fifths,
+        };
 
     /// One recipe word: two bits each.
     pub fn word(self) -> u32 {
         fn idx<T: PartialEq>(all: &[T], v: T) -> u32 {
             all.iter().position(|x| *x == v).unwrap_or(0) as u32
         }
-        idx(&PULSES, self.pulse) | idx(&GRAINS, self.grains) << 2 | idx(&PIPS, self.pips) << 4 | idx(&DROPOUTS, self.dropouts) << 6
+        idx(&PULSES, self.pulse)
+            | idx(&GRAINS, self.grains) << 2
+            | idx(&PIPS, self.pips) << 4
+            | idx(&DROPOUTS, self.dropouts) << 6
+            | idx(&CHORD_RATES, self.chords) << 8
+            | idx(&DRONE_SHIFTS, self.shift) << 10
     }
 
     pub fn from_word(w: u32) -> Self {
         fn at<T: Copy>(all: &[T], i: u32) -> T {
             all[(i & 3) as usize % all.len()]
         }
-        MicroSetup { pulse: at(&PULSES, w), grains: at(&GRAINS, w >> 2), pips: at(&PIPS, w >> 4), dropouts: at(&DROPOUTS, w >> 6) }
+        MicroSetup {
+            pulse: at(&PULSES, w),
+            grains: at(&GRAINS, w >> 2),
+            pips: at(&PIPS, w >> 4),
+            dropouts: at(&DROPOUTS, w >> 6),
+            chords: at(&CHORD_RATES, w >> 8),
+            shift: at(&DRONE_SHIFTS, w >> 10),
+        }
     }
 }
 
@@ -15263,6 +15592,9 @@ pub struct LayerConfig {
     /// its off-beat strikes late by `swing_push` (0 = straight).
     pub swing_push: u64,
     pub sixteenth: u64,
+    /// How long the ringing kinds (pings, blips, stutters) last, as a share
+    /// of their usual length: 1 normally, much less in microsound.
+    pub len_scale: f64,
 }
 
 const MAX_VOICES: usize = 8;
@@ -15337,6 +15669,11 @@ impl Layer {
             Kind::Ping => (ms(rng, 300.0, 1600.0), cfg.ping_ratio, 0.8),
             Kind::Click => (ms(rng, 3.0, 30.0), 0.0, 0.5),
             Kind::Crush => (ms(rng, 15.0, 80.0), rng.int(2, 40) as f64, 0.6),
+        };
+        // (Scaled after the draws, so the pattern is the same one, only shorter.)
+        let len = match kind {
+            Kind::Ping | Kind::Blip | Kind::Stutter if cfg.len_scale < 1.0 => (len as f64 * cfg.len_scale) as u32,
+            _ => len,
         };
         let freq = match kind {
             Kind::Click => rng.range(300.0, 3000.0),
@@ -15481,7 +15818,7 @@ use crate::tempo::Tempo;
 const VOICES: usize = 8;
 const LEVEL: f64 = 0.16;
 const ECHO_MIX: f64 = 0.3;
-const ECHO_FEEDBACK: f64 = 0.3;
+const ECHO_FEEDBACK: f64 = 0.2;
 
 /// One pip in a bar.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -15736,6 +16073,12 @@ pub struct Reverb {
 
 impl Reverb {
     pub fn new() -> Self {
+        Reverb::with_decay(DECAY_SECONDS)
+    }
+
+    /// The same network with a different decay (seconds to fall 60 dB):
+    /// microsound's small, close room.
+    pub fn with_decay(decay_s: f64) -> Self {
         let sr = crate::SAMPLE_RATE as f64;
         Reverb {
             lines: LINES
@@ -15743,7 +16086,7 @@ impl Reverb {
                 .map(|&len| Line {
                     buf: vec![0.0; len],
                     pos: 0,
-                    gain: decay_gain(len as f64, DECAY_SECONDS, sr),
+                    gain: decay_gain(len as f64, decay_s, sr),
                     damp: OnePole::new(DAMP_HZ, sr),
                 })
                 .collect(),
@@ -17200,6 +17543,23 @@ pub struct Settings {
     pub micro: crate::micro::MicroSetup,
 }
 
+/// Microsound's drone-shift figure: four transpositions (semitones), the
+/// first always home, the rest drawn from the chosen set by seed 1.
+fn shift_figure(seed: u64, shift: crate::micro::DroneShift, scale: Scale) -> [f64; 4] {
+    use crate::micro::DroneShift;
+    let set: Vec<f64> = match shift {
+        DroneShift::Off => vec![0.0],
+        DroneShift::Octaves => vec![12.0, -12.0, 0.0],
+        DroneShift::Fifths => vec![7.0, -5.0, 12.0, 5.0],
+        DroneShift::Scale => {
+            let iv = scale.intervals();
+            iv.iter().skip(1).flat_map(|i| [*i as f64, *i as f64 - 12.0]).collect()
+        }
+    };
+    let mut rng = Rng::stream(seed, 0x5F17);
+    [0.0, rng.pick(&set), rng.pick(&set), rng.pick(&set)]
+}
+
 impl Settings {
     /// What suits each mode, when nothing was chosen by hand: (tempo,
     /// scale, chord count). Garage lives around 130 BPM in a plain major
@@ -17262,7 +17622,7 @@ pub const DEFAULT_SETTINGS: Settings =
         arch: crate::arch::ArchTransform::IDENTITY,
         glitch: crate::glitch_setup::GlitchSetup::DEFAULT,
         model: crate::shrine_model::ShrineModel::EMPTY,
-        camera_speed: 0,
+        camera_speed: -2,
         drone_rhythm: false,
         loop_rhythm: false,
         wildlife: false,
@@ -17299,6 +17659,18 @@ const PIP_SEND: f64 = 0.25;
 /// How much of the loops stays as it is, sparse .. dense grains, and the cloud's level.
 const MICRO_BED_DRY: [f64; 2] = [0.8, 0.35];
 const CLOUD_LEVEL: f64 = 0.9;
+/// Microsound keeps everything short: the reverb is a small room, the glitch
+/// echo barely repeats, the ringing glitches last a quarter as long, and the
+/// drone and loops sound only in fragments, in a steady rhythm: (on, off)
+/// in sixteenths, each pattern exactly one or two bars long.
+const MICRO_DECAY_S: f64 = 1.2;
+const MICRO_ECHO_FEEDBACK: f64 = 0.25;
+const MICRO_GLITCH_LEN: f64 = 0.25;
+/// The drone: two beats on and two off, one on three off, three on one off,
+/// a bar on and a bar off, two beats in two bars, one beat on and off.
+const DRONE_FRAGMENTS: [(u64, u64); 6] = [(8, 8), (4, 12), (12, 4), (16, 16), (8, 24), (4, 4)];
+/// The loops: shorter, eighth notes to a dotted quarter.
+const LOOP_FRAGMENTS: [(u64, u64); 6] = [(2, 2), (2, 6), (4, 4), (4, 12), (6, 10), (2, 14)];
 const ECHO_SIXTEENTHS: u64 = 3;
 /// The drums' tape echo delay, in drum sixteenths.
 const TAPE_SIXTEENTHS: u64 = 3;
@@ -17473,6 +17845,13 @@ pub struct Track {
     pub(crate) pips: Option<crate::pips::Pips>,
     pub(crate) sub_pulse: Option<crate::bass::SubPulse>,
     pub(crate) cloud: Option<crate::grains::Cloud>,
+    /// Microsound's fragment gates on the drone and each atmosphere loop.
+    pub(crate) drone_gate: Option<crate::grains::Gate>,
+    pub(crate) loop_gates: Option<[crate::grains::Gate; 4]>,
+    /// Microsound: the drone's fragments transposed by a repeating figure of
+    /// four (semitones), and the fragment last heard.
+    pub(crate) drone_shift: Option<(crate::grains::Shifter, [f64; 4])>,
+    pub(crate) drone_fragment: u64,
     /// 2-step garage: how far the drone (and the pitched glitches) step back
     /// under a chord that rubs against the drone's open fifth.
     pub(crate) pedal_gain: f64,
@@ -17503,7 +17882,7 @@ impl Track {
         let harmony = Harmony::new(settings.scale, if garage { 1 } else { chords }, settings.pace, tempo.beat(), key, &mut first, &mut rest);
         // 2-step garage: the drone holds the tonic (the harmony just built,
         // one chord), while everything else follows the genre progression.
-        let (mut harmony, drone_harmony) = if garage {
+        let (mut harmony, mut drone_harmony) = if garage {
             let mut g = Rng::stream(seeds.s1, 0x6A4A_6E);
             let gs = settings.garage;
             (
@@ -17513,6 +17892,15 @@ impl Track {
         } else {
             (harmony.clone(), harmony)
         };
+        // Microsound: the chords can change on a regular count of bars,
+        // crossing over in a beat.
+        let micro = settings.pace == Pace::Micro;
+        let rate = settings.micro.chords.bars();
+        if micro && rate > 0 {
+            let (step, morph) = (rate * tempo.drum_bar(), 4 * tempo.drum16);
+            harmony = harmony.stepped(step, morph);
+            drone_harmony = drone_harmony.stepped(step, morph);
+        }
         if garage {
             // The loops and glitches swing with the drums.
             harmony.swing_push = ((2.0 * settings.garage.swing_fraction() - 1.0) * tempo.drum16 as f64) as u64;
@@ -17527,13 +17915,20 @@ impl Track {
             let beats = crate::atmos::loop_beats(tempo.beat(), LOOP_SECONDS[i], (i > 0).then_some(avoid));
             avoid = avoid.wrapping_mul(beats);
         }
-        let micro = settings.pace == Pace::Micro;
         let mut drums = match settings.pace {
             Pace::Garage => Drums::garage(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.garage.swing_fraction()),
             Pace::Micro => Drums::micro(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.micro),
             Pace::HalfTime | Pace::Jungle => Drums::new(seeds.s5, settings.kit, settings.space, &harmony, tempo),
         };
         drums.set_reverse(settings.drum_reverse);
+        let glitch_config = |i: usize| {
+            let mut c = settings.glitch[i].layer_config(i, &harmony, tempo);
+            if micro {
+                c.len_scale = MICRO_GLITCH_LEN;
+            }
+            c
+        };
+        let gate = |stream: u64, patterns: &[(u64, u64)]| crate::grains::Gate::new(seeds.s6, stream, tempo.drum16, patterns);
         Track {
             seeds,
             tempo,
@@ -17551,8 +17946,8 @@ impl Track {
             drums,
             clock: 0,
             mods: Mods::new(seeds.s1),
-            glitch1: Layer::new(settings.glitch[0].layer_config(0, &harmony, tempo), seeds.s2, 0x61),
-            glitch2: Layer::new(settings.glitch[1].layer_config(1, &harmony, tempo), seeds.s3, 0x62),
+            glitch1: Layer::new(glitch_config(0), seeds.s2, 0x61),
+            glitch2: Layer::new(glitch_config(1), seeds.s3, 0x62),
             loops: std::array::from_fn(|i| {
                 AtmosLoop::new(
                     settings.loops[i],
@@ -17572,7 +17967,7 @@ impl Track {
             drone_tone_filter: [Svf::new(8_000.0, 0.7, sr), Svf::new(8_000.0, 0.7, sr)],
             drone_window: 1.0,
             history: History::new(),
-            echo: PingPong::new(echo_delay, ECHO_FEEDBACK),
+            echo: PingPong::new(echo_delay, if micro { MICRO_ECHO_FEEDBACK } else { ECHO_FEEDBACK }),
             bass: Bass::new(seeds.s4),
             bassline: (settings.pace == Pace::Garage && settings.garage.bass == crate::garage::BassMode::Rhythmic)
                 .then(|| crate::bass::BassLine::new(seeds.s4, tempo, settings.garage.swing_fraction())),
@@ -17585,7 +17980,12 @@ impl Track {
                 .then(|| crate::pips::Pips::new(seeds.s6, settings.micro.pips, tempo)),
             sub_pulse: (micro && settings.micro.pulse != crate::micro::Pulse::Off).then(|| crate::bass::SubPulse::new(seeds.s4, tempo)),
             cloud: micro.then(|| crate::grains::Cloud::new(seeds.s6, settings.micro.grains.amount())),
-            reverb: Reverb::new(),
+            drone_gate: micro.then(|| gate(0x6A7E_D0, &DRONE_FRAGMENTS)),
+            loop_gates: micro.then(|| std::array::from_fn(|k| gate(0x6A7E_A1 + k as u64, &LOOP_FRAGMENTS))),
+            drone_shift: (micro && settings.micro.shift != crate::micro::DroneShift::Off)
+                .then(|| (crate::grains::Shifter::new(), shift_figure(seeds.s1, settings.micro.shift, settings.scale))),
+            drone_fragment: u64::MAX,
+            reverb: if micro { Reverb::with_decay(MICRO_DECAY_S) } else { Reverb::new() },
             dc: Default::default(),
             meters: Meters::default(),
             drone_cutoff: 0.0,
@@ -17700,6 +18100,7 @@ impl Track {
         // 2-step garage leans on the atmosphere loops: the drone steps back,
         // and further still under a chord that rubs against its open fifth
         // (a borrowed chord, or the key lift).
+        let mut drone_bed = (0.0, 0.0);
         let (dl, dr) = if self.settings.pace == Pace::Garage {
             if clock % 32 == 0 {
                 let p = self.harmony.at(clock);
@@ -17708,8 +18109,25 @@ impl Track {
             self.pedal_gain += (self.pedal_target - self.pedal_gain) * 0.0004;
             let g = GARAGE_DRONE * self.pedal_gain;
             (dl * g, dr * g)
-        } else if self.settings.pace == Pace::Micro {
-            (dl * MICRO_DRONE, dr * MICRO_DRONE)
+        } else if let Some(gate) = self.drone_gate.as_mut() {
+            // Microsound: the drone heard only in fragments. The whole of it
+            // still feeds the grain cloud below.
+            drone_bed = (dl * MICRO_DRONE, dr * MICRO_DRONE);
+            // Each fragment takes the next transposition of the figure, set
+            // as it opens.
+            let (sl, sr_) = match self.drone_shift.as_mut() {
+                Some((shifter, figure)) => {
+                    let f = gate.fragment(clock);
+                    if f != self.drone_fragment {
+                        self.drone_fragment = f;
+                        shifter.set(figure[(f % 4) as usize]);
+                    }
+                    shifter.process(drone_bed.0, drone_bed.1)
+                }
+                None => drone_bed,
+            };
+            let g = gate.next(clock);
+            (sl * g, sr_ * g)
         } else {
             (dl, dr)
         };
@@ -17760,12 +18178,15 @@ impl Track {
         // the loops themselves step back to make room for their cloud.
         let cloud = match self.cloud.as_mut() {
             Some(c) => {
-                let bed = (0..4).fold((dl * 0.5, dr * 0.5), |(x, y), k| (x + a[k].0 * LOOP_DRY[k], y + a[k].1 * LOOP_DRY[k]));
+                let bed = (0..4).fold((drone_bed.0 * 0.5, drone_bed.1 * 0.5), |(x, y), k| (x + a[k].0 * LOOP_DRY[k], y + a[k].1 * LOOP_DRY[k]));
                 let (cl, cr) = c.process(bed.0, bed.1);
                 let g = self.settings.micro.grains.amount();
                 let keep = MICRO_BED_DRY[0] + (MICRO_BED_DRY[1] - MICRO_BED_DRY[0]) * g;
-                for x in a.iter_mut() {
-                    *x = (x.0 * keep, x.1 * keep);
+                // Each loop itself is heard only in fragments of its own.
+                let gates = self.loop_gates.as_mut().expect("microsound has loop gates");
+                for (k, x) in a.iter_mut().enumerate() {
+                    let gk = keep * gates[k].next(clock);
+                    *x = (x.0 * gk, x.1 * gk);
                 }
                 Some((cl * CLOUD_LEVEL, cr * CLOUD_LEVEL))
             }
@@ -18298,7 +18719,7 @@ pub use self::track::*;
 // Baked recipe — this artifact is this shrine
 // ============================================================================
 /// `recipe::encode` of the settings the setup menu produced.
-const RECIPE: [u32; 168] = [18, 0, 1003, 0, 172, 0, 47, 0, 1009, 0, 2026, 0, 168, 0, 11, 0, 7, 3, 2, 1, 4, 2, 5, 2, 132, 9, 12, 160, 30, 0, 1, 12, 0, 0, 0, 40, 10, 1, 13, 0, 0, 0, 120, 30, 1, 7, 0, 0, 0, 80, 25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3358395905, 51370, 188928180, 133152, 5546119, 67368, 5016745, 49764, 178, 0, 612666, 0, 86, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 875638832, 1126182176, 544830569, 7238994, 0, 0, 0, 0];
+const RECIPE: [u32; 168] = [18, 0, 1000, 0, 1000, 0, 9, 0, 1009, 0, 2026, 0, 168, 0, 11, 0, 7, 0, 0, 10, 2, 3, 0, 1, 120, 0, 12, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 3358395905, 51380, 188928180, 133152, 13376511, 66404, 9721599, 49764, 180, 0, 5434, 0, 2578, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 /// Build date as `YYYYMMDD`, stamped when this file was emitted.
 const BUILD: u32 = 20261018;
@@ -18307,19 +18728,19 @@ const BUILD: u32 = 20261018;
 const CODE_OVERLAY: u32 = 3358395905;
 
 /// The overlay's tilt: positive leans the drift to the left.
-const CODE_ANGLE: i32 = -10;
+const CODE_ANGLE: i32 = 0;
 
 /// The overlay's vertical shift, percent of the canvas height.
 const CODE_OFFSET: i32 = 0;
 
 /// Camera rotation speed, degrees per second.
-const CAMERA_SPEED: i32 = -2;
+const CAMERA_SPEED: i32 = 0;
 
 /// The track name, shown at the head of the page and used as the WAV title.
-const NAME: &str = "0014 - City Run";
+const NAME: &str = "";
 
 /// Everything needed to recreate this shrine.
-const INFO: &str = "ShrineGen  v20261018\n\nseed       1003\nbiome      Near Future\nweather    Wind\nwildlife   off\n\nscale      Ionian (major)\nroot note  G#\nchords     4\nmode       2-step garage · Daydream · key lift every 8 loops\ntempo      132 BPM\nstart      at the beginning\nkit        Acoustic break\nspace      Wide + tape echo\ndrum rev   off\nmaster fx  off\ncode over  on · 14% · speed 45 · text 200% · -10°\narch       centred, upright\ncamera     -2°/s\nglitch 1   2 kinds · 65% · ×4 · 11 steps\nglitch 2   2 kinds · 25% · ×4 · 7 steps\ntranspose  0 semitones\n\ndrone arc  160s cycle, 30s up\ndrone tone off\nlayer 1    Tide\n  arc 1    40s cycle, 10s up\nlayer 2    Ember\n  arc 2    120s cycle, 30s up\nlayer 3    Shine\n  arc 3    80s cycle, 25s up\nlayer 4    Off\n  arc 4    always on\n\nseeds      172 47 1009 2026 168 11 7\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone off · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
+const INFO: &str = "ShrineGen  v20261018\n\nseed       1000\nbiome      Moss\nweather    Clear\nwildlife   off\n\nscale      Pentatonic minor\nroot note  seed picks\nchords     2\nmode       microsound · pulse sub + click · grains sparse · pips sparse · dropouts off · chords every 2 bars · drone shift fifths\ntempo      120 BPM\nstart      at the beginning\nkit        Sub & clicks\nspace      Wide\ndrum rev   on\nmaster fx  off\ncode over  on · 14% · speed 45 · text 200%\narch       centred, upright\ncamera     still\nglitch 1   6 kinds · 55% · ×1 · 7 steps\nglitch 2   6 kinds · 45% · ×2 · 11 steps\ntranspose  0 semitones\n\ndrone arc  always on\ndrone tone off\nlayer 1    Voices\n  arc 1    always on\nlayer 2    Bells\n  arc 2    always on\nlayer 3    Off\n  arc 3    always on\nlayer 4    Off\n  arc 4    always on\n\nseeds      1000 9 1009 2026 168 11 7\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone off · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
 
 // ============================================================================
 // C ABI — plain extern "C", loadable with the standard WebAssembly API

@@ -64,6 +64,8 @@ fn custom() -> SimConfig {
                 grains: shrine0015::micro::Grains::Dense,
                 pips: shrine0015::micro::Pips::Busy,
                 dropouts: shrine0015::micro::Dropouts::Many,
+                chords: shrine0015::micro::ChordRate::EveryBar,
+                shift: shrine0015::micro::DroneShift::Scale,
             },
             drone_rhythm: true,
             loop_rhythm: true,

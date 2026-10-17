@@ -28,6 +28,9 @@ pub struct LayerConfig {
     /// its off-beat strikes late by `swing_push` (0 = straight).
     pub swing_push: u64,
     pub sixteenth: u64,
+    /// How long the ringing kinds (pings, blips, stutters) last, as a share
+    /// of their usual length: 1 normally, much less in microsound.
+    pub len_scale: f64,
 }
 
 const MAX_VOICES: usize = 8;
@@ -102,6 +105,11 @@ impl Layer {
             Kind::Ping => (ms(rng, 300.0, 1600.0), cfg.ping_ratio, 0.8),
             Kind::Click => (ms(rng, 3.0, 30.0), 0.0, 0.5),
             Kind::Crush => (ms(rng, 15.0, 80.0), rng.int(2, 40) as f64, 0.6),
+        };
+        // (Scaled after the draws, so the pattern is the same one, only shorter.)
+        let len = match kind {
+            Kind::Ping | Kind::Blip | Kind::Stutter if cfg.len_scale < 1.0 => (len as f64 * cfg.len_scale) as u32,
+            _ => len,
         };
         let freq = match kind {
             Kind::Click => rng.range(300.0, 3000.0),

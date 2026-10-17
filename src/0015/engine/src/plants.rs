@@ -80,6 +80,19 @@ impl Biome {
         }
     }
 
+    /// A one-line sketch, for the setup screen and the Learn page.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Biome::Moss => "an old ruin softened by moss, ferns and grass",
+            Biome::Verdant => "a lush ruin, overgrown with leaves and flowers",
+            Biome::Fungal => "a damp ruin of mushrooms and glowing caps",
+            Biome::NearFuture => "a bright city block: roads, signs, a vending machine",
+            Biome::ResearchLab => "steel, glass and neon screens, under a ceiling",
+            Biome::Ecofuture => "parkland with white machines and solar tiles",
+            Biome::Greenhouse => "a glass atrium of plants on a steel frame",
+        }
+    }
+
     /// The biome called `name`, ignoring case, spaces, `-` and `_`
     /// ("near-future", "NearFuture" and "Near Future" all match).
     pub fn from_name(name: &str) -> Option<Biome> {

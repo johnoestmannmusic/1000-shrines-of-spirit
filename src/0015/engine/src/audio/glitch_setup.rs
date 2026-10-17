@@ -138,6 +138,7 @@ impl GlitchSetup {
             ping_ratio: if harmony.garage { 3.0 } else { 0.0 },
             swing_push: harmony.swing_push,
             sixteenth: harmony.sixteenth,
+            len_scale: 1.0,
         }
     }
 

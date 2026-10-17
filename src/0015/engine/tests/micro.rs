@@ -5,7 +5,7 @@
 use shrine0015::drums::{Drums, Voice};
 use shrine0015::harmony::{Harmony, Pace, Scale};
 use shrine0015::kits::{DrumSpace, Kit};
-use shrine0015::micro::{Dropouts, Grains, MicroSetup, Pips, Pulse};
+use shrine0015::micro::{ChordRate, DroneShift, Dropouts, Grains, MicroSetup, Pips, Pulse};
 use shrine0015::rng::Rng;
 use shrine0015::tempo::Tempo;
 use shrine0015::{Settings, Track, DEFAULT_SEEDS, DEFAULT_SETTINGS, SAMPLE_RATE};
@@ -70,6 +70,8 @@ fn every_microsound_setting_is_heard() {
         ("grains", MicroSetup { grains: Grains::Dense, ..MicroSetup::DEFAULT }),
         ("pips", MicroSetup { pips: Pips::Busy, ..MicroSetup::DEFAULT }),
         ("dropouts", MicroSetup { dropouts: Dropouts::Many, ..MicroSetup::DEFAULT }),
+        ("chord rate", MicroSetup { chords: ChordRate::EveryBar, ..MicroSetup::DEFAULT }),
+        ("drone shift", MicroSetup { shift: DroneShift::Off, ..MicroSetup::DEFAULT }),
     ];
     for (name, m) in changes {
         let s = Settings { micro: m, ..micro() };
@@ -79,13 +81,59 @@ fn every_microsound_setting_is_heard() {
 
 #[test]
 fn the_other_modes_never_hear_the_microsound_settings() {
-    let other = MicroSetup { pulse: Pulse::Off, grains: Grains::Dense, pips: Pips::Busy, dropouts: Dropouts::Many };
+    let other = MicroSetup {
+        pulse: Pulse::Off,
+        grains: Grains::Dense,
+        pips: Pips::Busy,
+        dropouts: Dropouts::Many,
+        chords: ChordRate::EveryBar,
+        shift: DroneShift::Scale,
+    };
     for pace in [Pace::HalfTime, Pace::Jungle, Pace::Garage] {
         let mut s = DEFAULT_SETTINGS;
         s.set_mode(pace);
         assert_eq!(render(s, 6, 4096), render(Settings { micro: other, ..s }, 6, 4096), "{pace:?} heard the microsound settings");
     }
     assert_ne!(render(micro(), 6, 4096), render(DEFAULT_SETTINGS, 6, 4096), "microsound sounds like half-time");
+}
+
+#[test]
+fn the_chords_change_on_the_bar_count_asked() {
+    let tempo = Tempo::new(120);
+    for (rate, bars) in [(ChordRate::Every4, 4), (ChordRate::Every2, 2), (ChordRate::EveryBar, 1)] {
+        let step = bars * tempo.drum_bar();
+        let h = harmony(tempo).stepped(step, 4 * tempo.drum16);
+        for k in 0..8u64 {
+            // Each chord holds for exactly its step, then the next takes over.
+            assert_eq!(h.at(k * step).chord, (k as usize) % 2, "{rate:?}: step {k}");
+            assert_eq!(h.at(k * step + step - 1).chord, (k as usize) % 2, "{rate:?}: end of step {k}");
+        }
+    }
+}
+
+#[test]
+fn the_drone_fragments_keep_time_with_the_bar() {
+    use shrine0015::grains::Gate;
+    let six = Tempo::new(120).drum16;
+    for seed in 0..32u64 {
+        let mut g = Gate::new(seed, 0xD0, six, &[(8, 8), (4, 12), (12, 4), (16, 16), (8, 24), (4, 4)]);
+        let (on, off) = g.pattern();
+        assert!(matches!(on + off, 8 | 16 | 32), "seed {seed}: a pattern that does not fit the bar");
+        // Opens only ever on a beat, and the same length every time.
+        let mut opens = Vec::new();
+        let mut was = 0.0;
+        for clock in 0..(64 * six) {
+            let v = g.next(clock);
+            // (A piece may begin part-way through a fragment: that is not an opening.)
+            if was == 0.0 && v > 0.0 && clock > 0 {
+                opens.push(clock);
+            }
+            was = v;
+        }
+        assert!(opens.len() >= 2, "seed {seed}: never opened");
+        assert!(opens.iter().all(|c| c % (4 * six) == 0), "seed {seed}: opened off the beat");
+        assert!(opens.windows(2).all(|w| w[1] - w[0] == (on + off) * six), "seed {seed}: an uneven rhythm");
+    }
 }
 
 #[test]

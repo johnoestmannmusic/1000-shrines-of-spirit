@@ -165,6 +165,16 @@ impl Pace {
         }
     }
 
+    /// A one-line sketch, for the setup screen and the Learn page.
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Pace::HalfTime => "slow chords and a half-speed break: drifting, spacious",
+            Pace::Jungle => "the chopped break at full speed under the slow bed",
+            Pace::Garage => "swung 2-step drums, a bassline and chord stabs: bright, melodic",
+            Pace::Micro => "clicks, grains and sine pips on a faint, exact pulse",
+        }
+    }
+
     /// The mode called `name` (case and spacing ignored; "garage" is enough).
     pub fn from_name(name: &str) -> Option<Pace> {
         let key = |s: &str| s.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect::<String>();
@@ -466,6 +476,18 @@ impl Harmony {
     }
 
     /// The progression at sample `t`. The last bar of each chord morphs into the next.
+    /// The same chords, each held for exactly `step` samples in turn (rather
+    /// than weighted over the slow cycle), crossfading over the last `morph`
+    /// samples of each: microsound's regular chord changes.
+    pub fn stepped(mut self, step: u64, morph: u64) -> Harmony {
+        let step = step.max(1);
+        self.sequence = (0..self.chords.len()).collect();
+        self.bar_samples = step;
+        self.morph_len = morph.clamp(1, step);
+        self.cycle = step * self.chords.len() as u64;
+        self
+    }
+
     pub fn at(&self, t: u64) -> Position {
         if !self.sequence.is_empty() {
             let step = (t / self.bar_samples) as usize % self.sequence.len();

@@ -246,6 +246,23 @@ pub struct Settings {
     pub micro: crate::micro::MicroSetup,
 }
 
+/// Microsound's drone-shift figure: four transpositions (semitones), the
+/// first always home, the rest drawn from the chosen set by seed 1.
+fn shift_figure(seed: u64, shift: crate::micro::DroneShift, scale: Scale) -> [f64; 4] {
+    use crate::micro::DroneShift;
+    let set: Vec<f64> = match shift {
+        DroneShift::Off => vec![0.0],
+        DroneShift::Octaves => vec![12.0, -12.0, 0.0],
+        DroneShift::Fifths => vec![7.0, -5.0, 12.0, 5.0],
+        DroneShift::Scale => {
+            let iv = scale.intervals();
+            iv.iter().skip(1).flat_map(|i| [*i as f64, *i as f64 - 12.0]).collect()
+        }
+    };
+    let mut rng = Rng::stream(seed, 0x5F17);
+    [0.0, rng.pick(&set), rng.pick(&set), rng.pick(&set)]
+}
+
 impl Settings {
     /// What suits each mode, when nothing was chosen by hand: (tempo,
     /// scale, chord count). Garage lives around 130 BPM in a plain major
@@ -308,7 +325,7 @@ pub const DEFAULT_SETTINGS: Settings =
         arch: crate::arch::ArchTransform::IDENTITY,
         glitch: crate::glitch_setup::GlitchSetup::DEFAULT,
         model: crate::shrine_model::ShrineModel::EMPTY,
-        camera_speed: 0,
+        camera_speed: -2,
         drone_rhythm: false,
         loop_rhythm: false,
         wildlife: false,
@@ -345,6 +362,18 @@ const PIP_SEND: f64 = 0.25;
 /// How much of the loops stays as it is, sparse .. dense grains, and the cloud's level.
 const MICRO_BED_DRY: [f64; 2] = [0.8, 0.35];
 const CLOUD_LEVEL: f64 = 0.9;
+/// Microsound keeps everything short: the reverb is a small room, the glitch
+/// echo barely repeats, the ringing glitches last a quarter as long, and the
+/// drone and loops sound only in fragments, in a steady rhythm: (on, off)
+/// in sixteenths, each pattern exactly one or two bars long.
+const MICRO_DECAY_S: f64 = 1.2;
+const MICRO_ECHO_FEEDBACK: f64 = 0.25;
+const MICRO_GLITCH_LEN: f64 = 0.25;
+/// The drone: two beats on and two off, one on three off, three on one off,
+/// a bar on and a bar off, two beats in two bars, one beat on and off.
+const DRONE_FRAGMENTS: [(u64, u64); 6] = [(8, 8), (4, 12), (12, 4), (16, 16), (8, 24), (4, 4)];
+/// The loops: shorter, eighth notes to a dotted quarter.
+const LOOP_FRAGMENTS: [(u64, u64); 6] = [(2, 2), (2, 6), (4, 4), (4, 12), (6, 10), (2, 14)];
 const ECHO_SIXTEENTHS: u64 = 3;
 /// The drums' tape echo delay, in drum sixteenths.
 const TAPE_SIXTEENTHS: u64 = 3;
@@ -519,6 +548,13 @@ pub struct Track {
     pub(crate) pips: Option<crate::pips::Pips>,
     pub(crate) sub_pulse: Option<crate::bass::SubPulse>,
     pub(crate) cloud: Option<crate::grains::Cloud>,
+    /// Microsound's fragment gates on the drone and each atmosphere loop.
+    pub(crate) drone_gate: Option<crate::grains::Gate>,
+    pub(crate) loop_gates: Option<[crate::grains::Gate; 4]>,
+    /// Microsound: the drone's fragments transposed by a repeating figure of
+    /// four (semitones), and the fragment last heard.
+    pub(crate) drone_shift: Option<(crate::grains::Shifter, [f64; 4])>,
+    pub(crate) drone_fragment: u64,
     /// 2-step garage: how far the drone (and the pitched glitches) step back
     /// under a chord that rubs against the drone's open fifth.
     pub(crate) pedal_gain: f64,
@@ -549,7 +585,7 @@ impl Track {
         let harmony = Harmony::new(settings.scale, if garage { 1 } else { chords }, settings.pace, tempo.beat(), key, &mut first, &mut rest);
         // 2-step garage: the drone holds the tonic (the harmony just built,
         // one chord), while everything else follows the genre progression.
-        let (mut harmony, drone_harmony) = if garage {
+        let (mut harmony, mut drone_harmony) = if garage {
             let mut g = Rng::stream(seeds.s1, 0x6A4A_6E);
             let gs = settings.garage;
             (
@@ -559,6 +595,15 @@ impl Track {
         } else {
             (harmony.clone(), harmony)
         };
+        // Microsound: the chords can change on a regular count of bars,
+        // crossing over in a beat.
+        let micro = settings.pace == Pace::Micro;
+        let rate = settings.micro.chords.bars();
+        if micro && rate > 0 {
+            let (step, morph) = (rate * tempo.drum_bar(), 4 * tempo.drum16);
+            harmony = harmony.stepped(step, morph);
+            drone_harmony = drone_harmony.stepped(step, morph);
+        }
         if garage {
             // The loops and glitches swing with the drums.
             harmony.swing_push = ((2.0 * settings.garage.swing_fraction() - 1.0) * tempo.drum16 as f64) as u64;
@@ -573,13 +618,20 @@ impl Track {
             let beats = crate::atmos::loop_beats(tempo.beat(), LOOP_SECONDS[i], (i > 0).then_some(avoid));
             avoid = avoid.wrapping_mul(beats);
         }
-        let micro = settings.pace == Pace::Micro;
         let mut drums = match settings.pace {
             Pace::Garage => Drums::garage(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.garage.swing_fraction()),
             Pace::Micro => Drums::micro(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.micro),
             Pace::HalfTime | Pace::Jungle => Drums::new(seeds.s5, settings.kit, settings.space, &harmony, tempo),
         };
         drums.set_reverse(settings.drum_reverse);
+        let glitch_config = |i: usize| {
+            let mut c = settings.glitch[i].layer_config(i, &harmony, tempo);
+            if micro {
+                c.len_scale = MICRO_GLITCH_LEN;
+            }
+            c
+        };
+        let gate = |stream: u64, patterns: &[(u64, u64)]| crate::grains::Gate::new(seeds.s6, stream, tempo.drum16, patterns);
         Track {
             seeds,
             tempo,
@@ -597,8 +649,8 @@ impl Track {
             drums,
             clock: 0,
             mods: Mods::new(seeds.s1),
-            glitch1: Layer::new(settings.glitch[0].layer_config(0, &harmony, tempo), seeds.s2, 0x61),
-            glitch2: Layer::new(settings.glitch[1].layer_config(1, &harmony, tempo), seeds.s3, 0x62),
+            glitch1: Layer::new(glitch_config(0), seeds.s2, 0x61),
+            glitch2: Layer::new(glitch_config(1), seeds.s3, 0x62),
             loops: std::array::from_fn(|i| {
                 AtmosLoop::new(
                     settings.loops[i],
@@ -618,7 +670,7 @@ impl Track {
             drone_tone_filter: [Svf::new(8_000.0, 0.7, sr), Svf::new(8_000.0, 0.7, sr)],
             drone_window: 1.0,
             history: History::new(),
-            echo: PingPong::new(echo_delay, ECHO_FEEDBACK),
+            echo: PingPong::new(echo_delay, if micro { MICRO_ECHO_FEEDBACK } else { ECHO_FEEDBACK }),
             bass: Bass::new(seeds.s4),
             bassline: (settings.pace == Pace::Garage && settings.garage.bass == crate::garage::BassMode::Rhythmic)
                 .then(|| crate::bass::BassLine::new(seeds.s4, tempo, settings.garage.swing_fraction())),
@@ -631,7 +683,12 @@ impl Track {
                 .then(|| crate::pips::Pips::new(seeds.s6, settings.micro.pips, tempo)),
             sub_pulse: (micro && settings.micro.pulse != crate::micro::Pulse::Off).then(|| crate::bass::SubPulse::new(seeds.s4, tempo)),
             cloud: micro.then(|| crate::grains::Cloud::new(seeds.s6, settings.micro.grains.amount())),
-            reverb: Reverb::new(),
+            drone_gate: micro.then(|| gate(0x6A7E_D0, &DRONE_FRAGMENTS)),
+            loop_gates: micro.then(|| std::array::from_fn(|k| gate(0x6A7E_A1 + k as u64, &LOOP_FRAGMENTS))),
+            drone_shift: (micro && settings.micro.shift != crate::micro::DroneShift::Off)
+                .then(|| (crate::grains::Shifter::new(), shift_figure(seeds.s1, settings.micro.shift, settings.scale))),
+            drone_fragment: u64::MAX,
+            reverb: if micro { Reverb::with_decay(MICRO_DECAY_S) } else { Reverb::new() },
             dc: Default::default(),
             meters: Meters::default(),
             drone_cutoff: 0.0,
@@ -746,6 +803,7 @@ impl Track {
         // 2-step garage leans on the atmosphere loops: the drone steps back,
         // and further still under a chord that rubs against its open fifth
         // (a borrowed chord, or the key lift).
+        let mut drone_bed = (0.0, 0.0);
         let (dl, dr) = if self.settings.pace == Pace::Garage {
             if clock % 32 == 0 {
                 let p = self.harmony.at(clock);
@@ -754,8 +812,25 @@ impl Track {
             self.pedal_gain += (self.pedal_target - self.pedal_gain) * 0.0004;
             let g = GARAGE_DRONE * self.pedal_gain;
             (dl * g, dr * g)
-        } else if self.settings.pace == Pace::Micro {
-            (dl * MICRO_DRONE, dr * MICRO_DRONE)
+        } else if let Some(gate) = self.drone_gate.as_mut() {
+            // Microsound: the drone heard only in fragments. The whole of it
+            // still feeds the grain cloud below.
+            drone_bed = (dl * MICRO_DRONE, dr * MICRO_DRONE);
+            // Each fragment takes the next transposition of the figure, set
+            // as it opens.
+            let (sl, sr_) = match self.drone_shift.as_mut() {
+                Some((shifter, figure)) => {
+                    let f = gate.fragment(clock);
+                    if f != self.drone_fragment {
+                        self.drone_fragment = f;
+                        shifter.set(figure[(f % 4) as usize]);
+                    }
+                    shifter.process(drone_bed.0, drone_bed.1)
+                }
+                None => drone_bed,
+            };
+            let g = gate.next(clock);
+            (sl * g, sr_ * g)
         } else {
             (dl, dr)
         };
@@ -806,12 +881,15 @@ impl Track {
         // the loops themselves step back to make room for their cloud.
         let cloud = match self.cloud.as_mut() {
             Some(c) => {
-                let bed = (0..4).fold((dl * 0.5, dr * 0.5), |(x, y), k| (x + a[k].0 * LOOP_DRY[k], y + a[k].1 * LOOP_DRY[k]));
+                let bed = (0..4).fold((drone_bed.0 * 0.5, drone_bed.1 * 0.5), |(x, y), k| (x + a[k].0 * LOOP_DRY[k], y + a[k].1 * LOOP_DRY[k]));
                 let (cl, cr) = c.process(bed.0, bed.1);
                 let g = self.settings.micro.grains.amount();
                 let keep = MICRO_BED_DRY[0] + (MICRO_BED_DRY[1] - MICRO_BED_DRY[0]) * g;
-                for x in a.iter_mut() {
-                    *x = (x.0 * keep, x.1 * keep);
+                // Each loop itself is heard only in fragments of its own.
+                let gates = self.loop_gates.as_mut().expect("microsound has loop gates");
+                for (k, x) in a.iter_mut().enumerate() {
+                    let gk = keep * gates[k].next(clock);
+                    *x = (x.0 * gk, x.1 * gk);
                 }
                 Some((cl * CLOUD_LEVEL, cr * CLOUD_LEVEL))
             }

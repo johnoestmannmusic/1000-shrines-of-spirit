@@ -22,8 +22,15 @@ builds with bare `rustc`.
 cargo run                 # the setup menu
 ```
 
-The menu has a live visual preview on the right. Keys: `↑↓` move, `←→` change,
-`Shift+←→` bigger steps, `Enter` act/edit, `r` randomise, `q` quit. Choose the
+The menu has a live visual preview on the right, and is split into eight tabs:
+**Track · Shrine · Music · Atmosphere · Drone & FX · Glitch · Look · Export**
+(`Tab`/`Shift+Tab` or `1`–`8`). Keys: `↑↓` move within the tab, `←→` change,
+`Shift+←→` bigger steps, `Enter` act/edit, `r` randomise, `q` quit. A line
+under the menu says what the selected row is for. `Enter` on a choice (marked
+`▾`) opens its list: every value with a one-line description. Moving through
+the list applies each one live (picture and audition), and typing a letter
+jumps to it. `Enter` keeps it; `Esc` puts back what was there. Numbers open a
+small box to type an exact value. Choose the
 seed, biome, weather, and every part of the music; set a **Track name** (it heads
 the page and titles the WAV); toggle **Audition** to hear it live; **Master FX**
 opens a screen of end-of-chain glitch effects (Tape, CD artifacts, pitch drift,
@@ -134,15 +141,27 @@ pulse (no swing, no human timing):
   and the drone are listened to and scattered back as 20–80 ms grains;
 - **Pips** (*off / sparse / busy*) play chord tones as pure sine pips of
   5–40 ms, three or four octaves up, through a small ping-pong echo;
-- the drone is frozen from pure sines (no FM), thin and well back; the glitch
-  layers come forward, there is less reverb, and the whole sits about 3 dB
-  lower.
+- everything is kept short. The drone is frozen from pure sines (no FM),
+  thin and well back, and heard only in fragments that keep time with the
+  bar: a fixed rhythm the seed picks (two beats on and two off, one on and
+  three off, three on and one off, a bar on and a bar off, …), every pattern
+  exactly one or two bars long, so each fragment starts where the groove
+  expects it. Each atmosphere loop has a shorter rhythm of its own (eighths
+  to a dotted quarter), started on its own beat so the layers interlock; the
+  grain cloud still hears all of them. **Chord rate** (*slow / every 4 bars /
+  every 2 bars / every bar*) changes the chords on a regular count, crossing
+  over in a beat; **Drone shift** (*off / octaves / fifths / scale steps*)
+  transposes each drone fragment by a repeating figure of four, the first
+  always home. The reverb is a small room (1.2 s
+  instead of 18 s). The glitch echo barely repeats. The pings, blips and
+  stutters of the glitch layers last a quarter as long;
+- the glitch layers come forward, and the whole sits about 3 dB lower.
 
 Choosing microsound moves a default tempo to 120 BPM, the scale to the minor
 pentatonic and the chords to two (and back again when you leave), and keeps
 the Kit to the light kits.
 **Camera · Rotation speed** orbits
-the whole viewport around the shrine, in degrees per second (default 0); the
+the whole viewport around the shrine, in degrees per second (default −2, a slow turn); the
 **Code plane** setting puts the scrolling source on a *static* plane, a *flat*
 one that slides with the camera, or a *sphere* that wraps around the viewer so
 panning reveals it on both sides. Every numeric row can be

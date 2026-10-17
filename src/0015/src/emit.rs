@@ -258,12 +258,14 @@ pub fn info(config: &SimConfig, build: u32) -> String {
                     format!("{} · {} · key lift {}", s.pace.name(), s.garage.progression_name(), s.garage.lift.name())
                 }
                 shrine0015::harmony::Pace::Micro => format!(
-                    "{} · pulse {} · grains {} · pips {} · dropouts {}",
+                    "{} · pulse {} · grains {} · pips {} · dropouts {} · chords {} · drone shift {}",
                     s.pace.name(),
                     s.micro.pulse.name(),
                     s.micro.grains.name(),
                     s.micro.pips.name(),
-                    s.micro.dropouts.name()
+                    s.micro.dropouts.name(),
+                    s.micro.chords.name(),
+                    s.micro.shift.name()
                 ),
                 _ => s.pace.name().to_string(),
             }
