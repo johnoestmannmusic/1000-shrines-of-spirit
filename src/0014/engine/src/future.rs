@@ -191,7 +191,7 @@ pub fn palette(seed: u64, p: Palette, biome: Biome) -> Palette {
                 foliage: hsl(0.29 + j, 0.5, 0.38),
                 foliage_light: hsl(0.27 + j, 0.55, 0.52),
                 water: hsl(0.55, 0.4, 0.6),
-                accent: hsl(sign + j, 0.88, 0.58),
+                accent: hsl(sign + j, 0.7, 0.62),
             }
         }
         Biome::ResearchLab => Palette {
@@ -505,13 +505,27 @@ fn city(st: &Stock, b: &Block, t: &Texel, emissive: &mut f64, spec: &mut f64) ->
             }
         };
     }
+    // Sign colours: the scene's accent now and then, mostly softer lights.
+    let sign_colour = |h: u64| [st.neon, [120, 214, 236, 255], [246, 246, 240, 255], [244, 186, 206, 255], [255, 226, 170, 255]][(h % 5) as usize];
     if b.kind == kind::PILLAR {
-        // A tall vertical sign: a lit panel of glyphs, one to a level.
-        if (1..=4).contains(&tu) {
-            *emissive = 0.9;
-            return if glyph(t.hb, tu, tz.min(4).max(1)) && (1..=4).contains(&tz) { st.paint } else { st.neon };
+        // About one pillar in three carries a tall, narrow vertical sign; the
+        // rest are slim towers with a strip of windows.
+        if bits(t.hc, 12, 2) == 0 {
+            if (2..=3).contains(&tu) {
+                *emissive = 0.85;
+                let c = sign_colour(bits(t.hc, 16, 8));
+                return if (tz + tu) % 3 == 0 { st.paint } else { c };
+            }
+            return st.trim;
         }
-        return st.trim;
+        if (2..=3).contains(&tu) && (2..=4).contains(&tz) {
+            if u8f(t.hb2, (tz * 8) as u32) < 0.25 {
+                *emissive = 0.5;
+                return st.warm;
+            }
+            return scale(st.glass, 0.95 + 0.1 * u8f(t.ht, 8));
+        }
+        return scale(facade, if tu == 0 || tu == 5 { 0.92 } else { t.speckle });
     }
     if t.band == 0 && b.kind != kind::RUBBLE {
         // Street level: shops behind roller shutters, some open and lit.
@@ -525,9 +539,9 @@ fn city(st: &Stock, b: &Block, t: &Texel, emissive: &mut f64, spec: &mut f64) ->
         return scale([176, 180, 184, 255], if tz % 2 == 0 { 1.06 } else { 0.9 });
     }
     // Upper floors: small square tiles, a band of windows, a sign now and then.
-    if bits(t.hb, 4, 3) == 0 && (1..=4).contains(&tu) && (1..=4).contains(&tz) {
+    if bits(t.hb, 4, 4) == 0 && (1..=4).contains(&tu) && (1..=4).contains(&tz) {
         *emissive = 0.8;
-        return if glyph(t.hb2, tu, tz) { st.paint } else { st.neon };
+        return if glyph(t.hb2, tu, tz) { st.paint } else { sign_colour(bits(t.hb, 12, 8)) };
     }
     if (2..=4).contains(&tz) && (1..=4).contains(&tu) && b.kind != kind::RUBBLE {
         if tz == 4 && (tu == 1 || tu == 4) {

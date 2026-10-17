@@ -34,6 +34,7 @@ pub mod modulate;
 pub mod pattern;
 pub mod rain;
 pub mod reverb;
+pub mod stabs;
 pub mod telemetry;
 pub mod tempo;
 pub mod texture;

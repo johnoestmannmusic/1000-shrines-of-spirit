@@ -12,8 +12,8 @@
 //         --crate-type cdylib shrine.rs -o shrine.wasm
 //
 // The shrine it draws and plays:
-//   seed 1000 · Ecofuture · Clear
-//   Lydian, 3 chord(s), half-time, 168 BPM, root seed picks, kit Acoustic break
+//   seed 1000 · Near Future · Clear
+//   Ionian (major), 4 chord(s), 2-step garage, 132 BPM, root seed picks, kit Acoustic break
 //   drone arc 0s up 0s, tone 0
 //
 // Contents: crate docs and constants, then engine modules (iso, grid, render,
@@ -734,7 +734,7 @@ pub fn palette(seed: u64, p: Palette, biome: Biome) -> Palette {
                 foliage: hsl(0.29 + j, 0.5, 0.38),
                 foliage_light: hsl(0.27 + j, 0.55, 0.52),
                 water: hsl(0.55, 0.4, 0.6),
-                accent: hsl(sign + j, 0.88, 0.58),
+                accent: hsl(sign + j, 0.7, 0.62),
             }
         }
         Biome::ResearchLab => Palette {
@@ -1048,13 +1048,27 @@ fn city(st: &Stock, b: &Block, t: &Texel, emissive: &mut f64, spec: &mut f64) ->
             }
         };
     }
+    // Sign colours: the scene's accent now and then, mostly softer lights.
+    let sign_colour = |h: u64| [st.neon, [120, 214, 236, 255], [246, 246, 240, 255], [244, 186, 206, 255], [255, 226, 170, 255]][(h % 5) as usize];
     if b.kind == kind::PILLAR {
-        // A tall vertical sign: a lit panel of glyphs, one to a level.
-        if (1..=4).contains(&tu) {
-            *emissive = 0.9;
-            return if glyph(t.hb, tu, tz.min(4).max(1)) && (1..=4).contains(&tz) { st.paint } else { st.neon };
+        // About one pillar in three carries a tall, narrow vertical sign; the
+        // rest are slim towers with a strip of windows.
+        if bits(t.hc, 12, 2) == 0 {
+            if (2..=3).contains(&tu) {
+                *emissive = 0.85;
+                let c = sign_colour(bits(t.hc, 16, 8));
+                return if (tz + tu) % 3 == 0 { st.paint } else { c };
+            }
+            return st.trim;
         }
-        return st.trim;
+        if (2..=3).contains(&tu) && (2..=4).contains(&tz) {
+            if u8f(t.hb2, (tz * 8) as u32) < 0.25 {
+                *emissive = 0.5;
+                return st.warm;
+            }
+            return scale(st.glass, 0.95 + 0.1 * u8f(t.ht, 8));
+        }
+        return scale(facade, if tu == 0 || tu == 5 { 0.92 } else { t.speckle });
     }
     if t.band == 0 && b.kind != kind::RUBBLE {
         // Street level: shops behind roller shutters, some open and lit.
@@ -1068,9 +1082,9 @@ fn city(st: &Stock, b: &Block, t: &Texel, emissive: &mut f64, spec: &mut f64) ->
         return scale([176, 180, 184, 255], if tz % 2 == 0 { 1.06 } else { 0.9 });
     }
     // Upper floors: small square tiles, a band of windows, a sign now and then.
-    if bits(t.hb, 4, 3) == 0 && (1..=4).contains(&tu) && (1..=4).contains(&tz) {
+    if bits(t.hb, 4, 4) == 0 && (1..=4).contains(&tu) && (1..=4).contains(&tz) {
         *emissive = 0.8;
-        return if glyph(t.hb2, tu, tz) { st.paint } else { st.neon };
+        return if glyph(t.hb2, tu, tz) { st.paint } else { sign_colour(bits(t.hb, 12, 8)) };
     }
     if (2..=4).contains(&tz) && (1..=4).contains(&tu) && b.kind != kind::RUBBLE {
         if tz == 4 && (tu == 1 || tu == 4) {
@@ -5055,7 +5069,7 @@ use crate::track::{DroneArc, KeyChoice, LoopDesign, Seeds, Settings};
 use crate::weather::WeatherKind;
 use crate::{DEFAULT_SEEDS, DEFAULT_SETTINGS};
 
-pub const VERSION: u32 = 15;
+pub const VERSION: u32 = 16;
 
 /// Encode a configuration.
 pub fn encode(config: &SimConfig) -> Vec<u32> {
@@ -5082,7 +5096,7 @@ pub fn encode(config: &SimConfig) -> Vec<u32> {
 
     w.push(s.scale.index() as u32);
     w.push(s.chords as u32);
-    w.push(if s.pace == Pace::Jungle { 1 } else { 0 });
+    w.push(s.pace.index());
     w.push(s.kit.index() as u32);
     w.push(s.space.index() as u32);
     w.push(s.bpm as u32);
@@ -5122,6 +5136,8 @@ pub fn encode(config: &SimConfig) -> Vec<u32> {
     // Bit 0: the drone. Bit 1: the same rhythm on the atmosphere loops.
     // Bit 2: wildlife (an older recipe has it clear, so it decodes as off).
     w.push(s.drone_rhythm as u32 | ((s.loop_rhythm as u32) << 1) | ((s.wildlife as u32) << 2));
+    // Version 16: the 2-step garage setup.
+    w.push(s.garage.word());
     for word in s.model.words() {
         w.push(word);
     }
@@ -5153,7 +5169,11 @@ pub fn decode(words: &[u32]) -> SimConfig {
 
     let scale = Scale::from_index(c.next() as usize);
     let chords = (c.next() as u8).clamp(1, 4);
-    let pace = if c.next() == 1 { Pace::Jungle } else { Pace::HalfTime };
+    let pace = match c.next() {
+        1 => Pace::Jungle,
+        2 => Pace::Garage,
+        _ => Pace::HalfTime,
+    };
     let kit = KITS[(c.next() as usize) % KITS.len()];
     let space = SPACES[(c.next() as usize) % SPACES.len()];
     let bpm = (c.next() as u16).max(1);
@@ -5224,6 +5244,8 @@ pub fn decode(words: &[u32]) -> SimConfig {
     } else {
         (false, false, false)
     };
+    // Version 16 added 2-step garage's own settings.
+    let garage = if version >= 16 { crate::garage::GarageSetup::from_word(c.next()) } else { crate::garage::GarageSetup::DEFAULT };
     let model = if version >= 14 {
         let words: Vec<u32> = (0..crate::shrine_model::WORDS as u32).map(|_| c.next()).collect();
         crate::shrine_model::ShrineModel::from_words(&words)
@@ -5273,6 +5295,7 @@ pub fn decode(words: &[u32]) -> SimConfig {
             drone_rhythm,
             loop_rhythm,
             wildlife,
+            garage,
         },
         biome,
         weather,
@@ -9921,6 +9944,186 @@ impl Bass {
     }
 }
 
+/// One note of the 2-step bassline, within its bar.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Note {
+    /// The sixteenth it starts on (0..16).
+    pub step: u8,
+    /// How many sixteenths it holds for.
+    pub len: u8,
+    /// Semitones above the chord's root (an approach note: above the *next* root).
+    pub semis: f64,
+    pub vel: f64,
+    /// Leading into the next chord rather than sitting on this one.
+    pub approach: bool,
+}
+
+/// Where a garage bass note may start, and how likely it is: the pushes
+/// around the kick rather than on it. Index = sixteenth in the bar.
+const ONSETS: [f64; 16] = [0.55, 0.0, 0.3, 0.6, 0.0, 0.1, 0.55, 0.4, 0.2, 0.0, 0.5, 0.45, 0.0, 0.45, 0.55, 0.3];
+
+/// The 2-step garage bassline: a plucked sub with a little FM bite, moving
+/// in syncopated sixteenths on the chord roots, octaves and fifths, swung
+/// with the drums, gliding between notes and leading into each change with
+/// an approach note. Every bar's notes are a pure function of seed 4 and
+/// the bar number: a two-bar figure, varied at the end of each phrase, that
+/// grows a new shape every sixteen bars.
+pub struct BassLine {
+    seed: u64,
+    six: u64,
+    bar: u64,
+    push: u64,
+    fm: Fm2,
+    lp: Svf,
+    sub_phase: f64,
+    freq: f64,
+    target: f64,
+    env: f64,
+    fenv: f64,
+    vel: f64,
+    /// When the sounding note lets go (absolute samples).
+    release_at: u64,
+    plan: Option<(u64, Vec<Note>)>,
+    cutoff: f64,
+    midi: f64,
+}
+
+impl BassLine {
+    pub fn new(seed: u64, tempo: crate::tempo::Tempo, swing: f64) -> Self {
+        let mut rng = Rng::stream(seed, 0xBA56);
+        let six = tempo.drum16;
+        let sr = crate::SAMPLE_RATE as f64;
+        BassLine {
+            seed,
+            six,
+            bar: 16 * six,
+            push: ((2.0 * swing - 1.0) * six as f64) as u64,
+            fm: Fm2::new(midi_hz(ROOT), rng.pick(&[1.0, 2.0])),
+            lp: Svf::new(400.0, 0.8, sr),
+            sub_phase: 0.0,
+            freq: midi_hz(ROOT),
+            target: midi_hz(ROOT),
+            env: 0.0,
+            fenv: 0.0,
+            vel: 0.0,
+            release_at: 0,
+            plan: None,
+            cutoff: 400.0,
+            midi: ROOT,
+        }
+    }
+
+    /// The notes of bar `bar` (pure). `changing` marks a bar that leads into
+    /// a new chord: its last note becomes an approach.
+    pub fn plan(&self, bar: u64, changing: bool) -> Vec<Note> {
+        let figure = bar % 2;
+        let vary = bar % 4 == 3;
+        let shape = bar / 16;
+        let mut rng = Rng::stream(self.seed, 0xBA56_0000 ^ (shape << 8) ^ (figure << 4) ^ vary as u64);
+        let mut steps: Vec<u8> = Vec::new();
+        for (i, w) in ONSETS.iter().enumerate() {
+            // Never two in a row; the variation bar is a little busier.
+            let w = if vary { (w * 1.25).min(0.9) } else { *w };
+            if steps.last().is_some_and(|l| *l as usize + 1 == i) {
+                continue;
+            }
+            if rng.chance(w) {
+                steps.push(i as u8);
+            }
+        }
+        if steps.len() < 2 {
+            steps = vec![0, rng.pick(&[6u8, 10, 14])];
+        }
+        let mut notes = Vec::with_capacity(steps.len());
+        for (k, &step) in steps.iter().enumerate() {
+            let next = steps.get(k + 1).copied().unwrap_or(16);
+            let room = next - step;
+            // Mostly held to the next note, now and then a short stab.
+            let len = if rng.chance(0.3) { 1 } else { room.min(4) };
+            let semis = if k == 0 {
+                0.0
+            } else {
+                match rng.weighted(&[0.5, 0.28, 0.17, 0.05]) {
+                    0 => 0.0,
+                    1 => 12.0,
+                    2 => 7.0,
+                    _ => -5.0,
+                }
+            };
+            let vel = if semis == 12.0 { rng.range(0.6, 0.75) } else { rng.range(0.8, 1.0) };
+            notes.push(Note { step, len, semis, vel, approach: false });
+        }
+        if changing {
+            // Walk into the next chord: a semitone under its root on the
+            // last push of the bar.
+            let last = notes.last().map_or(0, |n| n.step);
+            if last < 14 {
+                notes.push(Note { step: 14, len: 2, semis: -1.0, vel: 0.8, approach: true });
+            } else if let Some(n) = notes.last_mut() {
+                *n = Note { semis: -1.0, approach: true, ..*n };
+            }
+        }
+        notes
+    }
+
+    /// Where a step's note begins within the bar (odd steps swing late).
+    fn onset(&self, step: u8) -> u64 {
+        step as u64 * self.six + if step % 2 == 1 { self.push } else { 0 }
+    }
+
+    /// The current note's pitch (MIDI), for display.
+    pub fn pitch(&self) -> f64 {
+        self.midi
+    }
+
+    /// One sample. `root` and `next_root` are this chord's and the next one's
+    /// bass notes; `changing` is true in the bar before a change; `active`
+    /// whether the groove is playing (the bass follows the drums' sections).
+    pub fn next(&mut self, clock: u64, root: f64, next_root: f64, changing: bool, active: bool, m: &ModState) -> f64 {
+        let sr = crate::SAMPLE_RATE as f64;
+        let bar = clock / self.bar;
+        let in_bar = clock % self.bar;
+        if self.plan.as_ref().is_none_or(|(b, _)| *b != bar) {
+            self.plan = Some((bar, self.plan(bar, changing)));
+        }
+        if active {
+            let notes = &self.plan.as_ref().unwrap().1;
+            if let Some(n) = notes.iter().find(|n| self.onset(n.step) == in_bar) {
+                let base = if n.approach { next_root } else { root };
+                // Keep the line in the sub register.
+                let mut midi = base + n.semis;
+                while midi > 50.0 {
+                    midi -= 12.0;
+                }
+                self.target = midi_hz(midi);
+                self.midi = midi;
+                self.vel = n.vel;
+                self.fenv = 1.0;
+                let hold = (n.len as f64 - 0.25).max(0.6) * self.six as f64;
+                self.release_at = clock + hold as u64;
+            }
+        }
+        // Glide (about 20 ms), the amplitude and filter envelopes.
+        self.freq += (self.target - self.freq) * 0.0011;
+        let gate = active && clock < self.release_at;
+        let goal = if gate { 1.0 } else { 0.0 };
+        let rate = if gate { 0.02 } else { 0.0009 };
+        self.env += (goal - self.env) * rate;
+        self.fenv *= 0.99975;
+        if clock % 32 == 0 {
+            self.cutoff = 150.0 + 330.0 * m.bass_bright + 1300.0 * self.fenv;
+            self.lp.set(self.cutoff, 0.85, sr);
+        }
+        self.fm.freq = self.freq;
+        let fm = self.fm.next(sr, 0.3 + 1.8 * self.fenv);
+        let sub = sin_turns(self.sub_phase);
+        self.sub_phase += self.freq / sr;
+        self.sub_phase -= self.sub_phase.floor();
+        let body = self.lp.process(fm * 0.3).low;
+        (sub * 0.3 + body * 0.85) * self.env * self.vel
+    }
+}
+
 }
 // ---- src/audio/creatures.rs ----
 pub mod creatures {
@@ -10650,6 +10853,16 @@ pub mod drums {
 //! Every bar's slice plan is a pure function of seed 5, the bar number and
 //! the slow LFOs, so playback never depends on block size or history.
 //! The kit "Off" switches the drums off.
+//!
+//! **2-step garage** plays the same machine differently. The loop is played
+//! at the track's own tempo (no pitch-up), shuffled by the swing setting,
+//! from rules rather than a record: a kick on the one and a second that
+//! *skips* past beat three to land just after it, claps on two and four,
+//! rimshots pushing the off-beats, shuffled sixteenth hats with an open hat
+//! on each off-beat eighth. Its edits lean toward the glitch: hat stutters,
+//! reversed claps sucking into the snare, kicks dropping out, pitched-down
+//! tails; and its sections breathe between hats, a kick-less breakdown, the
+//! full 2-step, and 2-step with the glitches let loose.
 
 use crate::filter::{OnePole, Svf};
 use crate::harmony::Harmony;
@@ -10718,6 +10931,12 @@ pub enum Section {
     Full,
     /// Full, with many more edits and rolls.
     Rolls,
+    /// 2-step garage: the kick filtered away, claps and hats floating.
+    Breakdown,
+    /// 2-step garage: the full groove.
+    TwoStep,
+    /// 2-step garage, with stutters and reversals let loose.
+    Shuffle,
 }
 
 impl Section {
@@ -10728,6 +10947,9 @@ impl Section {
             Section::HalfTime => "half-time",
             Section::Full => "full break",
             Section::Rolls => "full + rolls",
+            Section::Breakdown => "breakdown",
+            Section::TwoStep => "2-step",
+            Section::Shuffle => "2-step + glitch",
         }
     }
 }
@@ -10801,6 +11023,12 @@ pub struct Drums {
     plans: [Option<Plan>; 2],
     highpass: [Svf; 2],
     hp_mix: f64,
+    /// 2-step garage: the swing (the first sixteenth's share of each pair,
+    /// 0.5 = straight), or `None` for jungle.
+    swing: Option<f64>,
+    /// The garage breakdown's low cut, and how far it is in.
+    low_cut: [Svf; 2],
+    lc_mix: f64,
     // Display-only.
     last_hits: Vec<Voice>,
     hit_count: u64,
@@ -10814,9 +11042,24 @@ impl Drums {
     }
 
     pub fn new(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo) -> Self {
-        let params = KitParams::new(seed, kit, harmony);
-        let src16 = (60.0 / params.source_bpm / 4.0 * SR).round() as usize;
+        Drums::styled(seed, kit, space, harmony, tempo, None)
+    }
+
+    /// 2-step garage drums, shuffled by `swing` (0.5 straight .. about 0.66).
+    pub fn garage(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo, swing: f64) -> Self {
+        Drums::styled(seed, kit, space, harmony, tempo, Some(swing.clamp(0.5, 0.72)))
+    }
+
+    fn styled(seed: u64, kit: crate::kits::Kit, space: DrumSpace, harmony: &Harmony, tempo: Tempo, swing: Option<f64>) -> Self {
+        let mut params = KitParams::new(seed, kit, harmony);
+        if swing.is_some() {
+            // A rounder, shorter kick that leaves room for a moving bassline.
+            params.kick_decay = params.kick_decay.min(0.3);
+            params.kick_drop *= 0.8;
+        }
         let six = tempo.drum16;
+        // Garage plays its loop at the track's own tempo, unpitched.
+        let src16 = if swing.is_some() { six as usize } else { (60.0 / params.source_bpm / 4.0 * SR).round() as usize };
         let mut d = Drums {
             enabled: kit != crate::kits::Kit::Off,
             reverse: true,
@@ -10835,6 +11078,9 @@ impl Drums {
             plans: [None, None],
             highpass: [Svf::new(5000.0, 0.7, SR), Svf::new(5000.0, 0.7, SR)],
             hp_mix: 0.0,
+            swing,
+            low_cut: [Svf::new(260.0, 0.7, SR), Svf::new(260.0, 0.7, SR)],
+            lc_mix: 0.0,
             last_hits: Vec::new(),
             hit_count: 0,
             step: 0,
@@ -10849,18 +11095,14 @@ impl Drums {
         SLICES * self.src16
     }
 
-    /// Plays and samples the break (once, at start-up).
-    fn record_break(&mut self) {
-        let mut rng = Rng::stream(self.seed, 0xB4EA);
+    /// The jungle break's hits: one of the classic patterns, played with
+    /// human timing at the source tempo. (Its draws on `rng` are exactly the
+    /// break's original ones, so the break never changes.)
+    fn jungle_hits(&mut self, rng: &mut Rng) -> Vec<(usize, Voice, f64)> {
         let (name, kicks, snares, ghosts) = PATTERNS[rng.below(PATTERNS.len())];
         self.pattern = name;
-        let p = self.params.clone();
+        let p = &self.params;
         let src16 = self.src16;
-        let len = self.break_len() + SR as usize;
-        let (mut buf, mut buf_r, mut perc) = (vec![0.0; len], vec![0.0; len], vec![0.0; len]);
-        // Panning has its own random stream, so it never shifts the break itself.
-        let mut pan_rng = Rng::stream(self.seed, 0x9A4);
-        let space = self.space;
         let swing = (src16 as f64 * 0.05) as usize;
         let mut hits: Vec<(usize, Voice, f64)> = Vec::new();
         let at = |step: usize, rng: &mut Rng| {
@@ -10871,30 +11113,115 @@ impl Drums {
         };
         for s in 0..SLICES {
             if kicks.contains(&s) || (s % 8 == 6 && rng.chance(0.08)) {
-                hits.push((at(s, &mut rng), Voice::Kick, rng.range(0.85, 1.0)));
+                hits.push((at(s, rng), Voice::Kick, rng.range(0.85, 1.0)));
             }
             if snares.contains(&s) {
-                hits.push((at(s, &mut rng), Voice::Snare, rng.range(0.9, 1.0)));
+                hits.push((at(s, rng), Voice::Snare, rng.range(0.9, 1.0)));
             } else if ghosts.contains(&s) || (s % 2 == 1 && rng.chance(0.12)) {
-                hits.push((at(s, &mut rng), Voice::Ghost, rng.range(0.22, 0.38)));
+                hits.push((at(s, rng), Voice::Ghost, rng.range(0.22, 0.38)));
             }
             // The 8ths on the ride or closed hats (accents alternate), some off-16th hats,
             // and an open hat to close bar 2.
             if s % 2 == 0 {
                 let accent = if s % 4 == 0 { 0.75 } else { 0.45 } * rng.range(0.85, 1.0);
                 let v = if p.ride_on_8ths { Voice::Ride } else { Voice::Hat };
-                hits.push((at(s, &mut rng), v, accent));
+                hits.push((at(s, rng), v, accent));
             } else if rng.chance(p.hat_density) {
-                hits.push((at(s, &mut rng), Voice::Hat, rng.range(0.25, 0.45)));
+                hits.push((at(s, rng), Voice::Hat, rng.range(0.25, 0.45)));
             }
             if s == 30 {
-                hits.push((at(s, &mut rng), Voice::OpenHat, 0.5));
+                hits.push((at(s, rng), Voice::OpenHat, 0.5));
             }
         }
         hits.sort_by_key(|h| h.0);
+        hits
+    }
+
+    /// The 2-step garage loop's hits, at the track's own tempo, from the
+    /// genre's rules with seed 5 choosing within them.
+    fn garage_hits(&mut self, rng: &mut Rng) -> Vec<(usize, Voice, f64)> {
+        let six = self.src16;
+        let p = &self.params;
+        let swing = self.swing.unwrap_or(0.5);
+        // Each odd sixteenth is pushed late by the swing.
+        let push = ((2.0 * swing - 1.0) * six as f64) as usize;
+        let at = |step: usize, rng: &mut Rng| {
+            let jitter = (rng.bipolar() * 24.0) as i64;
+            let base = step * six + if step % 2 == 1 { push } else { 0 };
+            (base as i64 + jitter).max(0) as usize
+        };
+        // The skip: bar A's second kick lands just past beat three (the "and"
+        // or the "a"), bar B's anywhere from just before to well after it.
+        let skip_a = rng.pick(&[10usize, 11]);
+        let skip_b = rng.pick(&[9usize, 10, 11, 14]);
+        let pickup = rng.chance(0.45);
+        let ghost_kick = if rng.chance(0.4) { Some(rng.pick(&[3usize, 7])) } else { None };
+        let rim_a = rng.pick(&[6usize, 7, 14]);
+        let rim_b = rng.pick(&[6usize, 14, 15]);
+        // Open hats on the off-beat eighths: always on two of them.
+        let open: [bool; 4] = [true, rng.chance(0.7), true, rng.chance(0.7)];
+        let name = match (skip_a, pickup) {
+            (10, false) => "2-step: skip on the and of 3",
+            (10, true) => "2-step: skip on the and of 3, pickup",
+            (_, false) => "2-step: skip on the a of 3",
+            (_, true) => "2-step: skip on the a of 3, pickup",
+        };
+        let mut hits: Vec<(usize, Voice, f64)> = Vec::new();
+        for s in 0..SLICES {
+            let (b, second) = (s % STEPS, s >= STEPS);
+            let kick = b == 0 || (!second && b == skip_a) || (second && b == skip_b);
+            if kick {
+                hits.push((at(s, rng), Voice::Kick, rng.range(0.9, 1.0)));
+            } else if second && pickup && b == 15 {
+                hits.push((at(s, rng), Voice::Kick, rng.range(0.55, 0.7)));
+            } else if !second && ghost_kick == Some(b) {
+                hits.push((at(s, rng), Voice::Kick, rng.range(0.4, 0.5)));
+            }
+            if b == 4 || b == 12 {
+                hits.push((at(s, rng), Voice::Snare, rng.range(0.88, 1.0)));
+            } else if (!second && b == rim_a) || (second && b == rim_b) || (b % 2 == 1 && rng.chance(0.08)) {
+                hits.push((at(s, rng), Voice::Ghost, rng.range(0.25, 0.4)));
+            }
+            // Shuffled sixteenth hats, an open hat on the off-beat eighths.
+            if b % 4 == 2 && open[b / 4] {
+                hits.push((at(s, rng), Voice::OpenHat, rng.range(0.42, 0.55)));
+            } else if b % 2 == 0 {
+                let accent = if b % 4 == 0 { 0.5 } else { 0.4 } * rng.range(0.85, 1.0);
+                hits.push((at(s, rng), Voice::Hat, accent));
+            } else if rng.chance(0.55 + 0.4 * p.hat_density) {
+                hits.push((at(s, rng), Voice::Hat, rng.range(0.2, 0.34)));
+            }
+        }
+        self.pattern = name;
+        hits.sort_by_key(|h| h.0);
+        hits
+    }
+
+    /// Plays and samples the break (once, at start-up).
+    fn record_break(&mut self) {
+        let garage = self.swing.is_some();
+        let mut rng = Rng::stream(self.seed, if garage { 0x2577 } else { 0xB4EA });
+        let hits = if garage { self.garage_hits(&mut rng) } else { self.jungle_hits(&mut rng) };
+        let p = self.params.clone();
+        let len = self.break_len() + SR as usize;
+        let (mut buf, mut buf_r, mut perc) = (vec![0.0; len], vec![0.0; len], vec![0.0; len]);
+        // Panning has its own random stream, so it never shifts the break itself.
+        let mut pan_rng = Rng::stream(self.seed, 0x9A4);
+        let space = self.space;
         for (i, (pos, voice, vel)) in hits.iter().enumerate() {
             let sound = match voice {
                 Voice::Kick => crate::kits::kick(&p, *vel, &mut rng),
+                Voice::Snare if garage => {
+                    // A clap over the kit's snare, set a little back.
+                    let mut c = crate::kits::clap(&p, *vel, &mut rng);
+                    let s = crate::kits::snare(&p, *vel * 0.7, false, &mut rng);
+                    for (k, x) in s.iter().enumerate() {
+                        if let Some(y) = c.get_mut(k) {
+                            *y += 0.45 * x;
+                        }
+                    }
+                    c
+                }
                 Voice::Snare => crate::kits::snare(&p, *vel, false, &mut rng),
                 Voice::Ghost => crate::kits::snare(&p, *vel, true, &mut rng),
                 v => {
@@ -11001,6 +11328,9 @@ impl Drums {
         if p == SILENT_PHRASES {
             return Section::HatsOnly;
         }
+        if self.swing.is_some() {
+            return self.garage_section(p, mods);
+        }
         let energy = mods.at(p * PHRASE_BARS * self.bar).drums;
         let mut rng = Rng::stream(self.seed, 0x5EC0 ^ p);
         let e = (energy + rng.range(-0.12, 0.12)).clamp(0.0, 1.0);
@@ -11011,6 +11341,72 @@ impl Drums {
             x if x < 0.8 => Section::Full,
             _ => Section::Rolls,
         }
+    }
+
+    /// A garage phrase's section: hats, the breakdown, the 2-step, or the
+    /// 2-step with its glitches, by the same energy LFO as jungle's.
+    fn garage_section(&self, p: u64, mods: &Mods) -> Section {
+        let energy = mods.at(p * PHRASE_BARS * self.bar).drums;
+        let mut rng = Rng::stream(self.seed, 0x2577_5EC0 ^ p);
+        let e = (energy + rng.range(-0.12, 0.12)).clamp(0.0, 1.0);
+        match e {
+            x if x < 0.2 => Section::Out,
+            x if x < 0.32 => Section::HatsOnly,
+            x if x < 0.46 => Section::Breakdown,
+            x if x < 0.8 => Section::TwoStep,
+            _ => Section::Shuffle,
+        }
+    }
+
+    /// The slice plan for a garage bar (pure): the loop in order, with
+    /// glitch edits on top.
+    fn garage_plan(&self, bar: u64, mods: &Mods) -> Plan {
+        let section = self.section(bar / PHRASE_BARS, mods);
+        let fill = bar % PHRASE_BARS == PHRASE_BARS - 1;
+        let half = (bar % 2) as usize * STEPS;
+        let mut steps = [Step { slice: 0, op: Op::Play }; STEPS];
+        for (i, s) in steps.iter_mut().enumerate() {
+            *s = Step { slice: (half + i) as u8, op: Op::Play };
+        }
+        let mut rng = Rng::stream(self.seed, 0x2577_BA40_0000 ^ bar);
+        let p = match section {
+            Section::Out => 0.0,
+            Section::HatsOnly => 0.06,
+            Section::Breakdown => 0.1,
+            Section::Shuffle => 0.26,
+            _ => 0.08,
+        } + if fill && section != Section::Out { 0.15 } else { 0.0 };
+        let strong = self.strong_slices();
+        // Slices holding only hats and rims: what a stutter or a dropped kick borrows.
+        let weak: Vec<u8> = (0..SLICES as u8).filter(|s| !strong.contains(s)).collect();
+        for (i, s) in steps.iter_mut().enumerate().skip(1) {
+            if rng.chance(p) {
+                *s = match rng.weighted(&[0.35, 0.2, 0.2, 0.25]) {
+                    // A hat stutter.
+                    0 if !weak.is_empty() => Step { slice: rng.pick(&weak), op: Op::Roll },
+                    // A clap reversed into the beat after it.
+                    1 if self.reverse => Step { slice: if i % 8 == 3 { s.slice + 1 } else { s.slice }, op: Op::Reverse },
+                    // The kick drops out for a beat.
+                    2 if strong.contains(&s.slice) && !weak.is_empty() => Step { slice: rng.pick(&weak), op: Op::Play },
+                    3 => Step { slice: s.slice, op: Op::PitchDown },
+                    _ => *s,
+                };
+            }
+            // Fill: a reversed clap and a stutter into the next phrase.
+            if fill && section != Section::Out {
+                if i == STEPS - 2 && self.reverse && rng.chance(0.6) {
+                    *s = Step { slice: (half + 12) as u8, op: Op::Reverse };
+                } else if i == STEPS - 1 && rng.chance(0.6) {
+                    *s = Step { slice: s.slice, op: Op::Roll };
+                }
+            }
+        }
+        let mut join = [false; STEPS];
+        for i in 1..STEPS {
+            let (a, b) = (steps[i - 1], steps[i]);
+            join[i] = a.op == Op::Play && b.op == Op::Play && b.slice == a.slice + 1;
+        }
+        Plan { bar, section, fill, steps, join }
     }
 
     /// Slices containing a kick or a snare: what jungle edits love to move around.
@@ -11027,6 +11423,9 @@ impl Drums {
 
     /// The slice plan for bar `bar` (pure).
     pub fn plan(&self, bar: u64, mods: &Mods) -> Plan {
+        if self.swing.is_some() {
+            return self.garage_plan(bar, mods);
+        }
         let section = self.section(bar / PHRASE_BARS, mods);
         let fill = bar % PHRASE_BARS == PHRASE_BARS - 1;
         let half = (bar % 2) as usize * STEPS;
@@ -11044,6 +11443,8 @@ impl Drums {
             Section::HatsOnly => 0.08,
             Section::Full => 0.14,
             Section::Rolls => 0.32,
+            // Garage sections never reach the jungle plan.
+            Section::Breakdown | Section::TwoStep | Section::Shuffle => 0.0,
         } + if fill && section != Section::Out { 0.2 } else { 0.0 };
         let strong = self.strong_slices();
         for (i, s) in steps.iter_mut().enumerate().skip(1) {
@@ -11094,6 +11495,22 @@ impl Drums {
         self.plans[0].clone().unwrap()
     }
 
+    /// Where a stutter retriggers within a step, and where in the slice the
+    /// repeat reads from. Halfway, from the slice's start — except a swung
+    /// garage off-beat, whose hit sits late in its slice: there the repeat
+    /// starts at the hit and lands halfway through the rest, so both strikes
+    /// stay on the swung grid.
+    fn roll_split(&self, slice: u8) -> (u64, u64) {
+        let six = self.six;
+        match self.swing {
+            Some(swing) if slice % 2 == 1 => {
+                let push = ((2.0 * swing - 1.0) * six as f64) as u64;
+                (push + (six - push) / 2, push)
+            }
+            _ => (six / 2, 0),
+        }
+    }
+
     /// The source range a step reads, for counting hits.
     fn range(&self, step: Step, i: usize) -> (f64, f64) {
         let base = step.slice as f64 * self.src16 as f64;
@@ -11138,7 +11555,8 @@ impl Drums {
         };
 
         // Retriggers: count which drum hits this step plays (display only).
-        let retrigger = t == 0 || (st.op == Op::Roll && t == six / 2);
+        let (roll_at, roll_from) = self.roll_split(st.slice);
+        let retrigger = t == 0 || (st.op == Op::Roll && t == roll_at);
         if retrigger && section != Section::Out {
             self.step = i;
             let (lo, hi) = self.range(st, i);
@@ -11159,8 +11577,12 @@ impl Drums {
             Op::Play => (base + tt * rate, t, six),
             Op::Reverse => (base + len - 1.0 - tt * rate, t, six),
             Op::Roll => {
-                let h = six / 2;
-                (base + (t % h) as f64 * rate, t % h, h)
+                if t < roll_at {
+                    (base + tt * rate, t, roll_at)
+                } else {
+                    let u = t - roll_at;
+                    (base + (roll_from + u) as f64 * rate, u, six - roll_at)
+                }
             }
             Op::PitchDown => (base + tt * rate * 0.75, t, six),
             Op::Half => (base + (tt + (i % 2) as f64 * six as f64) * rate * 0.5, t, six),
@@ -11184,7 +11606,17 @@ impl Drums {
         let high = x - low;
         let low_r = self.highpass[1].process(xr).low;
         let high_r = xr - low_r;
-        (x + (high - x) * self.hp_mix, xr + (high_r - xr) * self.hp_mix, xp * (1.0 - self.hp_mix))
+        let (mut l, mut r) = (x + (high - x) * self.hp_mix, xr + (high_r - xr) * self.hp_mix);
+        if self.swing.is_some() {
+            // The garage breakdown: the kick and the bass end of the loop
+            // filtered away, so the claps and hats float.
+            let target = if section == Section::Breakdown { 1.0 } else { 0.0 };
+            self.lc_mix += (target - self.lc_mix) * 0.0004;
+            let (ll, lr) = (self.low_cut[0].process(l).low, self.low_cut[1].process(r).low);
+            l -= ll * self.lc_mix;
+            r -= lr * self.lc_mix;
+        }
+        (l, r, xp * (1.0 - self.hp_mix))
     }
 }
 
@@ -11200,6 +11632,11 @@ impl Drums {
 
     pub fn pattern_name(&self) -> &'static str {
         self.pattern
+    }
+
+    /// Every hit of the recorded loop: (source position in samples, voice).
+    pub fn hits(&self) -> &[(usize, Voice)] {
+        &self.hits
     }
 
     /// A sixteenth and a bar at the track's tempo, in samples.
@@ -11581,6 +12018,118 @@ impl Fm2 {
         out
     }
 }
+
+}
+// ---- src/audio/garage.rs ----
+pub mod garage {
+//! The 2-step garage mode's own settings: how hard it swings, whether the
+//! bass moves in rhythm or holds as a drone, how often the chord stabs come
+//! and how bright they are. They only matter when the mode is 2-step garage;
+//! the other modes ignore them, so their sound never moves.
+
+/// Swing limits, in percent: the first sixteenth's share of each pair.
+pub const MIN_SWING: u8 = 50;
+pub const MAX_SWING: u8 = 66;
+
+/// How the bass plays in 2-step garage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BassMode {
+    /// The sustained FM bass the other modes use.
+    Drone,
+    /// A syncopated bassline on the chord roots, octaves and fifths.
+    Rhythmic,
+}
+
+pub const BASS_MODES: [BassMode; 2] = [BassMode::Drone, BassMode::Rhythmic];
+
+impl BassMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            BassMode::Drone => "drone",
+            BassMode::Rhythmic => "rhythmic",
+        }
+    }
+}
+
+/// How often the chord stabs play.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stabs {
+    Off,
+    /// A stab or two a bar, on the pushes.
+    Sparse,
+    /// Answering phrases, most bars.
+    Busy,
+}
+
+pub const STABS: [Stabs; 3] = [Stabs::Off, Stabs::Sparse, Stabs::Busy];
+
+impl Stabs {
+    pub fn name(self) -> &'static str {
+        match self {
+            Stabs::Off => "off",
+            Stabs::Sparse => "sparse",
+            Stabs::Busy => "busy",
+        }
+    }
+}
+
+/// The colour of the stabs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StabTone {
+    /// A soft, round electric-piano tone.
+    Dark,
+    /// A bright, glassy bell-organ tone.
+    Bright,
+}
+
+pub const STAB_TONES: [StabTone; 2] = [StabTone::Dark, StabTone::Bright];
+
+impl StabTone {
+    pub fn name(self) -> &'static str {
+        match self {
+            StabTone::Dark => "dark",
+            StabTone::Bright => "bright",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GarageSetup {
+    /// Swing, percent (50 = straight).
+    pub swing: u8,
+    pub bass: BassMode,
+    pub stabs: Stabs,
+    pub tone: StabTone,
+}
+
+impl GarageSetup {
+    pub const DEFAULT: GarageSetup = GarageSetup { swing: 58, bass: BassMode::Rhythmic, stabs: Stabs::Sparse, tone: StabTone::Bright };
+
+    /// The swing as a fraction (0.5 .. 0.66).
+    pub fn swing_fraction(self) -> f64 {
+        self.swing.clamp(MIN_SWING, MAX_SWING) as f64 / 100.0
+    }
+
+    /// One recipe word: swing in the low byte, then the bass, the stabs and
+    /// their tone.
+    pub fn word(self) -> u32 {
+        fn idx<T: PartialEq>(all: &[T], v: T) -> u32 {
+            all.iter().position(|x| *x == v).unwrap_or(0) as u32
+        }
+        self.swing as u32 | idx(&BASS_MODES, self.bass) << 8 | idx(&STABS, self.stabs) << 10 | idx(&STAB_TONES, self.tone) << 12
+    }
+
+    pub fn from_word(w: u32) -> Self {
+        GarageSetup {
+            swing: ((w & 0xff) as u8).clamp(MIN_SWING, MAX_SWING),
+            bass: BASS_MODES[(w >> 8 & 3) as usize % BASS_MODES.len()],
+            stabs: STABS[(w >> 10 & 3) as usize % STABS.len()],
+            tone: STAB_TONES[(w >> 12 & 1) as usize],
+        }
+    }
+}
+
+
 
 }
 // ---- src/audio/glitch.rs ----
@@ -12091,14 +12640,45 @@ pub enum Pace {
     HalfTime,
     /// Bars at the drum tempo (≈1.43 s at 168 BPM), the drums' own bar.
     Jungle,
+    /// 2-step garage: chords change every two drum bars (as half-time), and
+    /// the drums, bass and stabs play the garage way.
+    Garage,
 }
 
+/// The modes, in setup order.
+pub const PACES: [Pace; 3] = [Pace::HalfTime, Pace::Jungle, Pace::Garage];
+
 impl Pace {
+    pub fn name(self) -> &'static str {
+        match self {
+            Pace::HalfTime => "half-time",
+            Pace::Jungle => "jungle",
+            Pace::Garage => "2-step garage",
+        }
+    }
+
+    /// The mode called `name` (case and spacing ignored; "garage" is enough).
+    pub fn from_name(name: &str) -> Option<Pace> {
+        let key = |s: &str| s.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect::<String>();
+        let want = key(name);
+        PACES.into_iter().find(|p| key(p.name()) == want || (want == "garage" && *p == Pace::Garage))
+    }
+
+    /// Recipe value.
+    pub fn index(self) -> u32 {
+        match self {
+            Pace::HalfTime => 0,
+            Pace::Jungle => 1,
+            Pace::Garage => 2,
+        }
+    }
+
     /// A bar's length, given one half-time beat (`Tempo::beat`) in samples.
     pub fn bar_samples(self, beat: u64) -> u64 {
         match self {
             Pace::HalfTime => 4 * beat,
             Pace::Jungle => 2 * beat,
+            Pace::Garage => 4 * beat,
         }
     }
 }
@@ -12147,6 +12727,9 @@ pub struct Chord {
 
 #[derive(Clone, Debug)]
 pub struct Harmony {
+    /// How long each change's crossfade lasts (samples): a whole bar for
+    /// the slow modes, a single beat in 2-step garage.
+    morph_len: u64,
     pub scale: Scale,
     /// Pitch class of the tonic, 0 = C.
     pub key: u8,
@@ -12231,7 +12814,79 @@ impl Harmony {
         }
         let bar_samples = pace.bar_samples(beat);
         let cycle = weights.iter().map(|b| *b as u64).sum::<u64>() * bar_samples;
-        Harmony { scale, key, chords: out, bar_samples, cycle }
+        Harmony { morph_len: bar_samples, scale, key, chords: out, bar_samples, cycle }
+    }
+
+    /// 2-step garage's harmony: a genre progression, picked by the seed and
+    /// written as scale degrees, each chord two drum bars long and changing
+    /// on the downbeat (the loops crossfade over just the last beat).
+    ///
+    /// Major-third scales draw from the royal road (IV–V–iii–vi), ii–V–I–vi,
+    /// vi–IV–I–V and I–vi–IV–V; minor-third scales from i–iv–VII–III and
+    /// i–VII–III–iv, plus i–VI–III–VII and i–VII–VI–VII when the scale has a
+    /// flat sixth (so the VI is a major chord, never a diminished one).
+    /// `chords` (1-4) is how many chords the loop has.
+    pub fn garage(scale: Scale, chords: usize, beat: u64, key: u8, rng: &mut Rng) -> Harmony {
+        let iv = scale.intervals();
+        let n = iv.len() as i32;
+        let base = 48 + key as i32;
+        let note = |step: i32| -> f64 {
+            let oct = step.div_euclid(n);
+            (base + 12 * oct + iv[step.rem_euclid(n) as usize] as i32) as f64
+        };
+        let major = iv.get(2) == Some(&4);
+        let flat_six = iv.get(5) == Some(&8);
+        let k = chords.clamp(1, 4);
+        let mut pool: Vec<&[usize]> = match (major, k) {
+            (_, 1) => vec![&[0]],
+            (true, 2) => vec![&[0, 3], &[0, 4], &[5, 3]],
+            (true, 3) => vec![&[0, 3, 4], &[5, 3, 4], &[0, 5, 3]],
+            (true, _) => vec![&[3, 4, 2, 5], &[1, 4, 0, 5], &[5, 3, 0, 4], &[0, 5, 3, 4]],
+            (false, 2) => vec![&[0, 3], &[0, 6]],
+            (false, 3) => vec![&[0, 3, 6], &[0, 6, 3]],
+            (false, _) => vec![&[0, 3, 6, 2], &[0, 6, 2, 3]],
+        };
+        if !major && flat_six {
+            match k {
+                2 => pool.push(&[0, 5]),
+                3 => pool.push(&[0, 5, 6]),
+                4.. => pool.extend_from_slice(&[&[0, 5, 2, 6], &[0, 6, 5, 6]]),
+                _ => {}
+            }
+        }
+        let degrees = pool[rng.below(pool.len())];
+        // Room for the loops: a seventh chord, then its octave spread.
+        const SPREAD: [i32; 7] = [0, 2, 4, 6, 7, 9, 11];
+        let out: Vec<Chord> = degrees
+            .iter()
+            .map(|&d| {
+                let degree = d % n as usize;
+                let mut notes: Vec<f64> = SPREAD
+                    .iter()
+                    .map(|s| {
+                        let s = if n == 7 { *s } else { (*s as f64 * n as f64 / 7.0).round() as i32 };
+                        note(degree as i32 + s)
+                    })
+                    .collect();
+                let shift = if notes[0] > 55.0 { -12.0 } else { 0.0 };
+                for x in notes.iter_mut() {
+                    *x += shift;
+                    while *x > 90.0 {
+                        *x -= 12.0;
+                    }
+                }
+                notes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                notes.dedup();
+                let mut bass = (36 + key as i32 + iv[degree] as i32) as f64;
+                if bass > 45.0 {
+                    bass -= 12.0;
+                }
+                Chord { degree, notes, bass, bars: 1 }
+            })
+            .collect();
+        let bar_samples = Pace::Garage.bar_samples(beat);
+        let cycle = out.len() as u64 * bar_samples;
+        Harmony { morph_len: bar_samples / 8, scale, key, chords: out, bar_samples, cycle }
     }
 
     /// The progression at sample `t`. The last bar of each chord morphs into the next.
@@ -12245,9 +12900,9 @@ impl Harmony {
             let len = c.bars as u64 * self.bar_samples;
             if pos < len {
                 let bar = (pos / self.bar_samples) as u32;
-                let morph_start = len - self.bar_samples;
+                let morph_start = len - self.morph_len;
                 let morph = if pos >= morph_start {
-                    let x = (pos - morph_start) as f64 / self.bar_samples as f64;
+                    let x = (pos - morph_start) as f64 / self.morph_len as f64;
                     x * x * (3.0 - 2.0 * x) // smoothstep
                 } else {
                     0.0
@@ -12873,6 +13528,45 @@ pub fn kick(p: &KitParams, vel: f64, rng: &mut Rng) -> Vec<f64> {
         })
         .collect();
     shape(&mut v, 0.6 * p.punch, 7.0, p.kick_drive, 0.0);
+    v
+}
+
+/// A hand clap: four quick bursts of band-passed noise (several hands, a
+/// hair apart), then a short diffuse tail. Its colour follows the kit's
+/// snare wires, so it still belongs to the kit. Used by 2-step garage, layered
+/// over the kit's own snare.
+pub fn clap(p: &KitParams, vel: f64, rng: &mut Rng) -> Vec<f64> {
+    let len = (0.3 * SR) as usize;
+    let centre = (p.snare_wire * 0.6).clamp(900.0, 1800.0);
+    let mut bp = Svf::new(centre, 1.4, SR);
+    let mut air = Svf::new(centre * 2.4, 0.9, SR);
+    // Burst onsets (seconds) and their levels, nudged a little per hit.
+    let gaps = [0.0, 0.0095, 0.0185, 0.029];
+    let jit: [f64; 4] = core::array::from_fn(|_| rng.range(-0.0012, 0.0012));
+    let burst_k = decay_coef(0.0032, SR);
+    let tail_k = decay_coef(0.11, SR);
+    let mut bursts = [0.0f64; 4];
+    let mut tail = 0.0;
+    let mut v: Vec<f64> = (0..len)
+        .map(|i| {
+            let t = i as f64 / SR;
+            let n = rng.bipolar();
+            for k in 0..4 {
+                let on = (gaps[k] + jit[k]).max(0.0);
+                if t >= on && t - 1.0 / SR < on {
+                    bursts[k] = [0.75, 0.65, 0.85, 1.0][k];
+                }
+                bursts[k] *= burst_k;
+            }
+            if t >= gaps[3] && t - 1.0 / SR < gaps[3] {
+                tail = 0.55;
+            }
+            tail *= tail_k;
+            let env = bursts.iter().sum::<f64>() + tail;
+            (bp.process(n).band * 1.6 + air.process(n).band * 0.5) * env * vel
+        })
+        .collect();
+    shape(&mut v, 0.4 * p.punch, 3.0, p.snare_drive, 0.0);
     v
 }
 
@@ -13908,6 +14602,311 @@ impl Reverb {
 }
 
 }
+// ---- src/audio/stabs.rs ----
+pub mod stabs {
+//! 2-step garage's chord stabs: the melodic, bright-eyed part of the mode.
+//!
+//! Each stab is the current chord as an extended voicing around middle C —
+//! the third, fifth, seventh and ninth stacked from the scale, the root left
+//! to the bass — struck short on the pushes that make the groove skip (the
+//! "a" of one, the "and" of two, around beat three, the "a" of four), swung
+//! with the drums, in a two-bar call and answer. Stabs late in the bar
+//! before a change anticipate the next chord. In the glitchier sections a
+//! stab can stutter, retriggering a swung thirty-second later.
+//!
+//! Two tones: *dark*, a soft electric-piano FM with a barking attack that
+//! mellows; *bright*, a glassy bell-organ of a sine, its octave and a quickly
+//! fading inharmonic bell partial. Both sit in a dotted-eighth ping-pong echo
+//! and the shared reverb, under the glitch-ambient bed.
+//!
+//! Every bar's stabs are a pure function of seed 6 and the bar number.
+
+use crate::delay::PingPong;
+use crate::drums::Section;
+use crate::garage::{StabTone, Stabs as Density};
+use crate::harmony::Harmony;
+use crate::math::{midi_hz, sin_turns};
+use crate::rng::Rng;
+use crate::tempo::Tempo;
+
+/// Voices sounding at once (two overlapping four-note chords).
+const VOICES: usize = 8;
+/// Where stabs like to land, and how much (index = sixteenth in the bar).
+const PUSHES: [f64; 16] = [0.05, 0.0, 0.15, 0.6, 0.0, 0.1, 0.55, 0.2, 0.0, 0.15, 0.45, 0.4, 0.0, 0.15, 0.5, 0.2];
+/// Echo: a dotted eighth, three sixteenths.
+const ECHO_SIXTEENTHS: u64 = 3;
+const ECHO_FEEDBACK: f64 = 0.38;
+const ECHO_MIX: f64 = 0.32;
+const LEVEL: f64 = 0.34;
+
+/// One stab in a bar.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hit {
+    pub step: u8,
+    /// How long it is held, in sixteenths.
+    pub len: f64,
+    /// Retriggers a swung thirty-second later.
+    pub stutter: bool,
+    pub vel: f64,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Voice {
+    freq: f64,
+    phase: f64,
+    mod_phase: f64,
+    bell_phase: f64,
+    env: f64,
+    fenv: f64,
+    vel: f64,
+    pan: f64,
+    release_at: u64,
+    on: bool,
+}
+
+pub struct Stabs {
+    seed: u64,
+    density: Density,
+    tone: StabTone,
+    six: u64,
+    bar: u64,
+    push: u64,
+    voices: [Voice; VOICES],
+    next_voice: usize,
+    plan: Option<(u64, Vec<Hit>)>,
+    /// The stutter waiting to fire: (when, chord voicing).
+    pending: Option<(u64, Vec<f64>, f64, u64)>,
+    echo: PingPong,
+    /// The progression's voicings, worked out on first use.
+    voiced: Vec<Vec<f64>>,
+}
+
+/// The seventh chord on each chord of the progression (root, third, fifth
+/// and seventh from the scale), in close position around middle C and
+/// voice-led: each chord takes whichever inversion lies nearest the one
+/// before it, so the top line moves by step. (Scales with fewer than seven
+/// notes can repeat a pitch class; then the chord is the distinct ones.)
+pub fn voicings(harmony: &Harmony) -> Vec<Vec<f64>> {
+    let iv = harmony.scale.intervals();
+    let n = iv.len();
+    let pcs = |degree: usize| -> Vec<i64> {
+        let mut v: Vec<i64> = [0usize, 2, 4, 6].iter().map(|s| (harmony.key as i64 + iv[(degree + s) % n] as i64).rem_euclid(12)).collect();
+        v.dedup();
+        let first = v[0];
+        if v.len() > 1 && *v.last().unwrap() == first {
+            v.pop();
+        }
+        v
+    };
+    // Every close-position stack of the chord with its lowest note in 50..62.
+    let candidates = |p: &[i64]| -> Vec<Vec<f64>> {
+        let mut out = Vec::new();
+        for low in 50i64..=62 {
+            if let Some(r) = p.iter().position(|c| *c == low.rem_euclid(12)) {
+                let mut stack = vec![low];
+                for k in 1..p.len() {
+                    let want = p[(r + k) % p.len()];
+                    let mut m = stack[k - 1] + 1;
+                    while m.rem_euclid(12) != want {
+                        m += 1;
+                    }
+                    stack.push(m);
+                }
+                out.push(stack.iter().map(|m| *m as f64).collect());
+            }
+        }
+        out
+    };
+    let distance = |a: &[f64], b: &[f64]| -> f64 {
+        let k = a.len().min(b.len());
+        (0..k).map(|i| (a[i] - b[i]).abs()).sum::<f64>() + (a.len() as f64 - b.len() as f64).abs() * 3.0
+    };
+    let mut out: Vec<Vec<f64>> = Vec::new();
+    for c in &harmony.chords {
+        let cands = candidates(&pcs(c.degree));
+        let best = match out.last() {
+            // The first chord: centred on middle C and a little above.
+            None => cands.iter().min_by(|a, b| {
+                let centre = |v: &Vec<f64>| (v.iter().sum::<f64>() / v.len() as f64 - 63.0).abs();
+                centre(a).partial_cmp(&centre(b)).unwrap()
+            }),
+            Some(prev) => cands.iter().min_by(|a, b| distance(a, prev).partial_cmp(&distance(b, prev)).unwrap()),
+        };
+        out.push(best.cloned().unwrap_or_default());
+    }
+    out
+}
+
+impl Stabs {
+    pub fn new(seed: u64, density: Density, tone: StabTone, tempo: Tempo, swing: f64) -> Self {
+        let six = tempo.drum16;
+        Stabs {
+            seed,
+            density,
+            tone,
+            six,
+            bar: 16 * six,
+            push: ((2.0 * swing - 1.0) * six as f64) as u64,
+            voices: [Voice::default(); VOICES],
+            next_voice: 0,
+            plan: None,
+            pending: None,
+            voiced: Vec::new(),
+            echo: PingPong::new((ECHO_SIXTEENTHS * six) as usize, ECHO_FEEDBACK),
+        }
+    }
+
+    /// The stabs of bar `bar` in `section` (pure).
+    pub fn plan(&self, bar: u64, section: Section) -> Vec<Hit> {
+        if self.density == Density::Off {
+            return Vec::new();
+        }
+        let busy = self.density == Density::Busy;
+        // A two-bar call and answer, reshaped every eight bars.
+        let (figure, shape) = (bar % 2, bar / 8);
+        let mut rng = Rng::stream(self.seed, 0x57AB_0000 ^ (shape << 4) ^ figure);
+        // The answer bar is sparser than the call.
+        let want = match (busy, figure) {
+            (false, 0) => 2,
+            (false, _) => 1,
+            (true, 0) => 3,
+            (true, _) => 2,
+        };
+        let mut hits: Vec<Hit> = Vec::new();
+        let mut weights = PUSHES;
+        for _ in 0..want {
+            let i = rng.weighted(&weights);
+            weights[i] = 0.0;
+            // Keep a neighbour from crowding it.
+            if i > 0 {
+                weights[i - 1] *= 0.2;
+            }
+            if i < 15 {
+                weights[i + 1] *= 0.2;
+            }
+            let len = if rng.chance(0.75) { rng.range(0.6, 1.1) } else { rng.range(1.8, 3.0) };
+            hits.push(Hit { step: i as u8, len, stutter: false, vel: rng.range(0.75, 1.0) });
+        }
+        hits.sort_by(|a, b| a.step.cmp(&b.step));
+        match section {
+            // In the breakdown the stabs bloom into held chords.
+            Section::Breakdown => {
+                for h in hits.iter_mut() {
+                    h.len = h.len.max(2.5);
+                }
+            }
+            Section::Shuffle => {
+                let mut g = Rng::stream(self.seed, 0x57AB_5700 ^ bar);
+                for h in hits.iter_mut() {
+                    h.stutter = g.chance(0.35);
+                }
+            }
+            _ => {}
+        }
+        hits
+    }
+
+    fn onset(&self, step: u8) -> u64 {
+        step as u64 * self.six + if step % 2 == 1 { self.push } else { 0 }
+    }
+
+    fn strike(&mut self, clock: u64, chord: &[f64], vel: f64, len: u64) {
+        let mut r = Rng::new(crate::rng::hash3(self.seed, 0x57AB, clock));
+        for (k, m) in chord.iter().enumerate() {
+            let v = &mut self.voices[self.next_voice];
+            self.next_voice = (self.next_voice + 1) % VOICES;
+            *v = Voice {
+                freq: midi_hz(*m),
+                phase: 0.0,
+                mod_phase: 0.0,
+                bell_phase: 0.0,
+                env: 0.0,
+                fenv: 1.0,
+                vel: vel * r.range(0.85, 1.0),
+                // Spread across the field, low notes nearer the middle.
+                pan: (k as f64 - 1.5) / 1.5 * 0.45 + r.range(-0.1, 0.1),
+                // A hair of strum: each note a few samples later.
+                release_at: clock + len + k as u64 * 40,
+                on: true,
+            };
+        }
+    }
+
+    /// One stereo sample. `active` follows the drums' sections; `section` is
+    /// the current one.
+    pub fn next(&mut self, clock: u64, harmony: &Harmony, changing: bool, active: bool, section: Section) -> (f64, f64) {
+        let sr = crate::SAMPLE_RATE as f64;
+        let bar = clock / self.bar;
+        let in_bar = clock % self.bar;
+        if self.plan.as_ref().is_none_or(|(b, _)| *b != bar) {
+            self.plan = Some((bar, self.plan(bar, section)));
+        }
+        if self.voiced.is_empty() {
+            self.voiced = voicings(harmony);
+        }
+        if active {
+            let hit = self.plan.as_ref().unwrap().1.iter().copied().find(|h| self.onset(h.step) == in_bar);
+            if let Some(h) = hit {
+                let p = harmony.at(clock);
+                // Late in the bar before a change: anticipate the next chord.
+                let chord = if changing && h.step >= 12 { p.next } else { p.chord };
+                let notes = self.voiced[chord].clone();
+                let len = (h.len * self.six as f64) as u64;
+                self.strike(clock, &notes, h.vel, len);
+                if h.stutter {
+                    let gap = (self.six - if h.step % 2 == 1 { self.push } else { 0 }) / 2;
+                    self.pending = Some((clock + gap.max(1), notes, h.vel * 0.7, len / 2));
+                }
+            }
+            if self.pending.as_ref().is_some_and(|p| p.0 == clock) {
+                let (_, notes, vel, len) = self.pending.take().unwrap();
+                self.strike(clock, &notes, vel, len);
+            }
+        }
+        let (mut l, mut r) = (0.0, 0.0);
+        let bright = self.tone == StabTone::Bright;
+        for v in self.voices.iter_mut() {
+            if !v.on {
+                continue;
+            }
+            let gate = clock < v.release_at;
+            v.env += if gate { (1.0 - v.env) * 0.06 } else { -v.env * 0.0016 };
+            if !gate && v.env < 1e-4 {
+                v.on = false;
+                continue;
+            }
+            // The tone itself, decaying while held.
+            let s = if bright {
+                v.fenv *= 0.99955;
+                let bell = sin_turns(v.bell_phase) * 0.35 * v.fenv * v.fenv;
+                v.bell_phase += v.freq * 3.51 / sr;
+                v.bell_phase -= v.bell_phase.floor();
+                sin_turns(v.phase) * 0.7 + sin_turns(2.0 * v.phase) * 0.25 + bell
+            } else {
+                v.fenv *= 0.99985;
+                let index = 0.25 + 1.4 * v.fenv * v.fenv;
+                let m = sin_turns(v.mod_phase) * index / crate::math::TAU;
+                v.mod_phase += v.freq / sr;
+                v.mod_phase -= v.mod_phase.floor();
+                sin_turns(v.phase + m)
+            };
+            v.phase += v.freq / sr;
+            v.phase -= v.phase.floor();
+            // A slow natural decay under the gate.
+            let held = 0.55 + 0.45 * v.fenv;
+            let x = s * v.env * held * v.vel;
+            let (gl, gr) = crate::math::pan_gains(v.pan);
+            l += x * gl;
+            r += x * gr;
+        }
+        let (el, er) = self.echo.process(l * ECHO_MIX, r * ECHO_MIX);
+        ((l + el) * LEVEL, (r + er) * LEVEL)
+    }
+}
+
+
+
+}
 // ---- src/audio/telemetry.rs ----
 pub mod telemetry {
 //! Read-only views into the running engine, for visualisation.
@@ -14745,7 +15744,7 @@ use crate::texture::Grid;
 use crate::bass::Bass;
 use crate::delay::{PingPong, TapeEcho};
 use crate::drone::Drone;
-use crate::drums::Drums;
+use crate::drums::{Drums, Section};
 use crate::harmony::{Harmony, Pace, Scale};
 use crate::master::{MasterChain, MasterFx};
 use crate::overlay::CodeOverlay;
@@ -14957,6 +15956,9 @@ pub struct Settings {
     /// Whether the shrine's wildlife (chosen by the seed and biome) is heard
     /// and seen. Off by default.
     pub wildlife: bool,
+    /// The 2-step garage mode's swing, bass and stabs (ignored by the other
+    /// modes).
+    pub garage: crate::garage::GarageSetup,
 }
 
 pub const DEFAULT_SETTINGS: Settings =
@@ -14989,12 +15991,21 @@ pub const DEFAULT_SETTINGS: Settings =
         drone_rhythm: false,
         loop_rhythm: false,
         wildlife: false,
+        garage: crate::garage::GarageSetup::DEFAULT,
     };
 
 /// 0010's sound: the default settings with no atmosphere loops.
 pub const NO_LOOPS: [LoopDesign; 4] = [LoopDesign::OFF; 4];
 
 /// The ping-pong echo's delay, in glitch sixteenths (3/16).
+/// How far the garage bassline dips under each kick (sidechain).
+const GARAGE_BASS_DUCK: f64 = 0.5;
+/// Garage's balance: the drone about 6 dB back, the loops about 3 dB up.
+const GARAGE_DRONE: f64 = 0.5;
+const GARAGE_LOOPS: f64 = 1.4;
+/// How far the stabs dip under each kick, and how much of them goes to the reverb.
+const GARAGE_STAB_DUCK: f64 = 0.3;
+const STAB_SEND: f64 = 0.35;
 const ECHO_SIXTEENTHS: u64 = 3;
 /// The drums' tape echo delay, in drum sixteenths.
 const TAPE_SIXTEENTHS: u64 = 3;
@@ -15160,6 +16171,10 @@ pub struct Track {
     pub(crate) loop_windows: [f64; 4],
     pub(crate) echo: PingPong,
     pub(crate) bass: Bass,
+    /// 2-step garage's rhythmic bassline (in place of the drone bass).
+    pub(crate) bassline: Option<crate::bass::BassLine>,
+    /// 2-step garage's chord stabs.
+    pub(crate) stabs: Option<crate::stabs::Stabs>,
     pub(crate) reverb: Reverb,
     pub(crate) dc: [DcBlock; 2],
     // Display-only state: written by `tick`, never read by it.
@@ -15182,7 +16197,16 @@ impl Track {
         let tempo = Tempo::new(settings.bpm);
         let settings = Settings { bpm: tempo.bpm, ..settings };
         let chords = settings.chords.clamp(1, 4) as usize;
-        let harmony = Harmony::new(settings.scale, chords, settings.pace, tempo.beat(), key, &mut first, &mut rest);
+        let garage = settings.pace == Pace::Garage;
+        let harmony = Harmony::new(settings.scale, if garage { 1 } else { chords }, settings.pace, tempo.beat(), key, &mut first, &mut rest);
+        // 2-step garage: the drone holds the tonic (the harmony just built,
+        // one chord), while everything else follows the genre progression.
+        let (harmony, drone_harmony) = if garage {
+            let mut g = Rng::stream(seeds.s1, 0x6A4A_6E);
+            (Harmony::garage(settings.scale, chords, tempo.beat(), key, &mut g), harmony)
+        } else {
+            (harmony.clone(), harmony)
+        };
         let echo_delay = (ECHO_SIXTEENTHS * tempo.glitch16()) as usize;
         // Loop lengths: whole beats, 3-8 s, pairwise co-prime so all four drift.
         let mut avoid = 1u64;
@@ -15192,7 +16216,11 @@ impl Track {
             let beats = crate::atmos::loop_beats(tempo.beat(), LOOP_SECONDS[i], (i > 0).then_some(avoid));
             avoid = avoid.wrapping_mul(beats);
         }
-        let mut drums = Drums::new(seeds.s5, settings.kit, settings.space, &harmony, tempo);
+        let mut drums = if settings.pace == Pace::Garage {
+            Drums::garage(seeds.s5, settings.kit, settings.space, &harmony, tempo, settings.garage.swing_fraction())
+        } else {
+            Drums::new(seeds.s5, settings.kit, settings.space, &harmony, tempo)
+        };
         drums.set_reverse(settings.drum_reverse);
         Track {
             seeds,
@@ -15224,7 +16252,7 @@ impl Track {
                 )
             }),
             loop_windows: [1.0; 4],
-            drone: Drone::new(seeds.s1, harmony, first, rest),
+            drone: Drone::new(seeds.s1, drone_harmony, first, rest),
             drone_rhythm: crate::drone_rhythm::DroneRhythm::new(seeds.s7, settings.bpm),
             drone_filter: [Svf::new(1000.0, 0.7, sr), Svf::new(1000.0, 0.7, sr)],
             drone_tone_filter: [Svf::new(8_000.0, 0.7, sr), Svf::new(8_000.0, 0.7, sr)],
@@ -15232,6 +16260,11 @@ impl Track {
             history: History::new(),
             echo: PingPong::new(echo_delay, ECHO_FEEDBACK),
             bass: Bass::new(seeds.s4),
+            bassline: (settings.pace == Pace::Garage && settings.garage.bass == crate::garage::BassMode::Rhythmic)
+                .then(|| crate::bass::BassLine::new(seeds.s4, tempo, settings.garage.swing_fraction())),
+            stabs: (settings.pace == Pace::Garage && settings.garage.stabs != crate::garage::Stabs::Off).then(|| {
+                crate::stabs::Stabs::new(seeds.s6, settings.garage.stabs, settings.garage.tone, tempo, settings.garage.swing_fraction())
+            }),
             reverb: Reverb::new(),
             dc: Default::default(),
             meters: Meters::default(),
@@ -15344,6 +16377,8 @@ impl Track {
         let dl = (dl - (dl - self.shelf[0].process(dl)) * shelf) * duck;
         let dr = (dr - (dr - self.shelf[1].process(dr)) * shelf) * duck;
         self.duck_gain = duck;
+        // 2-step garage leans on the atmosphere loops: the drone steps back.
+        let (dl, dr) = if self.settings.pace == Pace::Garage { (dl * GARAGE_DRONE, dr * GARAGE_DRONE) } else { (dl, dr) };
         let others = 1.0 - GLITCH_DUCK * presence;
 
         // 2 & 3: glitch layers. A muted layer keeps ticking, so its pattern
@@ -15366,6 +16401,7 @@ impl Track {
                 let (l, r) = self.loops[k].next(clock, &self.harmony);
                 let level = if k % 2 == 0 { m.loop_level } else { m.loop2_level };
                 let g = duck * level * self.loop_windows[k];
+                let g = if self.settings.pace == Pace::Garage { g * GARAGE_LOOPS } else { g };
                 a[k] = if LOOP_WIDTH[k] == 1.0 {
                     // Full width: bit-identical to the old un-narrowed mix.
                     (l * g, r * g)
@@ -15378,16 +16414,48 @@ impl Track {
 
         // 4: bass, gliding to each chord's root during the morph bar. The bass
         // leaves with the drone: one arrangement, one envelope.
-        if clock % 32 == 0 {
+        // 2-step garage: the bassline and the stabs play with the groove
+        // (they carry the breakdown and rest when the drums do), lead into
+        // each chord change, and duck under each kick.
+        let garage = (self.settings.pace == Pace::Garage).then(|| {
             let p = self.harmony.at(clock);
-            let (a, z) = (self.harmony.chords[p.chord].bass, self.harmony.chords[p.next].bass);
-            self.bass.set_root(a + (z - a) * p.morph);
-        }
-        let b = self.bass.next(clock, &m) * window;
+            // The second of the chord's two bars, before a change.
+            let changing = p.next != p.chord && (clock / self.tempo.drum_bar()) % 2 == 1;
+            let section = self.drums.plan_now().map(|plan| plan.section);
+            let active = match section {
+                Some(s) => matches!(s, Section::Breakdown | Section::TwoStep | Section::Shuffle),
+                None => !self.drums.enabled(),
+            };
+            (p.chord, p.next, changing, active, section.unwrap_or(Section::TwoStep))
+        });
+        let stab = match (self.stabs.as_mut(), garage) {
+            (Some(st), Some((_, _, changing, active, section))) => {
+                let (sl, sr_) = st.next(clock, &self.harmony, changing, active, section);
+                let k = 1.0 - GARAGE_STAB_DUCK * punch;
+                Some((sl * k, sr_ * k))
+            }
+            _ => None,
+        };
+        let b = if let (Some(line), Some((chord, next, changing, active, _))) = (self.bassline.as_mut(), garage) {
+            let (root, next_root) = (self.harmony.chords[chord].bass, self.harmony.chords[next].bass);
+            // The bass walks up only into the top of the loop, not every change.
+            line.next(clock, root, next_root, changing && next == 0, active, &m) * (1.0 - GARAGE_BASS_DUCK * punch)
+        } else {
+            if clock % 32 == 0 {
+                let p = self.harmony.at(clock);
+                let (a, z) = (self.harmony.chords[p.chord].bass, self.harmony.chords[p.next].bass);
+                self.bass.set_root(a + (z - a) * p.morph);
+            }
+            self.bass.next(clock, &m) * window
+        };
 
         // Shared long reverb.
+        let send = |x: f64, k: usize| match stab {
+            Some(s) => x + [s.0, s.1][k] * STAB_SEND,
+            None => x,
+        };
         let (rl, rr) = self.reverb.process(
-            dl * DRONE_SEND
+            send(dl * DRONE_SEND
                 + a[0].0 * LOOP_SEND[0]
                 + a[1].0 * LOOP_SEND[1]
                 + a[2].0 * LOOP_SEND[2]
@@ -15397,8 +16465,8 @@ impl Track {
                 + g2.0 * GLITCH2_SEND
                 + el * ECHO_SEND
                 + d * DRUMS_SEND
-                + tl * TAPE_REVERB,
-            dr * DRONE_SEND
+                + tl * TAPE_REVERB, 0),
+            send(dr * DRONE_SEND
                 + a[0].1 * LOOP_SEND[0]
                 + a[1].1 * LOOP_SEND[1]
                 + a[2].1 * LOOP_SEND[2]
@@ -15408,7 +16476,7 @@ impl Track {
                 + g2.1 * GLITCH2_SEND
                 + er * ECHO_SEND
                 + d_r * DRUMS_SEND
-                + tr * TAPE_REVERB,
+                + tr * TAPE_REVERB, 1),
         );
 
         let mut l = dl * DRONE_DRY
@@ -15431,6 +16499,11 @@ impl Track {
             + d_r * DRUMS_DRY
             + rr * REVERB_WET
             + tr * TAPE_WET;
+
+        if let Some((sl, sr_)) = stab {
+            l += sl;
+            r += sr_;
+        }
 
         let fade_len = FADE_IN_SECONDS * crate::SAMPLE_RATE as u64;
         if clock < fade_len {
@@ -15756,7 +16829,7 @@ pub use self::track::*;
 // Baked recipe — this artifact is this shrine
 // ============================================================================
 /// `recipe::encode` of the settings the setup menu produced.
-const RECIPE: [u32; 165] = [15, 0, 1000, 0, 1000, 0, 9, 0, 1009, 0, 2026, 0, 168, 0, 11, 0, 7, 5, 0, 0, 3, 0, 5, 1, 168, 0, 12, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 3358395905, 51380, 188928180, 133152, 13376511, 66404, 9721599, 49764, 178, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 875638832, 0, 0, 0, 0, 0, 0, 0];
+const RECIPE: [u32; 166] = [16, 0, 1000, 0, 1000, 0, 9, 0, 1009, 0, 2026, 0, 168, 0, 11, 0, 7, 3, 0, 1, 4, 2, 5, 1, 132, 0, 12, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3358395905, 51380, 188928180, 133152, 13376511, 66404, 9721599, 49764, 178, 4, 5434, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 875638832, 0, 0, 0, 0, 0, 0, 0];
 
 /// Build date as `YYYYMMDD`, stamped when this file was emitted.
 const BUILD: u32 = 20261017;
@@ -15777,7 +16850,7 @@ const CAMERA_SPEED: i32 = -2;
 const NAME: &str = "0014";
 
 /// Everything needed to recreate this shrine.
-const INFO: &str = "ShrineGen  v20261017\n\nseed       1000\nbiome      Ecofuture\nweather    Clear\nwildlife   songbirds and frogs\n\nscale      Lydian\nroot note  seed picks\nchords     3\npace       half-time\ntempo      168 BPM\nkit        Acoustic break\nspace      Wide\ndrum rev   on\nmaster fx  off\ncode over  on · 14% · speed 45 · text 200%\narch       centred, upright\ncamera     -2°/s\nglitch 1   6 kinds · 55% · ×1 · 7 steps\nglitch 2   6 kinds · 45% · ×2 · 11 steps\ntranspose  0 semitones\n\ndrone arc  always on\ndrone tone off\nlayer 1    Voices\n  arc 1    always on\nlayer 2    Bells\n  arc 2    always on\nlayer 3    Off\n  arc 3    always on\nlayer 4    Off\n  arc 4    always on\n\nseeds      1000 9 1009 2026 168 11 7\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone off · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
+const INFO: &str = "ShrineGen  v20261017\n\nseed       1000\nbiome      Near Future\nweather    Clear\nwildlife   doves and cicadas\n\nscale      Ionian (major)\nroot note  seed picks\nchords     4\nmode       2-step garage\ntempo      132 BPM\nkit        Acoustic break\nspace      Wide\ndrum rev   off\nmaster fx  off\ncode over  on · 14% · speed 45 · text 200%\narch       centred, upright\ncamera     -2°/s\nglitch 1   6 kinds · 55% · ×1 · 7 steps\nglitch 2   6 kinds · 45% · ×2 · 11 steps\ntranspose  0 semitones\n\ndrone arc  always on\ndrone tone off\nlayer 1    Voices\n  arc 1    always on\nlayer 2    Bells\n  arc 2    always on\nlayer 3    Off\n  arc 3    always on\nlayer 4    Off\n  arc 4    always on\n\nseeds      1000 9 1009 2026 168 11 7\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone off · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
 
 // ============================================================================
 // C ABI — plain extern "C", loadable with the standard WebAssembly API

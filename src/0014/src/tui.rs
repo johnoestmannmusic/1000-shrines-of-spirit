@@ -80,6 +80,9 @@ enum Kind {
     Chords,
     Pace,
     Swing,
+    GarageBass,
+    GarageStabs,
+    GarageTone,
     Bpm,
     Kit,
     Space,
@@ -586,6 +589,11 @@ impl App {
                 Kind::Swing,
                 &mut rows,
             );
+            field("Bass".into(), s.garage.bass.name().to_string(), Kind::GarageBass, &mut rows);
+            field("Stabs".into(), s.garage.stabs.name().to_string(), Kind::GarageStabs, &mut rows);
+            if s.garage.stabs != shrine0014::garage::Stabs::Off {
+                field("Stab tone".into(), s.garage.tone.name().to_string(), Kind::GarageTone, &mut rows);
+            }
         }
         field("Tempo".into(), format!("{} BPM", s.bpm), Kind::Bpm, &mut rows);
         field("Kit".into(), s.kit.name().to_string(), Kind::Kit, &mut rows);
@@ -711,10 +719,32 @@ impl App {
             Kind::Pace => {
                 let s = &mut self.config.settings;
                 s.pace = cycle(&PACES, s.pace, forward);
-                // Garage lives around 130 BPM: move off the jungle default.
-                if s.pace == Pace::Garage && s.bpm == shrine0014::tempo::DEFAULT_BPM {
-                    s.bpm = 132;
+                // Garage lives around 130 BPM, in a plain major (or minor)
+                // scale, on a four-chord loop: move off the defaults that suit
+                // the other modes. Anything chosen by hand is kept.
+                if s.pace == Pace::Garage {
+                    if s.bpm == shrine0014::tempo::DEFAULT_BPM {
+                        s.bpm = 132;
+                    }
+                    if s.scale == shrine0014::DEFAULT_SETTINGS.scale {
+                        s.scale = shrine0014::harmony::Scale::Ionian;
+                    }
+                    if s.chords == shrine0014::DEFAULT_SETTINGS.chords {
+                        s.chords = 4;
+                    }
                 }
+            }
+            Kind::GarageBass => {
+                let g = &mut self.config.settings.garage;
+                g.bass = cycle(&shrine0014::garage::BASS_MODES, g.bass, forward);
+            }
+            Kind::GarageStabs => {
+                let g = &mut self.config.settings.garage;
+                g.stabs = cycle(&shrine0014::garage::STABS, g.stabs, forward);
+            }
+            Kind::GarageTone => {
+                let g = &mut self.config.settings.garage;
+                g.tone = cycle(&shrine0014::garage::STAB_TONES, g.tone, forward);
             }
             Kind::Swing => {
                 let g = &mut self.config.settings.garage;

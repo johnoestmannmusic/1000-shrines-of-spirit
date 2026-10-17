@@ -123,8 +123,10 @@ fn sim_for(a: &Args) -> Sim {
         seeds: DEFAULT_SEEDS,
         settings: shrine0014::Settings {
             pace: a.mode.unwrap_or(DEFAULT_SETTINGS.pace),
-            // Garage sits around 132 BPM unless told otherwise.
+            // Garage sits around 132 BPM, in Ionian, on four chords, unless told otherwise.
             bpm: a.bpm.unwrap_or(if a.mode == Some(shrine0014::harmony::Pace::Garage) { 132 } else { DEFAULT_SETTINGS.bpm }),
+            scale: if a.mode == Some(shrine0014::harmony::Pace::Garage) { shrine0014::harmony::Scale::Ionian } else { DEFAULT_SETTINGS.scale },
+            chords: if a.mode == Some(shrine0014::harmony::Pace::Garage) { 4 } else { DEFAULT_SETTINGS.chords },
             ..DEFAULT_SETTINGS
         },
         biome: a.biome,

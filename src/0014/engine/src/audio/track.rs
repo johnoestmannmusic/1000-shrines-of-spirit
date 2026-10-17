@@ -21,7 +21,7 @@ use crate::texture::Grid;
 use crate::bass::Bass;
 use crate::delay::{PingPong, TapeEcho};
 use crate::drone::Drone;
-use crate::drums::Drums;
+use crate::drums::{Drums, Section};
 use crate::harmony::{Harmony, Pace, Scale};
 use crate::master::{MasterChain, MasterFx};
 use crate::overlay::CodeOverlay;
@@ -275,6 +275,14 @@ pub const DEFAULT_SETTINGS: Settings =
 pub const NO_LOOPS: [LoopDesign; 4] = [LoopDesign::OFF; 4];
 
 /// The ping-pong echo's delay, in glitch sixteenths (3/16).
+/// How far the garage bassline dips under each kick (sidechain).
+const GARAGE_BASS_DUCK: f64 = 0.5;
+/// Garage's balance: the drone about 6 dB back, the loops about 3 dB up.
+const GARAGE_DRONE: f64 = 0.5;
+const GARAGE_LOOPS: f64 = 1.4;
+/// How far the stabs dip under each kick, and how much of them goes to the reverb.
+const GARAGE_STAB_DUCK: f64 = 0.3;
+const STAB_SEND: f64 = 0.35;
 const ECHO_SIXTEENTHS: u64 = 3;
 /// The drums' tape echo delay, in drum sixteenths.
 const TAPE_SIXTEENTHS: u64 = 3;
@@ -440,6 +448,10 @@ pub struct Track {
     pub(crate) loop_windows: [f64; 4],
     pub(crate) echo: PingPong,
     pub(crate) bass: Bass,
+    /// 2-step garage's rhythmic bassline (in place of the drone bass).
+    pub(crate) bassline: Option<crate::bass::BassLine>,
+    /// 2-step garage's chord stabs.
+    pub(crate) stabs: Option<crate::stabs::Stabs>,
     pub(crate) reverb: Reverb,
     pub(crate) dc: [DcBlock; 2],
     // Display-only state: written by `tick`, never read by it.
@@ -462,7 +474,16 @@ impl Track {
         let tempo = Tempo::new(settings.bpm);
         let settings = Settings { bpm: tempo.bpm, ..settings };
         let chords = settings.chords.clamp(1, 4) as usize;
-        let harmony = Harmony::new(settings.scale, chords, settings.pace, tempo.beat(), key, &mut first, &mut rest);
+        let garage = settings.pace == Pace::Garage;
+        let harmony = Harmony::new(settings.scale, if garage { 1 } else { chords }, settings.pace, tempo.beat(), key, &mut first, &mut rest);
+        // 2-step garage: the drone holds the tonic (the harmony just built,
+        // one chord), while everything else follows the genre progression.
+        let (harmony, drone_harmony) = if garage {
+            let mut g = Rng::stream(seeds.s1, 0x6A4A_6E);
+            (Harmony::garage(settings.scale, chords, tempo.beat(), key, &mut g), harmony)
+        } else {
+            (harmony.clone(), harmony)
+        };
         let echo_delay = (ECHO_SIXTEENTHS * tempo.glitch16()) as usize;
         // Loop lengths: whole beats, 3-8 s, pairwise co-prime so all four drift.
         let mut avoid = 1u64;
@@ -508,7 +529,7 @@ impl Track {
                 )
             }),
             loop_windows: [1.0; 4],
-            drone: Drone::new(seeds.s1, harmony, first, rest),
+            drone: Drone::new(seeds.s1, drone_harmony, first, rest),
             drone_rhythm: crate::drone_rhythm::DroneRhythm::new(seeds.s7, settings.bpm),
             drone_filter: [Svf::new(1000.0, 0.7, sr), Svf::new(1000.0, 0.7, sr)],
             drone_tone_filter: [Svf::new(8_000.0, 0.7, sr), Svf::new(8_000.0, 0.7, sr)],
@@ -516,6 +537,11 @@ impl Track {
             history: History::new(),
             echo: PingPong::new(echo_delay, ECHO_FEEDBACK),
             bass: Bass::new(seeds.s4),
+            bassline: (settings.pace == Pace::Garage && settings.garage.bass == crate::garage::BassMode::Rhythmic)
+                .then(|| crate::bass::BassLine::new(seeds.s4, tempo, settings.garage.swing_fraction())),
+            stabs: (settings.pace == Pace::Garage && settings.garage.stabs != crate::garage::Stabs::Off).then(|| {
+                crate::stabs::Stabs::new(seeds.s6, settings.garage.stabs, settings.garage.tone, tempo, settings.garage.swing_fraction())
+            }),
             reverb: Reverb::new(),
             dc: Default::default(),
             meters: Meters::default(),
@@ -628,6 +654,8 @@ impl Track {
         let dl = (dl - (dl - self.shelf[0].process(dl)) * shelf) * duck;
         let dr = (dr - (dr - self.shelf[1].process(dr)) * shelf) * duck;
         self.duck_gain = duck;
+        // 2-step garage leans on the atmosphere loops: the drone steps back.
+        let (dl, dr) = if self.settings.pace == Pace::Garage { (dl * GARAGE_DRONE, dr * GARAGE_DRONE) } else { (dl, dr) };
         let others = 1.0 - GLITCH_DUCK * presence;
 
         // 2 & 3: glitch layers. A muted layer keeps ticking, so its pattern
@@ -650,6 +678,7 @@ impl Track {
                 let (l, r) = self.loops[k].next(clock, &self.harmony);
                 let level = if k % 2 == 0 { m.loop_level } else { m.loop2_level };
                 let g = duck * level * self.loop_windows[k];
+                let g = if self.settings.pace == Pace::Garage { g * GARAGE_LOOPS } else { g };
                 a[k] = if LOOP_WIDTH[k] == 1.0 {
                     // Full width: bit-identical to the old un-narrowed mix.
                     (l * g, r * g)
@@ -662,16 +691,48 @@ impl Track {
 
         // 4: bass, gliding to each chord's root during the morph bar. The bass
         // leaves with the drone: one arrangement, one envelope.
-        if clock % 32 == 0 {
+        // 2-step garage: the bassline and the stabs play with the groove
+        // (they carry the breakdown and rest when the drums do), lead into
+        // each chord change, and duck under each kick.
+        let garage = (self.settings.pace == Pace::Garage).then(|| {
             let p = self.harmony.at(clock);
-            let (a, z) = (self.harmony.chords[p.chord].bass, self.harmony.chords[p.next].bass);
-            self.bass.set_root(a + (z - a) * p.morph);
-        }
-        let b = self.bass.next(clock, &m) * window;
+            // The second of the chord's two bars, before a change.
+            let changing = p.next != p.chord && (clock / self.tempo.drum_bar()) % 2 == 1;
+            let section = self.drums.plan_now().map(|plan| plan.section);
+            let active = match section {
+                Some(s) => matches!(s, Section::Breakdown | Section::TwoStep | Section::Shuffle),
+                None => !self.drums.enabled(),
+            };
+            (p.chord, p.next, changing, active, section.unwrap_or(Section::TwoStep))
+        });
+        let stab = match (self.stabs.as_mut(), garage) {
+            (Some(st), Some((_, _, changing, active, section))) => {
+                let (sl, sr_) = st.next(clock, &self.harmony, changing, active, section);
+                let k = 1.0 - GARAGE_STAB_DUCK * punch;
+                Some((sl * k, sr_ * k))
+            }
+            _ => None,
+        };
+        let b = if let (Some(line), Some((chord, next, changing, active, _))) = (self.bassline.as_mut(), garage) {
+            let (root, next_root) = (self.harmony.chords[chord].bass, self.harmony.chords[next].bass);
+            // The bass walks up only into the top of the loop, not every change.
+            line.next(clock, root, next_root, changing && next == 0, active, &m) * (1.0 - GARAGE_BASS_DUCK * punch)
+        } else {
+            if clock % 32 == 0 {
+                let p = self.harmony.at(clock);
+                let (a, z) = (self.harmony.chords[p.chord].bass, self.harmony.chords[p.next].bass);
+                self.bass.set_root(a + (z - a) * p.morph);
+            }
+            self.bass.next(clock, &m) * window
+        };
 
         // Shared long reverb.
+        let send = |x: f64, k: usize| match stab {
+            Some(s) => x + [s.0, s.1][k] * STAB_SEND,
+            None => x,
+        };
         let (rl, rr) = self.reverb.process(
-            dl * DRONE_SEND
+            send(dl * DRONE_SEND
                 + a[0].0 * LOOP_SEND[0]
                 + a[1].0 * LOOP_SEND[1]
                 + a[2].0 * LOOP_SEND[2]
@@ -681,8 +742,8 @@ impl Track {
                 + g2.0 * GLITCH2_SEND
                 + el * ECHO_SEND
                 + d * DRUMS_SEND
-                + tl * TAPE_REVERB,
-            dr * DRONE_SEND
+                + tl * TAPE_REVERB, 0),
+            send(dr * DRONE_SEND
                 + a[0].1 * LOOP_SEND[0]
                 + a[1].1 * LOOP_SEND[1]
                 + a[2].1 * LOOP_SEND[2]
@@ -692,7 +753,7 @@ impl Track {
                 + g2.1 * GLITCH2_SEND
                 + er * ECHO_SEND
                 + d_r * DRUMS_SEND
-                + tr * TAPE_REVERB,
+                + tr * TAPE_REVERB, 1),
         );
 
         let mut l = dl * DRONE_DRY
@@ -715,6 +776,11 @@ impl Track {
             + d_r * DRUMS_DRY
             + rr * REVERB_WET
             + tr * TAPE_WET;
+
+        if let Some((sl, sr_)) = stab {
+            l += sl;
+            r += sr_;
+        }
 
         let fade_len = FADE_IN_SECONDS * crate::SAMPLE_RATE as u64;
         if clock < fade_len {

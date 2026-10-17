@@ -104,3 +104,61 @@ fn a_garage_track_is_clean_and_the_swing_is_heard() {
     let jungle = Settings { pace: Pace::Jungle, ..DEFAULT_SETTINGS };
     assert_eq!(render(jungle, 12), render(Settings { garage: GarageSetup { swing: 66, ..GarageSetup::DEFAULT }, ..jungle }, 12));
 }
+
+#[test]
+fn the_bassline_and_stabs_are_heard_and_can_be_turned_off() {
+    use shrine0014::garage::{BassMode, Stabs, StabTone};
+    let garage = Settings { pace: Pace::Garage, bpm: 132, ..DEFAULT_SETTINGS };
+    let full = render(garage, 40);
+    let set = |g: GarageSetup| render(Settings { garage: g, ..garage }, 40);
+    let drone_bass = set(GarageSetup { bass: BassMode::Drone, ..GarageSetup::DEFAULT });
+    let no_stabs = set(GarageSetup { stabs: Stabs::Off, ..GarageSetup::DEFAULT });
+    let busy = set(GarageSetup { stabs: Stabs::Busy, ..GarageSetup::DEFAULT });
+    let dark = set(GarageSetup { tone: StabTone::Dark, ..GarageSetup::DEFAULT });
+    for (name, other) in [("drone bass", &drone_bass), ("no stabs", &no_stabs), ("busy stabs", &busy), ("dark stabs", &dark)] {
+        assert_ne!(&full, other, "{name} sounds the same as the default garage");
+        assert!(other.iter().all(|x| x.is_finite() && x.abs() <= 1.0), "{name} is not clean");
+    }
+}
+
+#[test]
+fn the_bassline_skips_with_the_groove_and_walks_into_changes() {
+    use shrine0014::bass::BassLine;
+    let line = BassLine::new(4, Tempo::new(132), 0.58);
+    for bar in 0..64 {
+        let notes = line.plan(bar, false);
+        assert!(notes.len() >= 2, "bar {bar}: {notes:?}");
+        assert!(notes.windows(2).all(|w| w[1].step > w[0].step + 1), "bar {bar}: notes crowd together");
+        assert!(notes.iter().all(|n| !n.approach));
+        let changing = line.plan(bar, true);
+        assert!(changing.last().is_some_and(|n| n.approach && n.semis == -1.0), "bar {bar}: no walk into the change");
+    }
+    // Two bars make a figure: it comes round again until the phrase varies.
+    assert_eq!(line.plan(0, false), line.plan(2, false));
+}
+
+#[test]
+fn garage_chords_change_every_two_bars_on_the_downbeat() {
+    let tempo = Tempo::new(132);
+    for scale in [Scale::Ionian, Scale::Dorian, Scale::Aeolian, Scale::Lydian, shrine0014::harmony::Scale::PentatonicMinor] {
+        for chords in 1..=4 {
+            for seed in 0..10u64 {
+                let h = Harmony::garage(scale, chords, tempo.beat(), 2, &mut Rng::new(seed));
+                assert_eq!(h.chords.len(), chords);
+                let two_bars = 2 * tempo.drum_bar();
+                for (i, c) in h.chords.iter().enumerate() {
+                    let start = i as u64 * two_bars;
+                    assert_eq!(h.at(start).chord, i, "{scale:?}: chord {i} is not there on its downbeat");
+                    assert_eq!(h.at(start + two_bars - 1).chord, i, "{scale:?}: chord {i} leaves early");
+                    assert!(c.bass >= 24.0 && c.bass <= 45.0);
+                }
+                // The crossfade is only the last beat.
+                if chords > 1 {
+                    assert_eq!(h.at(two_bars - tempo.drum_bar() / 2).morph, 0.0);
+                }
+                // Major scales begin on a major-key progression; nothing repeats back to back.
+                assert!(h.chords.windows(2).all(|w| w[0].degree != w[1].degree), "{scale:?}: a chord repeats");
+            }
+        }
+    }
+}

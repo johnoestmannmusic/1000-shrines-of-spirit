@@ -655,6 +655,22 @@ impl Drums {
         self.plans[0].clone().unwrap()
     }
 
+    /// Where a stutter retriggers within a step, and where in the slice the
+    /// repeat reads from. Halfway, from the slice's start — except a swung
+    /// garage off-beat, whose hit sits late in its slice: there the repeat
+    /// starts at the hit and lands halfway through the rest, so both strikes
+    /// stay on the swung grid.
+    fn roll_split(&self, slice: u8) -> (u64, u64) {
+        let six = self.six;
+        match self.swing {
+            Some(swing) if slice % 2 == 1 => {
+                let push = ((2.0 * swing - 1.0) * six as f64) as u64;
+                (push + (six - push) / 2, push)
+            }
+            _ => (six / 2, 0),
+        }
+    }
+
     /// The source range a step reads, for counting hits.
     fn range(&self, step: Step, i: usize) -> (f64, f64) {
         let base = step.slice as f64 * self.src16 as f64;
@@ -699,7 +715,8 @@ impl Drums {
         };
 
         // Retriggers: count which drum hits this step plays (display only).
-        let retrigger = t == 0 || (st.op == Op::Roll && t == six / 2);
+        let (roll_at, roll_from) = self.roll_split(st.slice);
+        let retrigger = t == 0 || (st.op == Op::Roll && t == roll_at);
         if retrigger && section != Section::Out {
             self.step = i;
             let (lo, hi) = self.range(st, i);
@@ -720,8 +737,12 @@ impl Drums {
             Op::Play => (base + tt * rate, t, six),
             Op::Reverse => (base + len - 1.0 - tt * rate, t, six),
             Op::Roll => {
-                let h = six / 2;
-                (base + (t % h) as f64 * rate, t % h, h)
+                if t < roll_at {
+                    (base + tt * rate, t, roll_at)
+                } else {
+                    let u = t - roll_at;
+                    (base + (roll_from + u) as f64 * rate, u, six - roll_at)
+                }
             }
             Op::PitchDown => (base + tt * rate * 0.75, t, six),
             Op::Half => (base + (tt + (i % 2) as f64 * six as f64) * rate * 0.5, t, six),

@@ -212,6 +212,9 @@ pub struct Chord {
 
 #[derive(Clone, Debug)]
 pub struct Harmony {
+    /// How long each change's crossfade lasts (samples): a whole bar for
+    /// the slow modes, a single beat in 2-step garage.
+    morph_len: u64,
     pub scale: Scale,
     /// Pitch class of the tonic, 0 = C.
     pub key: u8,
@@ -296,7 +299,79 @@ impl Harmony {
         }
         let bar_samples = pace.bar_samples(beat);
         let cycle = weights.iter().map(|b| *b as u64).sum::<u64>() * bar_samples;
-        Harmony { scale, key, chords: out, bar_samples, cycle }
+        Harmony { morph_len: bar_samples, scale, key, chords: out, bar_samples, cycle }
+    }
+
+    /// 2-step garage's harmony: a genre progression, picked by the seed and
+    /// written as scale degrees, each chord two drum bars long and changing
+    /// on the downbeat (the loops crossfade over just the last beat).
+    ///
+    /// Major-third scales draw from the royal road (IV–V–iii–vi), ii–V–I–vi,
+    /// vi–IV–I–V and I–vi–IV–V; minor-third scales from i–iv–VII–III and
+    /// i–VII–III–iv, plus i–VI–III–VII and i–VII–VI–VII when the scale has a
+    /// flat sixth (so the VI is a major chord, never a diminished one).
+    /// `chords` (1-4) is how many chords the loop has.
+    pub fn garage(scale: Scale, chords: usize, beat: u64, key: u8, rng: &mut Rng) -> Harmony {
+        let iv = scale.intervals();
+        let n = iv.len() as i32;
+        let base = 48 + key as i32;
+        let note = |step: i32| -> f64 {
+            let oct = step.div_euclid(n);
+            (base + 12 * oct + iv[step.rem_euclid(n) as usize] as i32) as f64
+        };
+        let major = iv.get(2) == Some(&4);
+        let flat_six = iv.get(5) == Some(&8);
+        let k = chords.clamp(1, 4);
+        let mut pool: Vec<&[usize]> = match (major, k) {
+            (_, 1) => vec![&[0]],
+            (true, 2) => vec![&[0, 3], &[0, 4], &[5, 3]],
+            (true, 3) => vec![&[0, 3, 4], &[5, 3, 4], &[0, 5, 3]],
+            (true, _) => vec![&[3, 4, 2, 5], &[1, 4, 0, 5], &[5, 3, 0, 4], &[0, 5, 3, 4]],
+            (false, 2) => vec![&[0, 3], &[0, 6]],
+            (false, 3) => vec![&[0, 3, 6], &[0, 6, 3]],
+            (false, _) => vec![&[0, 3, 6, 2], &[0, 6, 2, 3]],
+        };
+        if !major && flat_six {
+            match k {
+                2 => pool.push(&[0, 5]),
+                3 => pool.push(&[0, 5, 6]),
+                4.. => pool.extend_from_slice(&[&[0, 5, 2, 6], &[0, 6, 5, 6]]),
+                _ => {}
+            }
+        }
+        let degrees = pool[rng.below(pool.len())];
+        // Room for the loops: a seventh chord, then its octave spread.
+        const SPREAD: [i32; 7] = [0, 2, 4, 6, 7, 9, 11];
+        let out: Vec<Chord> = degrees
+            .iter()
+            .map(|&d| {
+                let degree = d % n as usize;
+                let mut notes: Vec<f64> = SPREAD
+                    .iter()
+                    .map(|s| {
+                        let s = if n == 7 { *s } else { (*s as f64 * n as f64 / 7.0).round() as i32 };
+                        note(degree as i32 + s)
+                    })
+                    .collect();
+                let shift = if notes[0] > 55.0 { -12.0 } else { 0.0 };
+                for x in notes.iter_mut() {
+                    *x += shift;
+                    while *x > 90.0 {
+                        *x -= 12.0;
+                    }
+                }
+                notes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                notes.dedup();
+                let mut bass = (36 + key as i32 + iv[degree] as i32) as f64;
+                if bass > 45.0 {
+                    bass -= 12.0;
+                }
+                Chord { degree, notes, bass, bars: 1 }
+            })
+            .collect();
+        let bar_samples = Pace::Garage.bar_samples(beat);
+        let cycle = out.len() as u64 * bar_samples;
+        Harmony { morph_len: bar_samples / 8, scale, key, chords: out, bar_samples, cycle }
     }
 
     /// The progression at sample `t`. The last bar of each chord morphs into the next.
@@ -310,9 +385,9 @@ impl Harmony {
             let len = c.bars as u64 * self.bar_samples;
             if pos < len {
                 let bar = (pos / self.bar_samples) as u32;
-                let morph_start = len - self.bar_samples;
+                let morph_start = len - self.morph_len;
                 let morph = if pos >= morph_start {
-                    let x = (pos - morph_start) as f64 / self.bar_samples as f64;
+                    let x = (pos - morph_start) as f64 / self.morph_len as f64;
                     x * x * (3.0 - 2.0 * x) // smoothstep
                 } else {
                     0.0
