@@ -1,0 +1,35 @@
+# 0015 workspace.
+#
+#   engine/  the artifact: zero dependencies, deterministic visuals + music,
+#            plain C-ABI WASM surface. Standard library only.
+#   (root)   the `shrine-0015` host: the setup menu and `--emit`. Its crates
+#            (terminal + sound card) never touch the engine or the artifact.
+
+[workspace]
+members = ["engine"]
+resolver = "2"
+
+[package]
+name = "shrine-0015"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "0015 - a procedural isometric shrine: one coupled visual + music artifact."
+publish = false
+default-run = "shrine-0015"
+
+[dependencies]
+shrine0015 = { package = "shrine-0015-engine", path = "engine" }
+# Host-only: the terminal UI and sound card. Never part of the artifact.
+ratatui = "0.30"
+cpal = "0.18"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+# Development builds stay optimised: rendering and audio are heavy even while
+# iterating. Optimisation level never changes results (no fast-math/FMA).
+[profile.dev]
+opt-level = 2
