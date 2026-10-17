@@ -83,6 +83,8 @@ enum Kind {
     GarageBass,
     GarageStabs,
     GarageTone,
+    GarageProgression,
+    GarageLift,
     Bpm,
     Kit,
     Space,
@@ -596,6 +598,19 @@ impl App {
                 Kind::Swing,
                 &mut rows,
             );
+            field(
+                "Progression".into(),
+                match s.garage.progression as usize {
+                    0 => "seed picks".to_string(),
+                    i => {
+                        let p = &shrine0014::harmony::PROGRESSIONS[i - 1];
+                        format!("{} · {}", p.name, p.numerals)
+                    }
+                },
+                Kind::GarageProgression,
+                &mut rows,
+            );
+            field("Key lift".into(), s.garage.lift.name().to_string(), Kind::GarageLift, &mut rows);
             field("Bass".into(), s.garage.bass.name().to_string(), Kind::GarageBass, &mut rows);
             field("Stabs".into(), s.garage.stabs.name().to_string(), Kind::GarageStabs, &mut rows);
             if s.garage.stabs != shrine0014::garage::Stabs::Off {
@@ -740,6 +755,19 @@ impl App {
                         s.chords = 4;
                     }
                 }
+            }
+            Kind::GarageProgression => {
+                let g = &mut self.config.settings.garage;
+                let n = shrine0014::harmony::PROGRESSIONS.len() as u8 + 1;
+                g.progression = if forward { (g.progression + 1) % n } else { (g.progression + n - 1) % n };
+                // A named progression needs all four chords.
+                if g.progression > 0 {
+                    self.config.settings.chords = 4;
+                }
+            }
+            Kind::GarageLift => {
+                let g = &mut self.config.settings.garage;
+                g.lift = cycle(&shrine0014::garage::KEY_LIFTS, g.lift, forward);
             }
             Kind::GarageBass => {
                 let g = &mut self.config.settings.garage;

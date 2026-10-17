@@ -212,6 +212,9 @@ pub struct Performance {
     pub offset: f64,
     /// Keep the FM bells' overtones whole-number (2-step garage).
     pub harmonic: bool,
+    /// 2-step garage: the swung sixteenth grid (length, push), so scattered
+    /// grains land on it. (0, 0) leaves them free.
+    pub grid: (usize, usize),
 }
 
 pub const HARMONICS: usize = 12;
@@ -351,14 +354,14 @@ fn perform(timbre: LoopTimbre, rng: &mut Rng, chord: &[f64], beats: u64, beat: u
     } else {
         Vec::new()
     };
-    Performance { notes, strikes, waves, offset: rng.unit(), harmonic: false }
+    Performance { notes, strikes, waves, offset: rng.unit(), harmonic: false, grid: (0, 0) }
 }
 
 /// An event layer's per-chord settings: a few chord tones for the Knock grains
 /// to strike, and a phase offset. The grid itself is the design.
 fn perform_events(rng: &mut Rng, chord: &[f64]) -> Performance {
     let notes = pick_notes(rng, chord, 3);
-    Performance { notes, strikes: Vec::new(), waves: Vec::new(), offset: rng.unit(), harmonic: false }
+    Performance { notes, strikes: Vec::new(), waves: Vec::new(), offset: rng.unit(), harmonic: false, grid: (0, 0) }
 }
 
 /// Band-limited sawtooth (polyBLEP), phase in turns, `dt` = increment per sample.
@@ -889,6 +892,12 @@ fn render_channel(timbre: LoopTimbre, perf: &Performance, rng: &mut Rng, len: us
                 let dur = (rng.range(0.02, 0.07) * SR) as usize;
                 let (amp, phase) = (rng.range(0.3, 1.0), rng.unit());
                 let mut start = rng.below(len);
+                if perf.grid.0 > 0 {
+                    // Garage: onto the swung sixteenth grid.
+                    let (six, push) = perf.grid;
+                    let k = start / six;
+                    start = (k * six + if k % 2 == 1 { push } else { 0 }) % len;
+                }
                 while start < total {
                     let mut ph = phase;
                     for (k, o) in out[start..(start + dur).min(total)].iter_mut().enumerate() {
@@ -1029,6 +1038,7 @@ impl AtmosLoop {
                     LoopDesign::Events(_) => perform_events(&mut rng, &chord.notes),
                 };
                 perf.harmonic = harmony.garage;
+                perf.grid = (harmony.sixteenth as usize, harmony.swing_push as usize);
                 if transpose != 0 {
                     for n in &mut perf.notes {
                         *n += transpose as f64;
@@ -1067,9 +1077,9 @@ impl AtmosLoop {
             return (0.0, 0.0);
         }
         if clock % CONTROL as u64 == 0 {
-            let p = harmony.at(clock);
-            let x = 0.25 * p.morph;
-            self.mix = (p.chord, p.next, cos_turns(x), sin_turns(x));
+            let (a, b, morph) = harmony.loop_mix(clock);
+            let x = 0.25 * morph;
+            self.mix = (a, b, cos_turns(x), sin_turns(x));
         }
         let i = (clock % self.len as u64) as usize;
         let (a, b, ga, gb) = self.mix;

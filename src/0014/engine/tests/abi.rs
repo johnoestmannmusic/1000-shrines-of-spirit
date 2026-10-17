@@ -56,6 +56,8 @@ fn custom() -> SimConfig {
                 bass: shrine0014::garage::BassMode::Drone,
                 stabs: shrine0014::garage::Stabs::Busy,
                 tone: shrine0014::garage::StabTone::Dark,
+                progression: 4,
+                lift: shrine0014::garage::KeyLift::Every8,
             },
             drone_rhythm: true,
             loop_rhythm: true,

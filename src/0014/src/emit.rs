@@ -251,7 +251,14 @@ pub fn info(config: &SimConfig, build: u32) -> String {
         format!("scale      {}", s.scale.name()),
         format!("root note  {key}"),
         format!("chords     {}", s.chords),
-        format!("mode       {}", s.pace.name()),
+        format!(
+            "mode       {}",
+            if s.pace == shrine0014::harmony::Pace::Garage {
+                format!("{} · {} · key lift {}", s.pace.name(), s.garage.progression_name(), s.garage.lift.name())
+            } else {
+                s.pace.name().to_string()
+            }
+        ),
         format!("tempo      {} BPM", s.bpm),
         format!("start      {}", if s.start_s == 0 { "at the beginning".to_string() } else { format!("{} s in", s.start_s) }),
         format!("kit        {}", s.kit.name()),

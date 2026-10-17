@@ -267,3 +267,15 @@ fn butterflies_are_a_rare_sight_in_clear_weather() {
     // Clear no longer blows leaves about: those were what read as butterflies.
     assert_eq!(Weather::new(WeatherKind::Clear, 1).state(30.0).leaves, 0.0);
 }
+
+#[test]
+fn the_wind_is_dry() {
+    // No rain at all in Wind: none drawn, no splashes, no taps, no wash.
+    for seed in [1u64, 1003, 4242] {
+        let w = Weather::new(WeatherKind::Wind, seed);
+        for i in 0..400 {
+            assert_eq!(w.state(i as f64 * 1.7).rain, 0.0, "seed {seed}: rain in the wind");
+        }
+        assert!(w.events(EventKind::Splash, 0.0, 600.0).is_empty(), "seed {seed}: splashes in the wind");
+    }
+}

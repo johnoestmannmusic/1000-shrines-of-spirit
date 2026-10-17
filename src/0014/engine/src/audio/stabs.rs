@@ -27,8 +27,10 @@ use crate::tempo::Tempo;
 const VOICES: usize = 8;
 /// Where stabs like to land, and how much (index = sixteenth in the bar).
 const PUSHES: [f64; 16] = [0.05, 0.0, 0.15, 0.6, 0.0, 0.1, 0.55, 0.2, 0.0, 0.15, 0.45, 0.4, 0.0, 0.15, 0.5, 0.2];
-/// Echo: a dotted eighth, three sixteenths.
-const ECHO_SIXTEENTHS: u64 = 3;
+/// Echo: a dotted quarter, six sixteenths — an even number, so every repeat
+/// keeps its stab's place in the swing (a dotted eighth, three, flips each
+/// repeat to the other side of it and lands it off the groove).
+const ECHO_SIXTEENTHS: u64 = 6;
 const ECHO_FEEDBACK: f64 = 0.38;
 const ECHO_MIX: f64 = 0.32;
 const LEVEL: f64 = 0.34;
@@ -90,14 +92,13 @@ const CUT: u64 = 480;
 /// before it, so the top line moves by step. (Scales with fewer than seven
 /// notes can repeat a pitch class; then the chord is the distinct ones.)
 pub fn voicings(harmony: &Harmony) -> Vec<Vec<f64>> {
-    let iv = harmony.scale.intervals();
-    let n = iv.len();
-    let pcs = |degree: usize| -> Vec<i64> {
-        let mut v: Vec<i64> = [0usize, 2, 4, 6].iter().map(|s| (harmony.key as i64 + iv[(degree + s) % n] as i64).rem_euclid(12)).collect();
-        v.dedup();
-        let first = v[0];
-        if v.len() > 1 && *v.last().unwrap() == first {
-            v.pop();
+    // Each chord's own tones (borrowed chords included), root first.
+    let pcs = |c: &crate::harmony::Chord| -> Vec<i64> {
+        let mut v: Vec<i64> = Vec::new();
+        for t in &c.tones {
+            if !v.contains(&(*t as i64)) {
+                v.push(*t as i64);
+            }
         }
         v
     };
@@ -126,7 +127,7 @@ pub fn voicings(harmony: &Harmony) -> Vec<Vec<f64>> {
     };
     let mut out: Vec<Vec<f64>> = Vec::new();
     for c in &harmony.chords {
-        let cands = candidates(&pcs(c.degree));
+        let cands = candidates(&pcs(c));
         let best = match out.last() {
             // The first chord: centred on middle C and a little above.
             None => cands.iter().min_by(|a, b| {
@@ -336,7 +337,7 @@ mod tests {
         for scale in [crate::harmony::Scale::Ionian, crate::harmony::Scale::Dorian, crate::harmony::Scale::Aeolian] {
             for seed in 0..12 {
                 let t = Tempo::new(132);
-                let h = Harmony::garage(scale, 4, t.beat(), 2, &mut Rng::new(seed));
+                let h = Harmony::garage(scale, 4, t.beat(), 2, &mut Rng::new(seed), 0, 0);
                 let v = voicings(&h);
                 for (i, chord) in v.iter().enumerate() {
                     assert_eq!(chord.len(), 4, "{scale:?}: a seventh chord has four notes");

@@ -305,10 +305,11 @@ impl Drums {
         let swing = self.swing.unwrap_or(0.5);
         // Each odd sixteenth is pushed late by the swing.
         let push = ((2.0 * swing - 1.0) * six as f64) as usize;
+        // A hair of human timing, only ever late: every hit begins inside its
+        // own slice, so moving or fading a slice never splits a hit.
         let at = |step: usize, rng: &mut Rng| {
-            let jitter = (rng.bipolar() * 24.0) as i64;
-            let base = step * six + if step % 2 == 1 { push } else { 0 };
-            (base as i64 + jitter).max(0) as usize
+            let jitter = (rng.unit() * 24.0) as usize;
+            step * six + if step % 2 == 1 { push } else { 0 } + jitter
         };
         // The skip: bar A's second kick lands just past beat three (the "and"
         // or the "a"), bar B's anywhere from just before to well after it.
@@ -393,8 +394,11 @@ impl Drums {
             };
             // Where this hit sits: kick centred; snare-type hits 45–65% to a random side,
             // cymbals 50–75% (never near centre, so the clicks always use the space).
+            // (2-step garage keeps its claps in the middle with the kick: they
+            // are the backbeat. Its rims and ghosts still spread out.)
             let (lo, hi) = match voice {
                 Voice::Kick => (0.0, 0.0),
+                Voice::Snare if garage => (0.0, 0.0),
                 Voice::Snare | Voice::Ghost => (0.45, 0.65),
                 _ => (0.5, 0.75),
             };
@@ -537,9 +541,13 @@ impl Drums {
             _ => 0.08,
         } + if fill && section != Section::Out { 0.15 } else { 0.0 };
         let strong = self.strong_slices();
-        // Slices holding only hats and rims: what a stutter or a dropped kick borrows.
-        let weak: Vec<u8> = (0..SLICES as u8).filter(|s| !strong.contains(s)).collect();
+        // Slices holding only hats and rims: what a stutter or a dropped kick
+        // borrows — only from the same place in the swing (an on-beat slice
+        // for an on-beat step, a pushed one for a pushed step), so a borrowed
+        // hit lands exactly where that step's own would.
+        let weak_at = |i: usize| -> Vec<u8> { (0..SLICES as u8).filter(|s| !strong.contains(s) && *s as usize % 2 == i % 2).collect() };
         for (i, s) in steps.iter_mut().enumerate().skip(1) {
+            let weak = weak_at(i);
             if rng.chance(p) {
                 *s = match rng.weighted(&[0.35, 0.2, 0.2, 0.25]) {
                     // A hat stutter.

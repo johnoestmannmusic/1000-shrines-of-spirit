@@ -92,10 +92,16 @@ break), or **2-step garage** — melodic, optimistic, swung. In garage:
   hats, a kick-less breakdown, the full 2-step and 2-step with glitch edits
   (hat stutters, reversed claps, dropped kicks), all swung by **Swing**
   (50–66 %);
-- the chords follow a genre progression picked by the seed (the royal road
-  IV–V–iii–vi, ii–V–I–vi and others; minor-key ones in minor scales), changing
-  every two bars on the downbeat, while the drone holds an open fifth on the
-  tonic beneath (no third or colour notes to rub against the chords);
+- the chords follow a **Progression** — the seed's pick from the scale's
+  family, or one chosen by name — with chords borrowed from outside the key
+  where it asks (secondary dominants, a borrowed iv, ♭VII): *Royal road*
+  (IVmaj7 V7 iii7 vi7), *Royal road, bright* (… III7 …), *Soft turn*,
+  *City lights*, *Sunrise*, *Menu loop*, *Wistful*, *Two-five-one*,
+  *Pop loop*, *Daydream*, and in minor *Night drive*, *Neon*, *Climb*,
+  *Rain city* and *Descent*. They change every two bars on the downbeat;
+  **Key lift** (*every 4* or *every 8 loops*) steps the whole piece up a
+  whole tone for as long, then home. The drone holds an open fifth on the
+  tonic beneath, and steps back under any chord that rubs against it;
 - **Bass** *rhythmic* plays a syncopated, swung bassline on the chord roots,
   octaves and fifths that walks into the top of the loop (*drone* keeps the
   sustained bass);
@@ -104,12 +110,12 @@ break), or **2-step garage** — melodic, optimistic, swung. In garage:
   **Stab tone**, through a dotted-eighth echo;
 - the drone steps back and the atmosphere loops come forward, voiced as open
   shells (root, fifth, tenth) above the stabs; bells and glitch pings keep to
-  whole-number overtones, the glitch layers pitch only to the root, second and
-  fifth, and at each change the stab echo clears and the reverb send dips, so
+  whole-number overtones, the glitch layers pitch only to the root and fifth, and at each change the stab echo clears and the reverb send dips, so
   no chord rings over the next.
 
 Choosing garage moves a default tempo to 132 BPM, Lydian to Ionian and three
-chords to four; anything set by hand is kept.
+chords to four; anything set by hand is kept. Two bright Japanese scales join
+the Scale list for every mode: the major pentatonic (*yonanuki*) and *Ryukyu*.
 **Camera · Rotation speed** orbits
 the whole viewport around the shrine, in degrees per second (default 0); the
 **Code plane** setting puts the scrolling source on a *static* plane, a *flat*

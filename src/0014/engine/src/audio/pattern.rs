@@ -24,6 +24,10 @@ pub struct LayerConfig {
     /// The ping's upper partial, as a ratio of its note; 0 = the usual
     /// inharmonic 2.756 (2-step garage uses a whole-number 3).
     pub ping_ratio: f64,
+    /// 2-step garage: a ratchet that splits a step into sixteenths swings
+    /// its off-beat strikes late by `swing_push` (0 = straight).
+    pub swing_push: u64,
+    pub sixteenth: u64,
 }
 
 const MAX_VOICES: usize = 8;
@@ -197,7 +201,14 @@ impl Layer {
         }
         if let Some(ev) = self.pattern[step] {
             let sub = step_len / ev.ratchet as u64;
-            if phase % sub == 0 && density > ev.threshold {
+            let on = if self.cfg.swing_push > 0 && sub == self.cfg.sixteenth {
+                // Swung sixteenths: the odd strikes come late.
+                let k = phase / sub;
+                phase == k * sub + if k % 2 == 1 { self.cfg.swing_push } else { 0 }
+            } else {
+                phase % sub == 0
+            };
+            if on && density > ev.threshold {
                 self.trigger(ev, history);
             }
         }

@@ -365,9 +365,12 @@
     targetYaw = Math.max(-1, Math.min(1, ((clientX - r.left) / r.width) * 2 - 1));
     targetPitch = Math.max(-1, Math.min(1, ((clientY - r.top) / r.height) * 2 - 1));
   }
-  stage.addEventListener("mousemove", (e) => aim(e.clientX, e.clientY));
-  stage.addEventListener("mouseleave", () => { targetYaw = 0; targetPitch = 0; });
-  stage.addEventListener("touchmove", (e) => {
+  // The camera follows the pointer only over the square visual itself (the
+  // frame shrink-wraps the canvas), and eases back to centre when it leaves.
+  frameEl.addEventListener("mousemove", (e) => aim(e.clientX, e.clientY));
+  frameEl.addEventListener("mouseleave", () => { targetYaw = 0; targetPitch = 0; });
+  frameEl.addEventListener("touchend", () => { targetYaw = 0; targetPitch = 0; });
+  frameEl.addEventListener("touchmove", (e) => {
     const t = e.touches[0];
     if (t) aim(t.clientX, t.clientY);
   }, { passive: true });

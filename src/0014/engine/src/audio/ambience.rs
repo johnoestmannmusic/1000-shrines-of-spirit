@@ -139,6 +139,9 @@ pub struct Ambience {
     rustle: Svf,
     rustle_env: f64,
     rustle_coef: f64,
+    /// Whether the blown leaves are heard. Off in the Wind weather, where
+    /// their dense flurry of tiny bursts read as a crackle over the gusts.
+    pub rustle_on: bool,
 }
 
 impl Ambience {
@@ -153,6 +156,7 @@ impl Ambience {
             rustle: Svf::new(3_000.0, 0.8, SR),
             rustle_env: 0.0,
             rustle_coef: decay_coef(0.012, SR),
+            rustle_on: true,
         }
     }
 
@@ -189,7 +193,9 @@ impl Ambience {
         }
 
         let x = self.rng.bipolar();
-        let rustle = self.rustle.process(x).band * self.rustle_env * 0.5;
+        // (Silenced, the leaves still draw their random numbers, so every
+        // other sound of the bed stays exactly as it was.)
+        let rustle = if self.rustle_on { self.rustle.process(x).band * self.rustle_env * 0.5 } else { 0.0 };
         self.rustle_env *= self.rustle_coef;
         let bed = 0.6 * s.snow * self.hush.process(x).low + 0.5 * s.fog * self.fog_air.process(x).low;
 
@@ -210,5 +216,27 @@ impl Ambience {
         self.echo[self.echo_at] = wet + back * ECHO_FB;
         self.echo_at = (self.echo_at + 1) % self.echo.len();
         (l + back * 0.6, r + back * 0.6)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::weather::{Weather, WeatherKind};
+
+    #[test]
+    fn the_rustle_switch_silences_the_leaves_and_nothing_without_them() {
+        let mut s = Weather::new(WeatherKind::Wind, 3).state(5.0);
+        s.leaves = 1.0;
+        let render = |state: &WeatherState, on: bool| {
+            let mut a = Ambience::new(9);
+            a.rustle_on = on;
+            (0..48_000).map(|_| a.next(state)).collect::<Vec<_>>()
+        };
+        // Blown leaves are heard, and the switch takes them away...
+        assert_ne!(render(&s, true), render(&s, false), "the leaves are not heard");
+        // ...while a weather without leaves is untouched by it.
+        let calm = WeatherState { leaves: 0.0, ..s };
+        assert_eq!(render(&calm, true), render(&calm, false));
     }
 }

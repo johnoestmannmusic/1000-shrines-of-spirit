@@ -69,6 +69,38 @@ impl StabTone {
     }
 }
 
+/// The key lift: the whole progression steps up a whole tone for a while,
+/// then comes home — the classic game-menu lift.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeyLift {
+    Off,
+    /// Four passes at home, four lifted.
+    Every4,
+    /// Eight passes at home, eight lifted.
+    Every8,
+}
+
+pub const KEY_LIFTS: [KeyLift; 3] = [KeyLift::Off, KeyLift::Every4, KeyLift::Every8];
+
+impl KeyLift {
+    pub fn name(self) -> &'static str {
+        match self {
+            KeyLift::Off => "off",
+            KeyLift::Every4 => "every 4 loops",
+            KeyLift::Every8 => "every 8 loops",
+        }
+    }
+
+    /// Passes through the progression before each step (0 = never).
+    pub fn passes(self) -> usize {
+        match self {
+            KeyLift::Off => 0,
+            KeyLift::Every4 => 4,
+            KeyLift::Every8 => 8,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GarageSetup {
     /// Swing, percent (50 = straight).
@@ -76,10 +108,22 @@ pub struct GarageSetup {
     pub bass: BassMode,
     pub stabs: Stabs,
     pub tone: StabTone,
+    /// 0 = the seed picks; otherwise a 1-based index into `harmony::PROGRESSIONS`.
+    pub progression: u8,
+    pub lift: KeyLift,
 }
 
 impl GarageSetup {
-    pub const DEFAULT: GarageSetup = GarageSetup { swing: 58, bass: BassMode::Rhythmic, stabs: Stabs::Sparse, tone: StabTone::Bright };
+    pub const DEFAULT: GarageSetup =
+        GarageSetup { swing: 58, bass: BassMode::Rhythmic, stabs: Stabs::Sparse, tone: StabTone::Bright, progression: 0, lift: KeyLift::Off };
+
+    /// The progression's name, or "seed picks".
+    pub fn progression_name(self) -> &'static str {
+        match self.progression as usize {
+            0 => "seed picks",
+            i => crate::harmony::PROGRESSIONS.get(i - 1).map_or("seed picks", |p| p.name),
+        }
+    }
 
     /// The swing as a fraction (0.5 .. 0.66).
     pub fn swing_fraction(self) -> f64 {
@@ -92,7 +136,12 @@ impl GarageSetup {
         fn idx<T: PartialEq>(all: &[T], v: T) -> u32 {
             all.iter().position(|x| *x == v).unwrap_or(0) as u32
         }
-        self.swing as u32 | idx(&BASS_MODES, self.bass) << 8 | idx(&STABS, self.stabs) << 10 | idx(&STAB_TONES, self.tone) << 12
+        self.swing as u32
+            | idx(&BASS_MODES, self.bass) << 8
+            | idx(&STABS, self.stabs) << 10
+            | idx(&STAB_TONES, self.tone) << 12
+            | (self.progression as u32 & 0x1f) << 13
+            | idx(&KEY_LIFTS, self.lift) << 18
     }
 
     pub fn from_word(w: u32) -> Self {
@@ -101,6 +150,11 @@ impl GarageSetup {
             bass: BASS_MODES[(w >> 8 & 3) as usize % BASS_MODES.len()],
             stabs: STABS[(w >> 10 & 3) as usize % STABS.len()],
             tone: STAB_TONES[(w >> 12 & 1) as usize],
+            progression: {
+                let p = (w >> 13 & 0x1f) as usize;
+                if p > crate::harmony::PROGRESSIONS.len() { 0 } else { p as u8 }
+            },
+            lift: KEY_LIFTS[(w >> 18 & 3) as usize % KEY_LIFTS.len()],
         }
     }
 }
@@ -115,8 +169,12 @@ mod tests {
             for bass in BASS_MODES {
                 for stabs in STABS {
                     for tone in STAB_TONES {
-                        let g = GarageSetup { swing, bass, stabs, tone };
-                        assert_eq!(GarageSetup::from_word(g.word()), g);
+                        for progression in 0..=crate::harmony::PROGRESSIONS.len() as u8 {
+                            for lift in KEY_LIFTS {
+                                let g = GarageSetup { swing, bass, stabs, tone, progression, lift };
+                                assert_eq!(GarageSetup::from_word(g.word()), g);
+                            }
+                        }
                     }
                 }
             }

@@ -120,7 +120,8 @@ impl WeatherKind {
         match self {
             WeatherKind::Clear => Profile { motes: 0.85, butterflies: true, ..p(0.18, 0.0, 0.08, 0.97, 0.1, [255, 222, 168], 10) },
             WeatherKind::Rain => Profile { drips: 0.5, leaves: 0.08, ..p(0.35, 0.75, 0.35, 0.62, 0.6, [150, 170, 205], 14) },
-            WeatherKind::Wind => Profile { leaves: 0.95, motes: 0.2, ..p(0.85, 0.05, 0.15, 0.82, 0.45, [200, 214, 232], 8) },
+            // Dry: no drizzle, so no splash taps under the gusts.
+            WeatherKind::Wind => Profile { leaves: 0.95, motes: 0.2, ..p(0.85, 0.0, 0.15, 0.82, 0.45, [200, 214, 232], 8) },
             WeatherKind::Fog => Profile { drips: 0.9, motes: 0.15, ..p(0.12, 0.05, 0.9, 0.55, 0.3, [188, 194, 202], 24) },
             WeatherKind::Storm => {
                 Profile { leaves: 0.5, lightning: true, ..p(0.95, 0.95, 0.45, 0.40, 1.0, [118, 132, 172], 22) }

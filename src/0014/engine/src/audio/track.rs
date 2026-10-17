@@ -289,6 +289,8 @@ pub const NO_LOOPS: [LoopDesign; 4] = [LoopDesign::OFF; 4];
 const GARAGE_BASS_DUCK: f64 = 0.5;
 /// Garage's balance: the drone about 6 dB back, the loops about 3 dB up.
 const GARAGE_DRONE: f64 = 0.5;
+/// The drone's further step back under a chord that rubs against it.
+const GARAGE_PEDAL_RUB: f64 = 0.25;
 const GARAGE_LOOPS: f64 = 1.4;
 /// How far the stabs dip under each kick, and how much of them goes to the reverb.
 const GARAGE_STAB_DUCK: f64 = 0.3;
@@ -298,6 +300,7 @@ const GARAGE_SEND_DIP: f64 = 0.7;
 const ECHO_SIXTEENTHS: u64 = 3;
 /// The drums' tape echo delay, in drum sixteenths.
 const TAPE_SIXTEENTHS: u64 = 3;
+const GARAGE_TAPE_SIXTEENTHS: u64 = 6;
 
 // Mix. "send" levels feed the shared long reverb.
 const DRONE_DRY: f64 = 1.0;
@@ -464,6 +467,10 @@ pub struct Track {
     pub(crate) bassline: Option<crate::bass::BassLine>,
     /// 2-step garage's chord stabs.
     pub(crate) stabs: Option<crate::stabs::Stabs>,
+    /// 2-step garage: how far the drone (and the pitched glitches) step back
+    /// under a chord that rubs against the drone's open fifth.
+    pub(crate) pedal_gain: f64,
+    pub(crate) pedal_target: f64,
     pub(crate) reverb: Reverb,
     pub(crate) dc: [DcBlock; 2],
     // Display-only state: written by `tick`, never read by it.
@@ -490,12 +497,21 @@ impl Track {
         let harmony = Harmony::new(settings.scale, if garage { 1 } else { chords }, settings.pace, tempo.beat(), key, &mut first, &mut rest);
         // 2-step garage: the drone holds the tonic (the harmony just built,
         // one chord), while everything else follows the genre progression.
-        let (harmony, drone_harmony) = if garage {
+        let (mut harmony, drone_harmony) = if garage {
             let mut g = Rng::stream(seeds.s1, 0x6A4A_6E);
-            (Harmony::garage(settings.scale, chords, tempo.beat(), key, &mut g), Harmony::pedal(settings.scale, tempo.beat(), key))
+            let gs = settings.garage;
+            (
+                Harmony::garage(settings.scale, chords, tempo.beat(), key, &mut g, gs.progression as usize, gs.lift.passes()),
+                Harmony::pedal(settings.scale, tempo.beat(), key),
+            )
         } else {
             (harmony.clone(), harmony)
         };
+        if garage {
+            // The loops and glitches swing with the drums.
+            harmony.swing_push = ((2.0 * settings.garage.swing_fraction() - 1.0) * tempo.drum16 as f64) as u64;
+            harmony.sixteenth = tempo.drum16;
+        }
         let echo_delay = (ECHO_SIXTEENTHS * tempo.glitch16()) as usize;
         // Loop lengths: whole beats, 3-8 s, pairwise co-prime so all four drift.
         let mut avoid = 1u64;
@@ -514,7 +530,9 @@ impl Track {
         Track {
             seeds,
             tempo,
-            tape: TapeEcho::new((TAPE_SIXTEENTHS * tempo.drum16) as usize, TAPE_FEEDBACK),
+            // Garage: an even number of sixteenths, so each echo keeps its
+            // hit's place in the swing (three would flip it to the other side).
+            tape: TapeEcho::new((if garage { GARAGE_TAPE_SIXTEENTHS } else { TAPE_SIXTEENTHS } * tempo.drum16) as usize, TAPE_FEEDBACK),
             monitor: Monitor::new(echo_delay),
             presence: Follower::new(PRESENCE_ATTACK, PRESENCE_RELEASE),
             punch: Follower::new(PUNCH_ATTACK, PUNCH_RELEASE),
@@ -551,6 +569,8 @@ impl Track {
             bass: Bass::new(seeds.s4),
             bassline: (settings.pace == Pace::Garage && settings.garage.bass == crate::garage::BassMode::Rhythmic)
                 .then(|| crate::bass::BassLine::new(seeds.s4, tempo, settings.garage.swing_fraction())),
+            pedal_gain: 1.0,
+            pedal_target: 1.0,
             stabs: (settings.pace == Pace::Garage && settings.garage.stabs != crate::garage::Stabs::Off).then(|| {
                 crate::stabs::Stabs::new(seeds.s6, settings.garage.stabs, settings.garage.tone, tempo, settings.garage.swing_fraction())
             }),
@@ -666,8 +686,20 @@ impl Track {
         let dl = (dl - (dl - self.shelf[0].process(dl)) * shelf) * duck;
         let dr = (dr - (dr - self.shelf[1].process(dr)) * shelf) * duck;
         self.duck_gain = duck;
-        // 2-step garage leans on the atmosphere loops: the drone steps back.
-        let (dl, dr) = if self.settings.pace == Pace::Garage { (dl * GARAGE_DRONE, dr * GARAGE_DRONE) } else { (dl, dr) };
+        // 2-step garage leans on the atmosphere loops: the drone steps back,
+        // and further still under a chord that rubs against its open fifth
+        // (a borrowed chord, or the key lift).
+        let (dl, dr) = if self.settings.pace == Pace::Garage {
+            if clock % 32 == 0 {
+                let p = self.harmony.at(clock);
+                self.pedal_target = if self.harmony.rubs_pedal(p.chord) { GARAGE_PEDAL_RUB } else { 1.0 };
+            }
+            self.pedal_gain += (self.pedal_target - self.pedal_gain) * 0.0004;
+            let g = GARAGE_DRONE * self.pedal_gain;
+            (dl * g, dr * g)
+        } else {
+            (dl, dr)
+        };
         let others = 1.0 - GLITCH_DUCK * presence;
 
         // 2 & 3: glitch layers. A muted layer keeps ticking, so its pattern
@@ -677,6 +709,13 @@ impl Track {
         let d2 = if self.settings.glitch[1].enabled { m.density2 } else { 0.0 };
         let g1 = self.glitch1.next(clock, d1, &self.history);
         let g2 = self.glitch2.next(clock, d2, &self.history);
+        // Garage: the glitches (which chop the drone) step back with it.
+        let (g1, g2) = if self.settings.pace == Pace::Garage {
+            let k = 0.4 + 0.6 * self.pedal_gain;
+            ((g1.0 * k, g1.1 * k), (g2.0 * k, g2.1 * k))
+        } else {
+            (g1, g2)
+        };
         let (el, er) = self.echo.process(
             g1.0 * GLITCH1_ECHO + g2.0 * GLITCH2_ECHO,
             g1.1 * GLITCH1_ECHO + g2.1 * GLITCH2_ECHO,
@@ -727,8 +766,10 @@ impl Track {
         };
         let b = if let (Some(line), Some((chord, next, changing, active, _))) = (self.bassline.as_mut(), garage) {
             let (root, next_root) = (self.harmony.chords[chord].bass, self.harmony.chords[next].bass);
-            // The bass walks up only into the top of the loop, not every change.
-            line.next(clock, root, next_root, changing && next == 0, active, &m) * (1.0 - GARAGE_BASS_DUCK * punch)
+            // The bass walks up only into the top of the loop, not every change;
+            // its fifth is the chord's own (a flat fifth on a m7b5).
+            let fifth = (self.harmony.chords[chord].tones[2] as f64 - self.harmony.chords[chord].tones[0] as f64).rem_euclid(12.0);
+            line.next(clock, root, next_root, fifth, changing && self.harmony.starts_pass(next), active, &m) * (1.0 - GARAGE_BASS_DUCK * punch)
         } else {
             if clock % 32 == 0 {
                 let p = self.harmony.at(clock);

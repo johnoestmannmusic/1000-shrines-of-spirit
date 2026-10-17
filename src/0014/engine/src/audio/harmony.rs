@@ -17,9 +17,13 @@ pub enum Scale {
     Hirajoshi,
     PentatonicMinor,
     DoubleHarmonic,
+    /// The major pentatonic: bright Japanese pop's "no fourth, no seventh" scale.
+    Yonanuki,
+    /// The Okinawan scale: major, without the second and sixth.
+    Ryukyu,
 }
 
-pub const SCALES: [Scale; 12] = [
+pub const SCALES: [Scale; 14] = [
     Scale::Lydian,
     Scale::Ionian,
     Scale::Dorian,
@@ -32,6 +36,8 @@ pub const SCALES: [Scale; 12] = [
     Scale::Hirajoshi,
     Scale::PentatonicMinor,
     Scale::DoubleHarmonic,
+    Scale::Yonanuki,
+    Scale::Ryukyu,
 ];
 
 impl Scale {
@@ -49,6 +55,8 @@ impl Scale {
             Scale::Hirajoshi => &[0, 2, 3, 7, 8],
             Scale::PentatonicMinor => &[0, 3, 5, 7, 10],
             Scale::DoubleHarmonic => &[0, 1, 4, 5, 7, 8, 11],
+            Scale::Yonanuki => &[0, 2, 4, 7, 9],
+            Scale::Ryukyu => &[0, 4, 5, 7, 11],
         }
     }
 
@@ -66,6 +74,8 @@ impl Scale {
             Scale::Hirajoshi => "Hirajoshi",
             Scale::PentatonicMinor => "Pentatonic minor",
             Scale::DoubleHarmonic => "Double harmonic",
+            Scale::Yonanuki => "Major pentatonic (yonanuki)",
+            Scale::Ryukyu => "Ryukyu",
         }
     }
 
@@ -84,6 +94,8 @@ impl Scale {
             Scale::Hirajoshi => "Japanese pentatonic, sparse and stark",
             Scale::PentatonicMinor => "five notes, nothing can clash",
             Scale::DoubleHarmonic => "exotic, two augmented seconds",
+            Scale::Yonanuki => "bright and sunny, five notes, no tension",
+            Scale::Ryukyu => "island-bright, major with a gentle lift",
         }
     }
 
@@ -102,6 +114,8 @@ impl Scale {
             Scale::Hirajoshi => "HIR",
             Scale::PentatonicMinor => "PMI",
             Scale::DoubleHarmonic => "DBH",
+            Scale::Yonanuki => "YON",
+            Scale::Ryukyu => "RYU",
         }
     }
 
@@ -111,6 +125,11 @@ impl Scale {
 
     pub fn index(self) -> usize {
         SCALES.iter().position(|s| *s == self).unwrap_or(0)
+    }
+
+    /// A major-third scale (else minor), for choosing garage progressions.
+    pub fn is_major(self) -> bool {
+        self.intervals().contains(&4) && !self.intervals().contains(&3)
     }
 
     pub fn from_index(i: usize) -> Scale {
@@ -208,6 +227,8 @@ pub struct Chord {
     /// The bass note (MIDI) for this chord.
     pub bass: f64,
     pub bars: u32,
+    /// Its pitch classes (0-11), root first: the chord the stabs voice.
+    pub tones: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -215,6 +236,17 @@ pub struct Harmony {
     /// How long each change's crossfade lasts (samples): a whole bar for
     /// the slow modes, a single beat in 2-step garage.
     morph_len: u64,
+    /// 2-step garage: which chord plays in each two-bar step of the cycle
+    /// (the progression, then — with the key lift — its lifted copy). Empty
+    /// for the slow modes, which weight their chords' lengths instead.
+    sequence: Vec<usize>,
+    /// Chords in one pass of the progression (before any lift).
+    pub loop_len: usize,
+    /// 2-step garage: how late a swung sixteenth is pushed (samples) and how
+    /// long a sixteenth is, so the loops and glitches can swing with the
+    /// drums. Zero for the slow modes.
+    pub swing_push: u64,
+    pub sixteenth: u64,
     /// 2-step garage: plain chords, so the timbres keep to whole-number
     /// (harmonic) overtones and the glitch pitches to the safest notes.
     pub garage: bool,
@@ -298,11 +330,13 @@ impl Harmony {
             if bass > 45.0 {
                 bass -= 12.0;
             }
-            out.push(Chord { degree, notes, bass, bars: *bars });
+            let tones = [0usize, 2, 4, 6].iter().map(|s| ((key as usize + iv[(degree + s) % n as usize] as usize) % 12) as u8).collect();
+            out.push(Chord { degree, notes, bass, bars: *bars, tones });
         }
         let bar_samples = pace.bar_samples(beat);
         let cycle = weights.iter().map(|b| *b as u64).sum::<u64>() * bar_samples;
-        Harmony { morph_len: bar_samples, garage: false, scale, key, chords: out, bar_samples, cycle }
+        let loop_len = out.len();
+        Harmony { morph_len: bar_samples, sequence: Vec::new(), loop_len, swing_push: 0, sixteenth: 0, garage: false, scale, key, chords: out, bar_samples, cycle }
     }
 
     /// 2-step garage's drone: the tonic as an open fifth (root, fifth,
@@ -323,92 +357,123 @@ impl Harmony {
             garage: true,
             scale,
             key,
-            chords: vec![Chord { degree: 0, notes, bass, bars: 32 }],
+            chords: vec![Chord { degree: 0, notes, bass, bars: 32, tones: vec![key % 12, (key + fifth as u8) % 12] }],
+            sequence: Vec::new(),
+            loop_len: 1,
+            swing_push: 0,
+            sixteenth: 0,
             bar_samples,
             cycle: 32 * bar_samples,
         }
     }
 
-    /// 2-step garage's harmony: a genre progression, picked by the seed and
-    /// written as scale degrees, each chord two drum bars long and changing
+    /// 2-step garage's harmony, each chord two drum bars long and changing
     /// on the downbeat (the loops crossfade over just the last beat).
     ///
-    /// Major-third scales draw from the royal road (IV–V–iii–vi), ii–V–I–vi,
-    /// vi–IV–I–V and I–vi–IV–V; minor-third scales from i–iv–VII–III and
-    /// i–VII–III–iv, plus i–VI–III–VII and i–VII–VI–VII when the scale has a
-    /// flat sixth (so the VI is a major chord, never a diminished one).
-    /// `chords` (1-4) is how many chords the loop has.
-    pub fn garage(scale: Scale, chords: usize, beat: u64, key: u8, rng: &mut Rng) -> Harmony {
+    /// With four chords it plays one of the named [`PROGRESSIONS`] — chosen
+    /// with `progression` (1-based), or by the seed from those of the scale's
+    /// family when it is 0 — with chords borrowed from outside the key where
+    /// the progression asks (secondary dominants, borrowed iv, ♭VII). With
+    /// fewer chords it keeps to the scale's own. `lift` > 0 steps the whole
+    /// progression up a whole tone every `lift` passes, then home again.
+    pub fn garage(scale: Scale, chords: usize, beat: u64, key: u8, rng: &mut Rng, progression: usize, lift: usize) -> Harmony {
         let iv = scale.intervals();
-        let n = iv.len() as i32;
-        let base = 48 + key as i32;
-        let note = |step: i32| -> f64 {
-            let oct = step.div_euclid(n);
-            (base + 12 * oct + iv[step.rem_euclid(n) as usize] as i32) as f64
-        };
-        let major = iv.get(2) == Some(&4);
-        let flat_six = iv.get(5) == Some(&8);
+        let n = iv.len();
+        let major = scale.is_major();
         let k = chords.clamp(1, 4);
-        let mut pool: Vec<&[usize]> = match (major, k) {
-            (_, 1) => vec![&[0]],
-            (true, 2) => vec![&[0, 3], &[0, 4], &[5, 3]],
-            (true, 3) => vec![&[0, 3, 4], &[5, 3, 4], &[0, 5, 3]],
-            (true, _) => vec![&[3, 4, 2, 5], &[1, 4, 0, 5], &[5, 3, 0, 4], &[0, 5, 3, 4]],
-            (false, 2) => vec![&[0, 3], &[0, 6]],
-            (false, 3) => vec![&[0, 3, 6], &[0, 6, 3]],
-            (false, _) => vec![&[0, 3, 6, 2], &[0, 6, 2, 3]],
+        let shape: Vec<(u8, Quality)> = if k == 4 {
+            let pick = if progression >= 1 && progression <= PROGRESSIONS.len() {
+                &PROGRESSIONS[progression - 1]
+            } else {
+                let family: Vec<&Progression> = PROGRESSIONS.iter().filter(|p| p.major == major).collect();
+                family[rng.below(family.len())]
+            };
+            pick.chords.to_vec()
+        } else {
+            // Short loops: the scale's own chords.
+            let pool: &[&[usize]] = match (major, k) {
+                (_, 1) => &[&[0]],
+                (true, 2) => &[&[0, 3], &[0, 4]],
+                (true, _) => &[&[0, 3, 4], &[5, 3, 4]],
+                (false, 2) => &[&[0, 3], &[0, 6]],
+                (false, _) => &[&[0, 3, 6], &[0, 6, 3]],
+            };
+            let degrees = pool[rng.below(pool.len())];
+            degrees.iter().map(|d| diatonic(iv, d % n)).collect()
         };
-        if !major && flat_six {
-            match k {
-                2 => pool.push(&[0, 5]),
-                3 => pool.push(&[0, 5, 6]),
-                4.. => pool.extend_from_slice(&[&[0, 5, 2, 6], &[0, 6, 5, 6]]),
-                _ => {}
+        let mut out: Vec<Chord> = shape.iter().map(|&(root, q)| garage_chord(iv, key, root, q)).collect();
+        let loop_len = out.len();
+        let mut sequence: Vec<usize> = (0..loop_len).collect();
+        if lift > 0 {
+            // The lifted copy, a whole tone up, after `lift` passes at home.
+            out.extend(shape.iter().map(|&(root, q)| garage_chord(iv, key, (root + 2) % 12, q)).map(|mut c| {
+                // Keep the lifted bass and shells in the same registers.
+                if c.bass > 45.0 {
+                    c.bass -= 12.0;
+                }
+                c
+            }));
+            sequence = (0..lift).flat_map(|_| 0..loop_len).chain((0..lift).flat_map(|_| loop_len..2 * loop_len)).collect();
+        }
+        let bar_samples = Pace::Garage.bar_samples(beat);
+        let cycle = sequence.len() as u64 * bar_samples;
+        Harmony { morph_len: bar_samples / 8, sequence, loop_len, swing_push: 0, sixteenth: 0, garage: true, scale, key, chords: out, bar_samples, cycle }
+    }
+
+    /// How the atmosphere loops blend at `t`: (from, to, 0..1). The slow
+    /// modes crossfade during each chord's last bar, exactly as [`at`]. In
+    /// 2-step garage the loops change *on* the downbeat with the bass and
+    /// stabs: a quick crossfade over the first sixteenth of the new chord.
+    ///
+    /// [`at`]: Harmony::at
+    pub fn loop_mix(&self, t: u64) -> (usize, usize, f64) {
+        if self.sequence.is_empty() {
+            let p = self.at(t);
+            return (p.chord, p.next, p.morph);
+        }
+        let step = (t / self.bar_samples) as usize;
+        let cur = self.sequence[step % self.sequence.len()];
+        let fade = (self.bar_samples / 32).max(1);
+        let pos = t % self.bar_samples;
+        if step > 0 && pos < fade {
+            let prev = self.sequence[(step - 1) % self.sequence.len()];
+            if prev != cur {
+                let x = pos as f64 / fade as f64;
+                return (prev, cur, x * x * (3.0 - 2.0 * x));
             }
         }
-        let degrees = pool[rng.below(pool.len())];
-        // The loops' notes: an open shell over the stabs — root, fifth and
-        // tenth (the stabs carry the seventh).
-        const SPREAD: [i32; 3] = [0, 4, 9];
-        let out: Vec<Chord> = degrees
-            .iter()
-            .map(|&d| {
-                let degree = d % n as usize;
-                let mut notes: Vec<f64> = SPREAD
-                    .iter()
-                    .map(|s| {
-                        let s = if n == 7 { *s } else { (*s as f64 * n as f64 / 7.0).round() as i32 };
-                        note(degree as i32 + s)
-                    })
-                    .collect();
-                // Root between C4 and B4, so the shell opens out above the
-                // stabs' middle register and tops out below F6.
-                let mut shift = 0.0;
-                while notes[0] + shift < 60.0 {
-                    shift += 12.0;
-                }
-                while notes[0] + shift > 71.0 {
-                    shift -= 12.0;
-                }
-                for x in notes.iter_mut() {
-                    *x += shift;
-                }
-                notes.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                notes.dedup();
-                let mut bass = (36 + key as i32 + iv[degree] as i32) as f64;
-                if bass > 45.0 {
-                    bass -= 12.0;
-                }
-                Chord { degree, notes, bass, bars: 1 }
-            })
-            .collect();
-        let bar_samples = Pace::Garage.bar_samples(beat);
-        let cycle = out.len() as u64 * bar_samples;
-        Harmony { morph_len: bar_samples / 8, garage: true, scale, key, chords: out, bar_samples, cycle }
+        (cur, cur, 0.0)
+    }
+
+    /// Whether chord `i` is the first of a pass through the progression.
+    pub fn starts_pass(&self, i: usize) -> bool {
+        i % self.loop_len.max(1) == 0
+    }
+
+    /// Whether chord `i` has a tone a semitone from the tonic or its fifth
+    /// (the garage drone's pedal): the drone steps back under it.
+    pub fn rubs_pedal(&self, i: usize) -> bool {
+        let iv = self.scale.intervals();
+        let fifth = if iv.contains(&7) { 7 } else { iv.get(iv.len() / 2).copied().unwrap_or(7) };
+        let pedal = [self.key % 12, (self.key + fifth) % 12];
+        self.chords[i].tones.iter().any(|t| pedal.iter().any(|p| (12 + *t as i32 - *p as i32) % 12 == 1 || (12 + *p as i32 - *t as i32) % 12 == 1))
     }
 
     /// The progression at sample `t`. The last bar of each chord morphs into the next.
     pub fn at(&self, t: u64) -> Position {
+        if !self.sequence.is_empty() {
+            let step = (t / self.bar_samples) as usize % self.sequence.len();
+            let (chord, next) = (self.sequence[step], self.sequence[(step + 1) % self.sequence.len()]);
+            let pos = t % self.bar_samples;
+            let morph_start = self.bar_samples - self.morph_len;
+            let morph = if chord != next && pos >= morph_start {
+                let x = (pos - morph_start) as f64 / self.morph_len as f64;
+                x * x * (3.0 - 2.0 * x)
+            } else {
+                0.0
+            };
+            return Position { chord, next, bar: step as u32, morph };
+        }
         let n = self.chords.len();
         if n == 1 {
             return Position { chord: 0, next: 0, bar: ((t / self.bar_samples) % 32) as u32, morph: 0.0 };
@@ -441,6 +506,100 @@ impl Harmony {
             .filter(|m| *m >= lo && *m <= hi)
             .collect()
     }
+}
+
+/// A chord's quality, as its intervals above the root.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Quality {
+    Maj7,
+    Dom7,
+    Min7,
+    HalfDim,
+}
+
+impl Quality {
+    pub fn intervals(self) -> [u8; 4] {
+        match self {
+            Quality::Maj7 => [0, 4, 7, 11],
+            Quality::Dom7 => [0, 4, 7, 10],
+            Quality::Min7 => [0, 3, 7, 10],
+            Quality::HalfDim => [0, 3, 6, 10],
+        }
+    }
+
+    pub fn suffix(self) -> &'static str {
+        match self {
+            Quality::Maj7 => "maj7",
+            Quality::Dom7 => "7",
+            Quality::Min7 => "m7",
+            Quality::HalfDim => "m7b5",
+        }
+    }
+}
+
+/// A named garage progression: four chords as (semitones above the key, quality).
+pub struct Progression {
+    pub name: &'static str,
+    /// How it reads in roman numerals.
+    pub numerals: &'static str,
+    /// Major-key (else minor-key) family, for the seed's pick.
+    pub major: bool,
+    pub chords: [(u8, Quality); 4],
+}
+
+use Quality::{Dom7 as D7, HalfDim as HD, Maj7 as M7, Min7 as M};
+
+/// The 2-step garage progressions: the bright, upbeat turns of Japanese pop,
+/// city pop and game menus, many with chords borrowed from outside the key.
+pub const PROGRESSIONS: [Progression; 15] = [
+    Progression { name: "Royal road", numerals: "IVmaj7 V7 iii7 vi7", major: true, chords: [(5, M7), (7, D7), (4, M), (9, M)] },
+    Progression { name: "Royal road, bright", numerals: "IVmaj7 V7 III7 vi7", major: true, chords: [(5, M7), (7, D7), (4, D7), (9, M)] },
+    Progression { name: "Soft turn", numerals: "IVmaj7 III7 vi7 I7", major: true, chords: [(5, M7), (4, D7), (9, M), (0, D7)] },
+    Progression { name: "City lights", numerals: "ii7 V7 Imaj7 VI7", major: true, chords: [(2, M), (7, D7), (0, M7), (9, D7)] },
+    Progression { name: "Sunrise", numerals: "IVmaj7 V7 vi7 bVIImaj7", major: true, chords: [(5, M7), (7, D7), (9, M), (10, M7)] },
+    Progression { name: "Menu loop", numerals: "Imaj7 vi7 ii7 V7", major: true, chords: [(0, M7), (9, M), (2, M), (7, D7)] },
+    Progression { name: "Wistful", numerals: "Imaj7 III7 IVmaj7 iv7", major: true, chords: [(0, M7), (4, D7), (5, M7), (5, M)] },
+    Progression { name: "Two-five-one", numerals: "ii7 V7 Imaj7 vi7", major: true, chords: [(2, M), (7, D7), (0, M7), (9, M)] },
+    Progression { name: "Pop loop", numerals: "vi7 IVmaj7 Imaj7 V7", major: true, chords: [(9, M), (5, M7), (0, M7), (7, D7)] },
+    Progression { name: "Daydream", numerals: "Imaj7 II7 IVmaj7 iv7", major: true, chords: [(0, M7), (2, D7), (5, M7), (5, M)] },
+    Progression { name: "Night drive", numerals: "i7 iv7 bVII7 bIIImaj7", major: false, chords: [(0, M), (5, M), (10, D7), (3, M7)] },
+    Progression { name: "Neon", numerals: "i7 IV7 bVIImaj7 bIIImaj7", major: false, chords: [(0, M), (5, D7), (10, M7), (3, M7)] },
+    Progression { name: "Climb", numerals: "bVImaj7 bVII7 i7 V7", major: false, chords: [(8, M7), (10, D7), (0, M), (7, D7)] },
+    Progression { name: "Rain city", numerals: "i7 bVImaj7 bIIImaj7 bVII7", major: false, chords: [(0, M), (8, M7), (3, M7), (10, D7)] },
+    Progression { name: "Descent", numerals: "ii7b5 V7 i7 bVImaj7", major: false, chords: [(2, HD), (7, D7), (0, M), (8, M7)] },
+];
+
+/// The scale's own seventh chord on degree `d`, as (semitones above the key, quality).
+fn diatonic(iv: &[u8], d: usize) -> (u8, Quality) {
+    let n = iv.len();
+    let at = |k: usize| (iv[(d + k) % n] as i32 + 12 * ((d + k) / n) as i32 - iv[d] as i32) as u8;
+    let (third, fifth, seventh) = (at(2), at(4), at(6));
+    let q = match (third, fifth, seventh) {
+        (4, _, 11) => Quality::Maj7,
+        (4, _, _) => Quality::Dom7,
+        (3, 6, _) => Quality::HalfDim,
+        _ => Quality::Min7,
+    };
+    (iv[d], q)
+}
+
+/// A garage chord: its tones, the loops' open shell (root, fifth, tenth,
+/// rooted C4–B4 so it opens out above the stabs), and its bass note.
+fn garage_chord(iv: &[u8], key: u8, root: u8, q: Quality) -> Chord {
+    let qi = q.intervals();
+    let r = (key + root) % 12;
+    let tones: Vec<u8> = qi.iter().map(|i| (r + i) % 12).collect();
+    let mut low = 60.0 + r as f64;
+    while low > 71.0 {
+        low -= 12.0;
+    }
+    let notes = vec![low, low + qi[2] as f64, low + qi[1] as f64 + 12.0];
+    let mut bass = (36 + key as i32 + root as i32) as f64;
+    while bass > 45.0 {
+        bass -= 12.0;
+    }
+    let degree = iv.iter().position(|x| *x == root).unwrap_or(0);
+    Chord { degree, notes, bass, bars: 1, tones }
 }
 
 pub fn key_name(pc: u8) -> &'static str {

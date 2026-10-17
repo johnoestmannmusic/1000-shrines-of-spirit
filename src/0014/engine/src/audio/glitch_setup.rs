@@ -113,10 +113,10 @@ impl GlitchSetup {
             step_len: tempo.glitch16() * RATES[(self.rate as usize).min(RATES.len() - 1)] as u64,
             weights,
             notes: if harmony.garage {
-                // Over moving chords, only the notes that sit well on all of
-                // them: the key's root, second and fifth.
+                // Over moving (and borrowed) chords, only the key's root and
+                // fifth: the notes the progressions keep coming back to.
                 let iv = harmony.scale.intervals();
-                let safe: Vec<u8> = [0usize, 1, 4].iter().filter_map(|d| iv.get(*d).copied()).collect();
+                let safe: Vec<u8> = [0u8, 7].into_iter().filter(|i| iv.contains(i)).collect();
                 let notes: Vec<f64> = harmony
                     .scale_notes(fixture.notes.0 + harmony.key as f64, fixture.notes.1)
                     .into_iter()
@@ -136,6 +136,8 @@ impl GlitchSetup {
             repeats: (lo.min(hi) as u64, lo.max(hi) as u64),
             max_ratchet: self.ratchet.clamp(MIN_RATCHET, MAX_RATCHET) as u64,
             ping_ratio: if harmony.garage { 3.0 } else { 0.0 },
+            swing_push: harmony.swing_push,
+            sixteenth: harmony.sixteenth,
         }
     }
 

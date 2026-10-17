@@ -7,7 +7,7 @@
 //! Host-only. The artifact itself carries the recipe as words (`recipe.rs`).
 
 use shrine0014::atmos::LOOP_TIMBRES;
-use shrine0014::garage::{BASS_MODES, MAX_SWING, MIN_SWING, STABS, STAB_TONES};
+use shrine0014::garage::{BASS_MODES, KEY_LIFTS, MAX_SWING, MIN_SWING, STABS, STAB_TONES};
 use shrine0014::harmony::{key_name, Pace, SCALES};
 use shrine0014::kits::{KITS, SPACES};
 use shrine0014::plants::Biome;
@@ -113,6 +113,9 @@ pub fn to_text(config: &SimConfig) -> String {
     out.push_str(&format!("garage_bass={}\n", s.garage.bass.name()));
     out.push_str(&format!("garage_stabs={}\n", s.garage.stabs.name()));
     out.push_str(&format!("garage_stab_tone={}\n", s.garage.tone.name()));
+    out.push_str("# progression: seed picks, or one of the named ones; key lift: off|every 4 loops|every 8 loops\n");
+    out.push_str(&format!("garage_progression={}\n", s.garage.progression_name()));
+    out.push_str(&format!("garage_key_lift={}\n", s.garage.lift.name()));
     out.push_str(&format!("kit={}\n", s.kit.name()));
     out.push_str(&format!("space={}\n", s.space.name()));
     out.push_str(&format!("drum_reverse={}\n", if s.drum_reverse { "on" } else { "off" }));
@@ -272,6 +275,21 @@ pub fn from_text(text: &str) -> Option<SimConfig> {
             "garage_stabs" => {
                 if let Some(b) = STABS.into_iter().find(|b| eq(b.name(), value)) {
                     config.settings.garage.stabs = b;
+                    found = true;
+                }
+            }
+            "garage_progression" => {
+                if eq(value, "seed picks") || eq(value, "seed") {
+                    config.settings.garage.progression = 0;
+                    found = true;
+                } else if let Some(i) = shrine0014::harmony::PROGRESSIONS.iter().position(|p| eq(p.name, value)) {
+                    config.settings.garage.progression = i as u8 + 1;
+                    found = true;
+                }
+            }
+            "garage_key_lift" => {
+                if let Some(l) = KEY_LIFTS.into_iter().find(|l| eq(l.name(), value)) {
+                    config.settings.garage.lift = l;
                     found = true;
                 }
             }
@@ -816,6 +834,8 @@ mod tests {
             bass: r.pick(&BASS_MODES),
             stabs: r.pick(&STABS),
             tone: r.pick(&STAB_TONES),
+            progression: r.int(0, shrine0014::harmony::PROGRESSIONS.len() as u64) as u8,
+            lift: r.pick(&KEY_LIFTS),
         };
         c
     }

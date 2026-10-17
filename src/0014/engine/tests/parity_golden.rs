@@ -146,10 +146,14 @@ const FUTURE_FRAMES: [f64; 2] = [0.0, 3.0];
 // Re-locked when garage's layers stopped clashing: an open-fifth drone,
 // whole-number overtones, separate registers and clean chord changes.
 const FUTURE_GOLDEN: [(u64, [u64; 2]); 4] = [
-    (0x806b_4fb8_21eb_c6fb, [6579003113373532395, 13247657374849648781]),
-    (0x2eb6_27ac_675a_bdae, [13912267995583014935, 17051752384514558235]),
-    (0xe724_716a_8e73_aa01, [3398551927623433174, 7995802616033956358]),
-    (0xf379_2ac5_3b56_5e35, [15606822369550803988, 16286219466886564680]),
+    // Re-locked when garage was tightened: the loops change on the downbeat
+    // with the bass, every echo keeps its hit's place in the swing, the loops'
+    // grains and the glitch ratchets swing with the drums, and the bass glides
+    // faster.
+    (0x49f2_ebac_73cd_214c, [6579003113373532395, 13247657374849648781]),
+    (0x8644_1f47_3bc4_2566, [13912267995583014935, 17051752384514558235]),
+    (0xb37b_73ba_d941_6b80, [3398551927623433174, 7995802616033956358]),
+    (0xec32_597d_0672_f60a, [15606822369550803988, 16286219466886564680]),
 ];
 
 fn future_configs() -> Vec<(&'static str, SimConfig)> {

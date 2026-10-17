@@ -29,7 +29,8 @@ fn usage() {
     println!("  (no arguments)   interactive menu and live preview");
     println!("  --preview [SEED] [--biome NAME] [--weather NAME] [--out FILE]");
     println!("  --cover   [SEED] [--biome NAME] [--weather NAME] [--out FILE]   a 1600×1600 PNG");
-    println!("  --wav     [SEED] [SECONDS] [--biome NAME] [--weather NAME] [--mode NAME] [--bpm N] [--out FILE]");
+    println!("  --wav     [SEED] [SECONDS] [--biome NAME] [--weather NAME] [--mode NAME] [--bpm N]");
+    println!("            [--progression NAME] [--key-lift 4|8] [--scale CODE] [--out FILE]");
     println!("  --serve   [PORT]   serve web/ locally (default 8080)");
     println!("  --emit    [--seed N] [--biome NAME] [--weather NAME] [--out FILE]   write the self-contained artifact");
     println!("  --export  [FILE]   write the stored settings as a .shrineseed file");
@@ -58,6 +59,10 @@ struct Args {
     /// The music's mode and tempo, if given (else the defaults).
     mode: Option<shrine0014::harmony::Pace>,
     bpm: Option<u16>,
+    /// 2-step garage: a named progression (1-based), the key lift, the scale.
+    progression: u8,
+    lift: shrine0014::garage::KeyLift,
+    scale: Option<shrine0014::harmony::Scale>,
 }
 
 fn parse(args: &[String]) -> Args {
@@ -68,6 +73,9 @@ fn parse(args: &[String]) -> Args {
     let mut seconds: f64 = 20.0;
     let mut mode = None;
     let mut bpm = None;
+    let mut progression = 0u8;
+    let mut lift = shrine0014::garage::KeyLift::Off;
+    let mut scale = None;
 
     let mut it = args.iter().skip(1);
     let mut positional = 0;
@@ -84,6 +92,22 @@ fn parse(args: &[String]) -> Args {
             "--out" => out = it.next().cloned(),
             "--mode" => mode = it.next().and_then(|n| shrine0014::harmony::Pace::from_name(n)),
             "--bpm" => bpm = it.next().and_then(|n| n.parse::<u16>().ok()),
+            "--progression" => {
+                if let Some(name) = it.next() {
+                    let key = |s: &str| s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
+                    if let Some(i) = shrine0014::harmony::PROGRESSIONS.iter().position(|p| key(p.name) == key(name)) {
+                        progression = i as u8 + 1;
+                    }
+                }
+            }
+            "--key-lift" => {
+                lift = match it.next().map(String::as_str) {
+                    Some("4") => shrine0014::garage::KeyLift::Every4,
+                    Some("8") => shrine0014::garage::KeyLift::Every8,
+                    _ => shrine0014::garage::KeyLift::Off,
+                }
+            }
+            "--scale" => scale = it.next().and_then(|c| shrine0014::harmony::Scale::from_code(c)),
             "--seconds" => {
                 if let Some(n) = it.next().and_then(|s| s.parse::<f64>().ok()) {
                     seconds = n.clamp(0.5, 3600.0);
@@ -114,6 +138,9 @@ fn parse(args: &[String]) -> Args {
         out,
         mode,
         bpm,
+        progression,
+        lift,
+        scale,
     }
 }
 
@@ -125,7 +152,8 @@ fn sim_for(a: &Args) -> Sim {
             pace: a.mode.unwrap_or(DEFAULT_SETTINGS.pace),
             // Garage sits around 132 BPM, in Ionian, on four chords, unless told otherwise.
             bpm: a.bpm.unwrap_or(if a.mode == Some(shrine0014::harmony::Pace::Garage) { 132 } else { DEFAULT_SETTINGS.bpm }),
-            scale: if a.mode == Some(shrine0014::harmony::Pace::Garage) { shrine0014::harmony::Scale::Ionian } else { DEFAULT_SETTINGS.scale },
+            scale: a.scale.unwrap_or(if a.mode == Some(shrine0014::harmony::Pace::Garage) { shrine0014::harmony::Scale::Ionian } else { DEFAULT_SETTINGS.scale }),
+            garage: shrine0014::garage::GarageSetup { progression: a.progression, lift: a.lift, ..DEFAULT_SETTINGS.garage },
             chords: if a.mode == Some(shrine0014::harmony::Pace::Garage) { 4 } else { DEFAULT_SETTINGS.chords },
             ..DEFAULT_SETTINGS
         },

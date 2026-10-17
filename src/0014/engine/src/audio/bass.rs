@@ -217,7 +217,7 @@ impl BassLine {
     /// One sample. `root` and `next_root` are this chord's and the next one's
     /// bass notes; `changing` is true in the bar before a change; `active`
     /// whether the groove is playing (the bass follows the drums' sections).
-    pub fn next(&mut self, clock: u64, root: f64, next_root: f64, changing: bool, active: bool, m: &ModState) -> f64 {
+    pub fn next(&mut self, clock: u64, root: f64, next_root: f64, fifth: f64, changing: bool, active: bool, m: &ModState) -> f64 {
         let sr = crate::SAMPLE_RATE as f64;
         let bar = clock / self.bar;
         let in_bar = clock % self.bar;
@@ -228,8 +228,14 @@ impl BassLine {
             let notes = &self.plan.as_ref().unwrap().1;
             if let Some(n) = notes.iter().find(|n| self.onset(n.step) == in_bar) {
                 let base = if n.approach { next_root } else { root };
+                // The figure's fifths are this chord's own fifth.
+                let semis = match n.semis {
+                    s if s == 7.0 => fifth,
+                    s if s == -5.0 => fifth - 12.0,
+                    s => s,
+                };
                 // Keep the line in the sub register.
-                let mut midi = base + n.semis;
+                let mut midi = base + semis;
                 while midi > 50.0 {
                     midi -= 12.0;
                 }
@@ -241,8 +247,9 @@ impl BassLine {
                 self.release_at = clock + hold as u64;
             }
         }
-        // Glide (about 20 ms), the amplitude and filter envelopes.
-        self.freq += (self.target - self.freq) * 0.0011;
+        // A quick glide (about 7 ms), so even a pushed note is at pitch on
+        // its beat; then the amplitude and filter envelopes.
+        self.freq += (self.target - self.freq) * 0.003;
         let gate = active && clock < self.release_at;
         let goal = if gate { 1.0 } else { 0.0 };
         let rate = if gate { 0.02 } else { 0.0009 };

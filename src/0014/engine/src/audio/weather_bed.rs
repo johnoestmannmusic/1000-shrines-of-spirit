@@ -181,6 +181,7 @@ impl WeatherBed {
     /// is the same however the audio is cut into blocks.
     pub fn render_from(&mut self, s0: u64, out: &mut [f32], weather: &Weather) {
         let frames = out.len() / 2;
+        self.ambience.rustle_on = weather.kind != crate::weather::WeatherKind::Wind;
         self.schedule(weather, s0, s0 + frames as u64);
         for i in 0..frames {
             let s = s0 + i as u64;

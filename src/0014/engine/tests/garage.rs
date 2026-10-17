@@ -143,7 +143,7 @@ fn garage_chords_change_every_two_bars_on_the_downbeat() {
     for scale in [Scale::Ionian, Scale::Dorian, Scale::Aeolian, Scale::Lydian, shrine0014::harmony::Scale::PentatonicMinor] {
         for chords in 1..=4 {
             for seed in 0..10u64 {
-                let h = Harmony::garage(scale, chords, tempo.beat(), 2, &mut Rng::new(seed));
+                let h = Harmony::garage(scale, chords, tempo.beat(), 2, &mut Rng::new(seed), 0, 0);
                 assert_eq!(h.chords.len(), chords);
                 let two_bars = 2 * tempo.drum_bar();
                 for (i, c) in h.chords.iter().enumerate() {
@@ -156,8 +156,8 @@ fn garage_chords_change_every_two_bars_on_the_downbeat() {
                 if chords > 1 {
                     assert_eq!(h.at(two_bars - tempo.drum_bar() / 2).morph, 0.0);
                 }
-                // Major scales begin on a major-key progression; nothing repeats back to back.
-                assert!(h.chords.windows(2).all(|w| w[0].degree != w[1].degree), "{scale:?}: a chord repeats");
+                // Nothing repeats back to back.
+                assert!(h.chords.windows(2).all(|w| w[0].tones != w[1].tones), "{scale:?}: a chord repeats");
             }
         }
     }
@@ -174,7 +174,7 @@ fn garage_layers_keep_out_of_each_others_way() {
                 let iv = (*n as i64 - key as i64).rem_euclid(12);
                 assert!(iv == 0 || iv == 7, "{scale:?} key {key}: the drone holds {n}, not a root or fifth");
             }
-            let g = Harmony::garage(scale, 4, tempo.beat(), key, &mut Rng::new(key as u64));
+            let g = Harmony::garage(scale, 4, tempo.beat(), key, &mut Rng::new(key as u64), 0, 0);
             assert!(g.garage);
             // The loops' shells sit above the stabs' middle register and below F6.
             for c in &g.chords {
@@ -194,4 +194,158 @@ fn garage_layers_keep_out_of_each_others_way() {
     let (mut a, mut b) = (Rng::stream(1, 0xD0), Rng::stream(1, 0xD7));
     let h = Harmony::new(Scale::Lydian, 3, Pace::HalfTime, tempo.beat(), 2, &mut a, &mut b);
     assert_eq!(shrine0014::glitch_setup::GlitchSetup::DEFAULT_0.layer_config(0, &h, tempo).ping_ratio, 0.0);
+}
+
+#[test]
+fn the_claps_sit_in_the_middle() {
+    // The jungle rule throws snare hits 45-65% to a random side; garage's
+    // claps are the backbeat and stay centred whatever the seed.
+    let tempo = Tempo::new(132);
+    let h = harmony(tempo);
+    let mods = Mods::new(1);
+    let six = tempo.drum16 as usize;
+    for seed in 0..6u64 {
+        let mut d = Drums::garage(seed, Kit::SubClicks, DrumSpace::Wide, &h, tempo, 0.58);
+        let claps: Vec<usize> = d.hits().iter().filter(|h| h.1 == Voice::Snare).map(|h| h.0).collect();
+        let (mut el, mut er) = (vec![0.0f64; claps.len()], vec![0.0f64; claps.len()]);
+        for clock in 0..(24 * 16 * six) as u64 {
+            let (l, r, _) = d.next(clock, &mods);
+            let at = clock as usize % (32 * six);
+            for (k, c) in claps.iter().enumerate() {
+                if at >= *c && at < c + six {
+                    el[k] += l * l;
+                    er[k] += r * r;
+                }
+            }
+        }
+        for k in 0..claps.len() {
+            let ratio = (el[k] / er[k]).sqrt();
+            assert!((0.95..1.05).contains(&ratio), "seed {seed}: clap {k} leans {ratio:.2} left/right");
+        }
+    }
+}
+
+#[test]
+fn garage_edits_keep_every_hit_on_its_swung_grid() {
+    let tempo = Tempo::new(132);
+    let h = harmony(tempo);
+    let mods = Mods::new(1);
+    for seed in 0..8u64 {
+        let d = Drums::garage(seed, Kit::SubClicks, DrumSpace::Wide, &h, tempo, 0.6);
+        // Every hit starts inside its own slice.
+        let six = tempo.drum16 as usize;
+        for (pos, v) in d.hits() {
+            let slice = (pos + six / 2) / six;
+            assert!(*pos >= slice * six, "seed {seed}: a {v:?} starts before its slice");
+        }
+        // A moved slice keeps the step's place in the swing — except the
+        // reversed clap swelling into the beat after it.
+        for bar in 0..300u64 {
+            let p = d.plan(bar, &mods);
+            for (i, s) in p.steps.iter().enumerate() {
+                let reversed_clap = s.op == shrine0014::drums::Op::Reverse && i % 8 == 3;
+                assert!(s.slice as usize % 2 == i % 2 || reversed_clap, "seed {seed} bar {bar} step {i}: {s:?} is off its swing");
+            }
+        }
+    }
+}
+
+#[test]
+fn every_named_progression_plays_its_chords_in_every_key() {
+    use shrine0014::harmony::PROGRESSIONS;
+    let tempo = Tempo::new(132);
+    for (i, p) in PROGRESSIONS.iter().enumerate() {
+        for key in 0..12u8 {
+            let scale = if p.major { Scale::Ionian } else { Scale::Aeolian };
+            let h = Harmony::garage(scale, 4, tempo.beat(), key, &mut Rng::new(1), i + 1, 0);
+            assert_eq!(h.chords.len(), 4);
+            for (c, (root, q)) in h.chords.iter().zip(p.chords) {
+                let want: Vec<u8> = q.intervals().iter().map(|x| (key + root + x) % 12).collect();
+                assert_eq!(c.tones, want, "{} in key {key}", p.name);
+                assert_eq!((c.bass as i64).rem_euclid(12) as u8, (key + root) % 12, "{}: the bass is not the root", p.name);
+                assert!(c.notes[0] >= 60.0 && c.notes.iter().all(|m| *m <= 87.0));
+            }
+            // The stabs voice every chord as four close notes, moving smoothly.
+            let v = shrine0014::stabs::voicings(&h);
+            for (k, chord) in v.iter().enumerate() {
+                assert_eq!(chord.len(), 4, "{}", p.name);
+                if k > 0 {
+                    let moved: f64 = chord.iter().zip(&v[k - 1]).map(|(a, b)| (a - b).abs()).sum();
+                    assert!(moved <= 12.0, "{} key {key}: chord {k} leaps {moved}", p.name);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_seed_picks_a_progression_of_the_scales_own_family() {
+    use shrine0014::harmony::PROGRESSIONS;
+    let tempo = Tempo::new(132);
+    for (scale, major) in [(Scale::Ionian, true), (Scale::Yonanuki, true), (Scale::Ryukyu, true), (Scale::Dorian, false), (Scale::Aeolian, false)] {
+        let mut seen = std::collections::BTreeSet::new();
+        for seed in 0..60u64 {
+            let h = Harmony::garage(scale, 4, tempo.beat(), 0, &mut Rng::new(seed), 0, 0);
+            let tones: Vec<Vec<u8>> = h.chords.iter().map(|c| c.tones.clone()).collect();
+            let p = PROGRESSIONS.iter().position(|p| p.chords.iter().zip(&tones).all(|((r, q), t)| q.intervals().iter().map(|x| (r + x) % 12).collect::<Vec<_>>() == *t)).expect("not a named progression");
+            assert_eq!(PROGRESSIONS[p].major, major, "{scale:?} picked {}", PROGRESSIONS[p].name);
+            seen.insert(p);
+        }
+        assert!(seen.len() >= 3, "{scale:?}: the seed only ever picks {seen:?}");
+    }
+}
+
+#[test]
+fn the_key_lift_steps_up_a_whole_tone_and_comes_home() {
+    let tempo = Tempo::new(132);
+    let h = Harmony::garage(Scale::Ionian, 4, tempo.beat(), 2, &mut Rng::new(3), 1, 4);
+    assert_eq!(h.chords.len(), 8);
+    let two_bars = 2 * tempo.drum_bar();
+    // Four passes at home, then four a whole tone up, then home again.
+    for pass in 0..10u64 {
+        let c = h.at(pass * 4 * two_bars).chord;
+        let lifted = (pass / 4) % 2 == 1;
+        assert_eq!(c, if lifted { 4 } else { 0 }, "pass {pass}");
+    }
+    for i in 0..4 {
+        let (home, up) = (&h.chords[i].tones, &h.chords[i + 4].tones);
+        assert!(home.iter().zip(up).all(|(a, b)| (a + 2) % 12 == *b));
+        assert!(h.starts_pass(0) && h.starts_pass(4) && !h.starts_pass(1));
+    }
+}
+
+#[test]
+fn the_drone_steps_back_under_chords_that_rub_against_it() {
+    use shrine0014::harmony::PROGRESSIONS;
+    let tempo = Tempo::new(132);
+    // C major: the bright royal road's III7 (E7) has G#, a semitone from the drone's G.
+    let bright = PROGRESSIONS.iter().position(|p| p.name == "Royal road, bright").unwrap();
+    let h = Harmony::garage(Scale::Ionian, 4, tempo.beat(), 0, &mut Rng::new(1), bright + 1, 0);
+    // Fmaj7 (F A C E) and Am7 sit on the C-G drone; G7's B rubs against its
+    // C, and E7's G# against its G (and B against C).
+    assert_eq!((0..4).map(|i| h.rubs_pedal(i)).collect::<Vec<_>>(), vec![false, true, true, false]);
+}
+
+#[test]
+fn the_loops_change_chord_on_the_downbeat_with_the_bass() {
+    let tempo = Tempo::new(132);
+    let h = Harmony::garage(Scale::Ionian, 4, tempo.beat(), 2, &mut Rng::new(5), 1, 4);
+    let two_bars = 2 * tempo.drum_bar();
+    for step in 1..40u64 {
+        let down = step * two_bars;
+        let (before, now) = (h.at(down - 1).chord, h.at(down).chord);
+        // Up to the downbeat the loops are wholly on the chord the bass is on...
+        assert_eq!(h.loop_mix(down - 1), (before, before, 0.0), "step {step}: the loops moved early");
+        // ...and from it they move with the bass, done within a sixteenth.
+        let (from, to, _) = h.loop_mix(down);
+        assert_eq!((from, to), (before, now));
+        assert_eq!(h.loop_mix(down + tempo.drum16), (now, now, 0.0));
+    }
+    // The slow modes keep their bar-long crossfade exactly.
+    let (mut a, mut b) = (Rng::stream(1, 0xD0), Rng::stream(1, 0xD7));
+    let slow = Harmony::new(Scale::Lydian, 3, Pace::HalfTime, tempo.beat(), 2, &mut a, &mut b);
+    for t in (0..slow.cycle).step_by(4099) {
+        let p = slow.at(t);
+        assert_eq!(slow.loop_mix(t), (p.chord, p.next, p.morph));
+    }
 }
