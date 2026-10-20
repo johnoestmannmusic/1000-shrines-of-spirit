@@ -734,6 +734,47 @@ impl Scene {
     }
 
     /// The column standing at grid point `(x, y)`, if any: its cell and height.
+    /// Where the top surface of grid cell `(gx, gy)` is on screen in
+    /// `state`, in logical pixels, and its level: the top of the shrine's
+    /// column there, or the ground. The same placement `render_state` gives a
+    /// rain splash, through the same camera, orbit and architecture
+    /// transform, so anything put there (the page's @ orbs) stays on it.
+    /// Off the grid: `None`.
+    pub fn surface_point(&self, state: &SimState, gx: i32, gy: i32) -> Option<(f64, f64, f64)> {
+        if gx < 0 || gy < 0 || gx >= GRID_W as i32 || gy >= GRID_H as i32 {
+            return None;
+        }
+        let mut iso = Iso::grid_24();
+        iso.cam_yaw = state.camera.yaw;
+        iso.cam_pitch = state.camera.pitch;
+        let arch = state.arch;
+        let orbit = state.orbit_turns;
+        let general = !arch.is_unrotated() || orbit != 0.0;
+        let (rot, off) = arch.world(orbit);
+        let (ground_rot, ground_off) = ArchTransform::IDENTITY.world(orbit);
+        let (x, y) = (gx as f64, gy as f64);
+        let above_ground = |z: f64| -> bool {
+            let wz = if general { crate::iso::to_world(x, y, z, &rot, off).2 } else { z + arch.off_z as f64 };
+            wz >= 0.0
+        };
+        let (at, level) = match self.column_at(x, y).filter(|c| above_ground(c.2 as f64 - 1.0)) {
+            Some((_, _, h)) => {
+                let z = h as f64 - 1.0;
+                let p = if general {
+                    iso.project_rotated(x, y, z, &rot, off)
+                } else {
+                    iso.project_world(x + arch.off_x as f64, y + arch.off_y as f64, z + arch.off_z as f64)
+                };
+                (p, h as f64)
+            }
+            None => {
+                let p = if general { iso.project_rotated(x, y, 0.0, &ground_rot, ground_off) } else { iso.project_world(x, y, 0.0) };
+                (p, 0.0)
+            }
+        };
+        Some((at.x as f64 / FP as f64, at.y as f64 / FP as f64, level))
+    }
+
     pub fn column_at(&self, x: f64, y: f64) -> Option<(i32, i32, u32)> {
         let (gx, gy) = (x.round() as i32, y.round() as i32);
         let (ox, oy) = self.shrine.origin();

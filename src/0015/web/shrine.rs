@@ -4139,6 +4139,7 @@ pub struct Player {
     learn: Option<String>,
     learn_state: Vec<f64>,
     weather: [f64; 6],
+    point: [f64; 3],
 }
 
 impl Player {
@@ -4154,6 +4155,7 @@ impl Player {
             learn: None,
             learn_state: vec![0.0; crate::learn::STATE_LEN],
             weather: [0.0; 6],
+            point: [0.0; 3],
         }
     }
 
@@ -4200,9 +4202,20 @@ impl Player {
     /// The weather at `sample_clock`, for the Learn page: (wind, gust, rain,
     /// snow, fog, light), each 0..1.
     pub fn weather_now(&mut self, sample_clock: u64) -> &[f64] {
-        let w = self.sim.state(sample_clock as f64 / SAMPLE_RATE as f64 + self.sim.start_offset()).weather;
+        let w = self.sim.state(self.time(sample_clock)).weather;
         self.weather = [w.wind_strength, w.gust, w.rain, w.snow, w.fog, w.light];
         &self.weather
+    }
+
+    /// Where grid cell `(gx, gy)`'s top surface is on screen at
+    /// `sample_clock`, in logical pixels, and its level (x = −1 off the grid).
+    pub fn surface_point(&mut self, gx: i32, gy: i32, sample_clock: u64) -> &[f64] {
+        let t = self.time(sample_clock);
+        let mut state = self.sim.state(t);
+        state.camera = self.camera;
+        let (x, y, z) = self.sim.scene.surface_point(&state, gx, gy).unwrap_or((-1.0, -1.0, 0.0));
+        self.point = [x, y, z];
+        &self.point
     }
 
     /// Hear one layer alone: 1.. = `learn::SOLOS`, 0 = the full mix.
@@ -4218,9 +4231,16 @@ impl Player {
         &self.buf
     }
 
+    /// Seconds into the piece at `sample_clock` samples of playback.
+    fn time(&self, sample_clock: u64) -> f64 {
+        sample_clock as f64 / SAMPLE_RATE as f64 + self.sim.start_offset()
+    }
+
     /// Render one 300x300 RGBA frame at `sample_clock` samples.
     pub fn render_visual(&mut self, sample_clock: u64) -> &[u8] {
-        let t = sample_clock as f64 / SAMPLE_RATE as f64;
+        // At the start offset plus the clock, in step with the audio (which
+        // was fast-forwarded there), as `Sim::render_visual` does.
+        let t = self.time(sample_clock);
         let mut state = self.sim.state(t);
         state.camera = self.camera;
         state.draw_sky = !self.transparent_sky;
@@ -6950,6 +6970,47 @@ impl Scene {
     }
 
     /// The column standing at grid point `(x, y)`, if any: its cell and height.
+    /// Where the top surface of grid cell `(gx, gy)` is on screen in
+    /// `state`, in logical pixels, and its level: the top of the shrine's
+    /// column there, or the ground. The same placement `render_state` gives a
+    /// rain splash, through the same camera, orbit and architecture
+    /// transform, so anything put there (the page's @ orbs) stays on it.
+    /// Off the grid: `None`.
+    pub fn surface_point(&self, state: &SimState, gx: i32, gy: i32) -> Option<(f64, f64, f64)> {
+        if gx < 0 || gy < 0 || gx >= GRID_W as i32 || gy >= GRID_H as i32 {
+            return None;
+        }
+        let mut iso = Iso::grid_24();
+        iso.cam_yaw = state.camera.yaw;
+        iso.cam_pitch = state.camera.pitch;
+        let arch = state.arch;
+        let orbit = state.orbit_turns;
+        let general = !arch.is_unrotated() || orbit != 0.0;
+        let (rot, off) = arch.world(orbit);
+        let (ground_rot, ground_off) = ArchTransform::IDENTITY.world(orbit);
+        let (x, y) = (gx as f64, gy as f64);
+        let above_ground = |z: f64| -> bool {
+            let wz = if general { crate::iso::to_world(x, y, z, &rot, off).2 } else { z + arch.off_z as f64 };
+            wz >= 0.0
+        };
+        let (at, level) = match self.column_at(x, y).filter(|c| above_ground(c.2 as f64 - 1.0)) {
+            Some((_, _, h)) => {
+                let z = h as f64 - 1.0;
+                let p = if general {
+                    iso.project_rotated(x, y, z, &rot, off)
+                } else {
+                    iso.project_world(x + arch.off_x as f64, y + arch.off_y as f64, z + arch.off_z as f64)
+                };
+                (p, h as f64)
+            }
+            None => {
+                let p = if general { iso.project_rotated(x, y, 0.0, &ground_rot, ground_off) } else { iso.project_world(x, y, 0.0) };
+                (p, 0.0)
+            }
+        };
+        Some((at.x as f64 / FP as f64, at.y as f64 / FP as f64, level))
+    }
+
     pub fn column_at(&self, x: f64, y: f64) -> Option<(i32, i32, u32)> {
         let (gx, gy) = (x.round() as i32, y.round() as i32);
         let (ox, oy) = self.shrine.origin();
@@ -19203,10 +19264,10 @@ pub use self::track::*;
 // Baked recipe — this artifact is this shrine
 // ============================================================================
 /// `recipe::encode` of the settings the setup menu produced.
-const RECIPE: [u32; 168] = [18, 0, 1000, 0, 1000, 0, 9, 0, 1009, 0, 2026, 0, 168, 0, 11, 0, 7, 0, 0, 10, 2, 3, 0, 1, 120, 0, 12, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 3358395905, 51380, 188928180, 133152, 13376511, 66404, 9721599, 49764, 180, 0, 5434, 0, 2578, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+const RECIPE: [u32; 168] = [18, 0, 1000, 0, 1000, 0, 9, 0, 1009, 0, 2026, 0, 168, 0, 11, 0, 7, 0, 0, 10, 2, 3, 0, 1, 120, 0, 12, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 3358395905, 51380, 188928180, 133152, 13376511, 66404, 9721599, 49764, 178, 0, 5434, 0, 2646, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 892416048, 0, 0, 0, 0, 0, 0, 0];
 
 /// Build date as `YYYYMMDD`, stamped when this file was emitted.
-const BUILD: u32 = 20261018;
+const BUILD: u32 = 20261020;
 
 /// The source-code overlay word: bit 0 enabled, byte 1 opacity, byte 2 speed, byte 3 text scale.
 const CODE_OVERLAY: u32 = 3358395905;
@@ -19218,13 +19279,13 @@ const CODE_ANGLE: i32 = 0;
 const CODE_OFFSET: i32 = 0;
 
 /// Camera rotation speed, degrees per second.
-const CAMERA_SPEED: i32 = 0;
+const CAMERA_SPEED: i32 = -2;
 
 /// The track name, shown at the head of the page and used as the WAV title.
-const NAME: &str = "";
+const NAME: &str = "0015";
 
 /// Everything needed to recreate this shrine.
-const INFO: &str = "ShrineGen  v20261018\n\nseed       1000\nbiome      Moss\nweather    Clear\nwildlife   off\n\nscale      Pentatonic minor\nroot note  seed picks\nchords     2\nmode       microsound · pulse sub + click · grains sparse · pips sparse · dropouts off · chords every 2 bars · drone shift fifths\ntempo      120 BPM\nstart      at the beginning\nkit        Sub & clicks\nspace      Wide\ndrum rev   on\nmaster fx  off\ncode over  on · 14% · speed 45 · text 200%\narch       centred, upright\ncamera     still\nglitch 1   6 kinds · 55% · ×1 · 7 steps\nglitch 2   6 kinds · 45% · ×2 · 11 steps\ntranspose  0 semitones\n\ndrone arc  always on\ndrone tone off\nlayer 1    Voices\n  arc 1    always on\nlayer 2    Bells\n  arc 2    always on\nlayer 3    Off\n  arc 3    always on\nlayer 4    Off\n  arc 4    always on\n\nseeds      1000 9 1009 2026 168 11 7\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone off · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
+const INFO: &str = "ShrineGen  v20261020\n\nseed       1000\nbiome      Moss\nweather    Clear\nwildlife   off\n\nscale      Pentatonic minor\nroot note  seed picks\nchords     2\nmode       microsound · pulse sub + click · grains medium · pips sparse · dropouts some · chords every 2 bars · drone shift fifths\ntempo      120 BPM\nstart      at the beginning\nkit        Sub & clicks\nspace      Wide\ndrum rev   on\nmaster fx  off\ncode over  on · 14% · speed 45 · text 200%\narch       centred, upright\ncamera     -2°/s\nglitch 1   6 kinds · 55% · ×1 · 7 steps\nglitch 2   6 kinds · 45% · ×2 · 11 steps\ntranspose  0 semitones\n\ndrone arc  always on\ndrone tone off\nlayer 1    Voices\n  arc 1    always on\nlayer 2    Bells\n  arc 2    always on\nlayer 3    Off\n  arc 3    always on\nlayer 4    Off\n  arc 4    always on\n\nseeds      1000 9 1009 2026 168 11 7\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone off · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
 
 // ============================================================================
 // C ABI — plain extern "C", loadable with the standard WebAssembly API
@@ -19383,6 +19444,17 @@ pub extern "C" fn shrine_learn_state_len() -> u32 {
 pub unsafe extern "C" fn shrine_learn_weather(player: *mut crate::player::Player, sample_clock: u64) -> *const f64 {
     let p = unsafe { &mut *player };
     p.weather_now(sample_clock).as_ptr()
+}
+
+/// Where grid cell `(gx, gy)`'s top surface is on screen at `sample_clock`:
+/// 3 f64s (x, y in logical pixels, its level); x = −1 off the grid.
+///
+/// # Safety
+/// `player` must come from `shrine_new`.
+#[no_mangle]
+pub unsafe extern "C" fn shrine_surface_point(player: *mut crate::player::Player, gx: i32, gy: i32, sample_clock: u64) -> *const f64 {
+    let p = unsafe { &mut *player };
+    p.surface_point(gx, gy, sample_clock).as_ptr()
 }
 
 /// Hear one layer alone (1 drone, 2–3 glitch layers, 4 bass, 5 drums, 6–9

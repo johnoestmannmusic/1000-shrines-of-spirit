@@ -22,6 +22,7 @@ pub struct Player {
     learn: Option<String>,
     learn_state: Vec<f64>,
     weather: [f64; 6],
+    point: [f64; 3],
 }
 
 impl Player {
@@ -37,6 +38,7 @@ impl Player {
             learn: None,
             learn_state: vec![0.0; crate::learn::STATE_LEN],
             weather: [0.0; 6],
+            point: [0.0; 3],
         }
     }
 
@@ -83,9 +85,20 @@ impl Player {
     /// The weather at `sample_clock`, for the Learn page: (wind, gust, rain,
     /// snow, fog, light), each 0..1.
     pub fn weather_now(&mut self, sample_clock: u64) -> &[f64] {
-        let w = self.sim.state(sample_clock as f64 / SAMPLE_RATE as f64 + self.sim.start_offset()).weather;
+        let w = self.sim.state(self.time(sample_clock)).weather;
         self.weather = [w.wind_strength, w.gust, w.rain, w.snow, w.fog, w.light];
         &self.weather
+    }
+
+    /// Where grid cell `(gx, gy)`'s top surface is on screen at
+    /// `sample_clock`, in logical pixels, and its level (x = −1 off the grid).
+    pub fn surface_point(&mut self, gx: i32, gy: i32, sample_clock: u64) -> &[f64] {
+        let t = self.time(sample_clock);
+        let mut state = self.sim.state(t);
+        state.camera = self.camera;
+        let (x, y, z) = self.sim.scene.surface_point(&state, gx, gy).unwrap_or((-1.0, -1.0, 0.0));
+        self.point = [x, y, z];
+        &self.point
     }
 
     /// Hear one layer alone: 1.. = `learn::SOLOS`, 0 = the full mix.
@@ -101,9 +114,16 @@ impl Player {
         &self.buf
     }
 
+    /// Seconds into the piece at `sample_clock` samples of playback.
+    fn time(&self, sample_clock: u64) -> f64 {
+        sample_clock as f64 / SAMPLE_RATE as f64 + self.sim.start_offset()
+    }
+
     /// Render one 300x300 RGBA frame at `sample_clock` samples.
     pub fn render_visual(&mut self, sample_clock: u64) -> &[u8] {
-        let t = sample_clock as f64 / SAMPLE_RATE as f64;
+        // At the start offset plus the clock, in step with the audio (which
+        // was fast-forwarded there), as `Sim::render_visual` does.
+        let t = self.time(sample_clock);
         let mut state = self.sim.state(t);
         state.camera = self.camera;
         state.draw_sky = !self.transparent_sky;

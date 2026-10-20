@@ -226,6 +226,38 @@ It is built from four exports, all display-only:
 - `shrine_learn_weather`: the weather now;
 - `shrine_set_solo`.
 
+### @ Orbs and CyberPal
+
+While the music plays, a glowing **@ orb** now and then surfaces on a tile
+of the shrine. It sits on that tile's highest surface, rides it as the camera
+turns, and fades if nobody catches it. Click one and **CyberPal**, the page's
+digital guide, tells you one thing about how this piece is made.
+
+CyberPal's Insights bar rises from the bottom of the picture like an RPG text
+box, decodes its line character by character, holds it, then slides away.
+Click the bar to finish the line, or to close it. Each insight is about the
+music, the sound design or the picture, and is true for this piece: it is
+filled with its own key, tempo, loop lengths, biome and so on. Every one shows
+once before any repeats.
+
+Clicking anywhere else still plays or pauses. Orbs are page UI only: they
+never touch the music or the picture.
+
+The tweakable values sit at the top of the page's `@ Orbs & CyberPal` block:
+
+| Constant | Default | What it sets |
+|---|---|---|
+| `ORB_EVERY_S` | 8 | seconds between rolls |
+| `ORB_CHANCE` | 0.4 | chance of an orb on each roll |
+| `ORB_LIFE_S` | 20 | seconds an unclicked orb lasts |
+| `ORB_MAX` | 4 | orbs at once |
+| `ORB_RADIUS` | 24 | the orb's size, in canvas pixels (1200 across) |
+| `INSIGHT_HOLD_S` | 15 | seconds a line stays up after typing |
+| `INSIGHT_CPS` | 40 | typing speed, characters per second |
+
+`?orbs=test` in the URL makes an orb appear every second, for trying it out.
+The insight lines live in `INSIGHTS`.
+
 ## Releasing
 
 ```sh

@@ -77,3 +77,32 @@ fn the_wild_biomes_have_no_props_or_roof() {
         assert!(Sim::new_visual(config(biome, WeatherKind::Rain)).scene.roof.is_some(), "{biome:?}");
     }
 }
+
+#[test]
+fn a_tile_top_is_where_the_renderer_puts_it_and_turns_with_the_camera() {
+    use shrine0015::iso::{Iso, FP};
+    let sim = Sim::new_visual(SimConfig::default());
+    let mut state = sim.state(0.0);
+    state.orbit_turns = 0.0;
+    // Upright: exactly the grid projection of the column's top level.
+    let mut checked = 0;
+    for gy in 0..24 {
+        for gx in 0..24 {
+            let (x, y, level) = sim.scene.surface_point(&state, gx, gy).unwrap();
+            let z = (level as i32 - 1).max(0);
+            let p = Iso::grid_24().project(gx, gy, z);
+            assert_eq!((x, y), (p.x as f64 / FP as f64, p.y as f64 / FP as f64), "cell {gx},{gy}");
+            checked += (level > 0.0) as u32;
+        }
+    }
+    assert!(checked > 20, "only {checked} shrine columns found");
+    assert!(sim.scene.surface_point(&state, 24, 0).is_none() && sim.scene.surface_point(&state, -1, 3).is_none());
+    // Turned: the same cell moves, the same way every time.
+    let a = sim.scene.surface_point(&state, 12, 12).unwrap();
+    state.orbit_turns = 0.1;
+    let b = sim.scene.surface_point(&state, 12, 3).unwrap();
+    state.orbit_turns = 0.0;
+    let c = sim.scene.surface_point(&state, 12, 3).unwrap();
+    assert_ne!(b, c, "turning moved nothing");
+    assert_eq!(a, sim.scene.surface_point(&state, 12, 12).unwrap());
+}

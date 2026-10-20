@@ -511,6 +511,17 @@ pub unsafe extern "C" fn shrine_learn_weather(player: *mut crate::player::Player
     p.weather_now(sample_clock).as_ptr()
 }
 
+/// Where grid cell `(gx, gy)`'s top surface is on screen at `sample_clock`:
+/// 3 f64s (x, y in logical pixels, its level); x = −1 off the grid.
+///
+/// # Safety
+/// `player` must come from `shrine_new`.
+#[no_mangle]
+pub unsafe extern "C" fn shrine_surface_point(player: *mut crate::player::Player, gx: i32, gy: i32, sample_clock: u64) -> *const f64 {
+    let p = unsafe { &mut *player };
+    p.surface_point(gx, gy, sample_clock).as_ptr()
+}
+
 /// Hear one layer alone (1 drone, 2–3 glitch layers, 4 bass, 5 drums, 6–9
 /// atmosphere loops, 10 the echo and reverb), or 0 for the full mix.
 ///

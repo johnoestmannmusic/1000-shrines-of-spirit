@@ -15,10 +15,11 @@
      shrink-wraps the canvas so the overlay lines up with it exactly. */
   .stage { flex: 1 1 auto; min-width: 0; min-height: 0;
     display: flex; align-items: center; justify-content: center; }
-  .frame { position: relative; display: inline-block; max-width: 100%; max-height: 100%; line-height: 0;
-    background: #0d0c10; }
-  canvas { display: block; width: min(100%, calc(100vh - 32px)); width: min(100%, calc(100dvh - 32px));
-    height: auto; max-width: 100%; image-rendering: pixelated; border: 1px solid #2a2732;
+  /* The frame is the square itself (not the canvas's 1200-pixel intrinsic
+     size), so the overlay, the orbs' hit area and CyberPal's bar all fit it. */
+  .frame { position: relative; display: block; width: min(100%, calc(100vh - 32px)); width: min(100%, calc(100dvh - 32px));
+    aspect-ratio: 1; line-height: 0; background: #0d0c10; }
+  canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; border: 1px solid #2a2732; box-sizing: border-box;
     background: #0d0c10; cursor: pointer; }
   .overlay { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center;
     gap: 8px; text-align: center; background: rgba(13, 12, 16, 0.42);
@@ -26,6 +27,37 @@
   .overlay .icon { font-size: 3rem; line-height: 1; color: #96dcb4; }
   .overlay small { font-size: 0.8rem; color: #8a8596; }
   .frame.playing .overlay { opacity: 0; pointer-events: none; }
+  /* CyberPal's insights: a cyberspace text box that rises from the bottom of
+     the picture, types its line, then slides away. */
+  .frame { overflow: hidden; }
+  .insight { position: absolute; left: 3%; right: 3%; bottom: 3%; z-index: 1; line-height: 1.45;
+    padding: 18px 20px 14px; color: #d8fbff; cursor: pointer;
+    font: clamp(11px, 1.35vw, 15px)/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background:
+      repeating-linear-gradient(0deg, rgba(95, 247, 255, 0.05) 0 1px, transparent 1px 3px),
+      linear-gradient(90deg, rgba(95, 247, 255, 0.04) 1px, transparent 1px) 0 0 / 14px 14px,
+      linear-gradient(180deg, rgba(6, 12, 28, 0.9), rgba(10, 4, 24, 0.92));
+    border: 1px solid rgba(95, 247, 255, 0.75);
+    box-shadow: 0 0 14px rgba(95, 247, 255, 0.35), inset 0 0 18px rgba(255, 79, 216, 0.12);
+    clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+    text-shadow: 0 0 6px rgba(95, 247, 255, 0.55);
+    transform: translateY(140%); opacity: 0; transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.1), opacity 0.2s; }
+  .insight.open { transform: translateY(0); opacity: 1; animation: glitch-in 0.32s steps(2) 1; }
+  .insight .tag { position: absolute; top: 4px; left: 14px; font-size: 0.72em; letter-spacing: 0.22em; color: #ff4fd8;
+    text-shadow: 0 0 6px rgba(255, 79, 216, 0.8); }
+  .insight .tag::before { content: "["; color: #5ff7ff; margin-right: 2px; }
+  .insight .tag::after { content: "]_"; color: #5ff7ff; margin-left: 2px; animation: blink 1s steps(1) infinite; }
+  .insight .portrait { display: none; }            /* CyberPal's face, coming later */
+  .insight .line { margin: 6px 0 0; min-height: 3em; white-space: pre-wrap; }
+  .insight .line[data-cursor]::after { content: "█"; color: #5ff7ff; animation: blink 0.8s steps(1) infinite; }
+  .insight .more { position: absolute; right: 18px; bottom: 6px; font-size: 0.7em; color: #ff4fd8; animation: blink 1.2s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes glitch-in {
+    0% { clip-path: polygon(0 40%, 100% 40%, 100% 60%, 0 60%); filter: hue-rotate(80deg); }
+    50% { transform: translate(3px, 0); filter: hue-rotate(-60deg); }
+    100% { transform: translate(0, 0); filter: none; }
+  }
+  body.learning .insight { display: none; }
   aside.info { flex: 0 0 300px; min-width: 0; max-height: 100%;
     display: flex; flex-direction: column; min-height: 0; }
   aside.info h2 { font-size: 0.8rem; font-weight: 400; letter-spacing: 0.12em;
@@ -50,7 +82,7 @@
   body.learning .learn { display: grid; }
   body.learning aside.info { display: none; }
   body.learning .stage { position: fixed; z-index: 3; left: 16px; top: 16px; width: 240px; height: 240px; }
-  body.learning canvas { width: 240px; height: 240px; }
+  body.learning .frame { width: 240px; }
   .learn nav { padding: 272px 16px 16px; border-right: 1px solid #2a2732; overflow: auto; }
   .learn nav h3 { font-size: 0.72rem; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase;
     color: #8a8596; margin: 14px 0 6px; }
@@ -80,7 +112,7 @@
   @media (max-width: 780px) {
     .learn { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
     body.learning .stage { left: 16px; top: 12px; width: 96px; height: 96px; }
-    body.learning canvas { width: 96px; height: 96px; }
+    body.learning .frame { width: 96px; }
     .learn nav { padding: 120px 16px 8px; border-right: 0; border-bottom: 1px solid #2a2732;
       display: flex; gap: 4px; overflow-x: auto; white-space: nowrap; }
     .learn nav h3 { display: none; }
@@ -91,7 +123,7 @@
   /* Narrow screens: stack, and let the panel scroll below the shrine. */
   @media (max-width: 780px) {
     main { flex-direction: column; }
-    canvas { width: min(100%, calc(60dvh - 32px)); }
+    .frame { width: min(100%, calc(60dvh - 32px)); }
     aside.info { flex: 0 0 auto; max-height: 34%; }
   }
 </style>
@@ -101,6 +133,12 @@
   <div class="stage" id="stage">
     <div class="frame" id="frame">
       <canvas id="screen" width="1200" height="1200" aria-label="Procedural isometric shrine"></canvas>
+      <div class="insight" id="insight" role="status" aria-live="polite">
+        <div class="tag"><span class="handle">CYBERPAL</span></div>
+        <div class="portrait" aria-hidden="true"></div>
+        <p class="line" id="insight-text"></p>
+        <span class="more" aria-hidden="true">▼</span>
+      </div>
       <div class="overlay" id="overlay">
         <span class="icon" id="icon">▶</span>
         <small id="hint">click to begin</small>
@@ -327,6 +365,8 @@
 
   // Learn mode's hooks (set up below).
   let learnFrame = null, learnState = null, learnLive = () => false;
+  // The orbs' and CyberPal's hooks (set up below).
+  let orbFrame = null, insightFrame = null;
 
   // Camera: eased toward the pointer, bounded.
   let camYaw = 0, camPitch = 0, targetYaw = 0, targetPitch = 0;
@@ -356,6 +396,8 @@
       screen.clearRect(0, 0, 1200, 1200);
     }
     screen.drawImage(off, 0, 0, LOGICAL, LOGICAL, 0, 0, 1200, 1200);
+    if (orbFrame) orbFrame(now, dt);
+    if (insightFrame) insightFrame(now);
     if (learnFrame) learnFrame(now);
     requestAnimationFrame(frame);
   }
@@ -984,6 +1026,11 @@
     learning = true;
     document.body.classList.add("learning");
     if (node) node.port.postMessage({ live: true });
+    // CyberPal may have built the description already.
+    if (D && !lessonsEl.children.length) {
+      buildNav();
+      show(lesson);
+    }
     if (!D) {
       lTitle.textContent = "Preparing…";
       lKicker.textContent = "Working out how this piece is made (a moment).";
@@ -1038,7 +1085,291 @@
     openLearn();
   }
 
-  stage.addEventListener("click", toggle);
+  // ---------------------------------------------------------------- @ Orbs & CyberPal
+  // Now and then a glowing @ orb surfaces on a tile of the shrine. Click it and
+  // CyberPal, the page's digital guide, tells you one thing about how this
+  // piece is made. Page UI only: nothing here touches the music or the picture.
+  // Tweak these freely.
+  const orbTest = new URLSearchParams(location.search).get("orbs") === "test";
+  const ORB_EVERY_S = orbTest ? 1 : 8;     // how often an orb may appear
+  const ORB_CHANCE = orbTest ? 1 : 0.4;    // the chance it does, each time
+  const ORB_LIFE_S = 20;                   // how long an unclicked orb stays
+  const ORB_MAX = 4;                       // orbs at once
+  const ORB_RADIUS = 24;                   // in canvas pixels (1200 across)
+  const INSIGHT_HOLD_S = 15;               // how long a typed insight stays up
+  const INSIGHT_CPS = 40;                  // typing speed, characters per second
+
+  const orbs = [];       // { gx, gy, born, x, y, popped }
+  let orbClock = 0;      // seconds of playback counted towards the next roll
+  const insightEl = document.getElementById("insight");
+  const insightText = document.getElementById("insight-text");
+  const GLYPHS = "@#%&*+=<>/\\|{}[]01";
+
+  // Where a tile's top surface is on the 1200-pixel canvas now.
+  function tileOnCanvas(gx, gy) {
+    if (typeof shr.shrine_surface_point !== "function") return null;
+    const p = new Float64Array(shr.memory.buffer, shr.shrine_surface_point(visual, gx, gy, BigInt(Math.floor(clock))), 3);
+    return p[0] < 0 ? null : { x: p[0] * 4, y: p[1] * 4, level: p[2] };
+  }
+
+  function spawnOrb(now) {
+    if (orbs.filter((o) => !o.popped).length >= ORB_MAX) return;
+    // Mostly on the shrine itself, now and then out on the ground.
+    const onShrine = Math.random() < 0.7;
+    for (let tries = 0; tries < 24; tries++) {
+      const gx = Math.floor(Math.random() * 24), gy = Math.floor(Math.random() * 24);
+      if (orbs.some((o) => o.gx === gx && o.gy === gy)) continue;
+      const p = tileOnCanvas(gx, gy);
+      if (!p || p.x < 40 || p.x > 1160 || p.y < 60 || p.y > 1140) continue;
+      if (onShrine && p.level === 0 && tries < 20) continue;
+      orbs.push({ gx, gy, born: now, x: p.x, y: p.y, popped: 0, spin: Math.random() * 6 });
+      return;
+    }
+  }
+
+  function drawOrb(o, now) {
+    const age = (now - o.born) / 1000;
+    if (o.popped) {
+      // A burst of glyphs, scattering and fading.
+      const t = (now - o.popped) / 500;
+      screen.save();
+      screen.font = "bold 18px ui-monospace, SFMono-Regular, Menlo, monospace";
+      screen.textAlign = "center"; screen.textBaseline = "middle";
+      for (let k = 0; k < 10; k++) {
+        const a = (k / 10) * Math.PI * 2 + o.spin;
+        screen.globalAlpha = Math.max(0, 1 - t);
+        screen.fillStyle = k % 2 ? "#ff4fd8" : "#5ff7ff";
+        screen.fillText(GLYPHS[(k * 7 + o.gx) % GLYPHS.length], o.x + Math.cos(a) * t * 70, o.y - 26 + Math.sin(a) * t * 70);
+      }
+      screen.restore();
+      return t < 1;
+    }
+    const fadeIn = Math.min(1, age / 0.4);
+    const left = ORB_LIFE_S - age;
+    // Flicker out over the last two seconds.
+    const fadeOut = left > 2 ? 1 : Math.max(0, left / 2) * (Math.sin(now / 35) > -0.3 ? 1 : 0.25);
+    const alpha = fadeIn * fadeOut;
+    if (left <= 0) return false;
+    const bob = Math.sin(age * 2.2 + o.spin) * 5;
+    const cx = o.x, cy = o.y - 38 + bob, r = ORB_RADIUS;
+    screen.save();
+    screen.globalAlpha = alpha;
+    // Its tile, lit as a wireframe diamond, and a thin beam up to the orb.
+    const pulse = 0.5 + 0.5 * Math.sin(now / 300 + o.spin);
+    screen.strokeStyle = `rgba(95,247,255,${0.45 + 0.4 * pulse})`; screen.lineWidth = 1.5;
+    screen.beginPath(); screen.moveTo(o.x, o.y - 12); screen.lineTo(o.x + 25, o.y); screen.lineTo(o.x, o.y + 12); screen.lineTo(o.x - 25, o.y); screen.closePath(); screen.stroke();
+    screen.fillStyle = `rgba(95,247,255,${0.08 + 0.1 * pulse})`; screen.fill();
+    const beam = screen.createLinearGradient(0, o.y, 0, cy);
+    beam.addColorStop(0, "rgba(95,247,255,0.5)"); beam.addColorStop(1, "rgba(255,79,216,0)");
+    screen.fillStyle = beam; screen.fillRect(o.x - 1, cy + r, 2, o.y - cy - r);
+    // The halo and the glass body.
+    let g = screen.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 2.4);
+    g.addColorStop(0, "rgba(95,247,255,0.35)"); g.addColorStop(0.5, "rgba(255,79,216,0.12)"); g.addColorStop(1, "rgba(95,247,255,0)");
+    screen.fillStyle = g; screen.beginPath(); screen.arc(cx, cy, r * 2.4, 0, Math.PI * 2); screen.fill();
+    // A dark glass core, so the @ reads against it, rimmed in light.
+    g = screen.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, "rgba(6,18,36,0.55)"); g.addColorStop(0.7, "rgba(20,70,110,0.35)"); g.addColorStop(1, "rgba(255,79,216,0.35)");
+    screen.fillStyle = g; screen.beginPath(); screen.arc(cx, cy, r, 0, Math.PI * 2); screen.fill();
+    // A small specular glint, top left.
+    screen.fillStyle = "rgba(220,255,255,0.45)"; screen.beginPath(); screen.ellipse(cx - r * 0.45, cy - r * 0.5, r * 0.22, r * 0.12, -0.6, 0, Math.PI * 2); screen.fill();
+    screen.strokeStyle = "rgba(95,247,255,0.85)"; screen.lineWidth = 1.5; screen.stroke();
+    // A ring of scan dashes turning the other way.
+    screen.setLineDash([3, 5]); screen.lineDashOffset = -now / 40;
+    screen.strokeStyle = "rgba(255,79,216,0.6)"; screen.beginPath(); screen.arc(cx, cy, r + 6, 0, Math.PI * 2); screen.stroke();
+    screen.setLineDash([]);
+    // The @, spinning on its vertical axis, split into cyan and magenta.
+    const spin = Math.cos(now / 900 + o.spin);
+    screen.translate(cx, cy);
+    screen.scale(0.35 + 0.65 * Math.abs(spin), 1);
+    screen.font = "bold 32px ui-monospace, SFMono-Regular, Menlo, monospace";
+    screen.textAlign = "center"; screen.textBaseline = "middle";
+    screen.fillStyle = "rgba(255,79,216,0.75)"; screen.fillText("@", -2, 1);
+    screen.fillStyle = "rgba(95,247,255,0.75)"; screen.fillText("@", 2, -1);
+    screen.shadowColor = "rgba(95,247,255,0.9)"; screen.shadowBlur = 8;
+    screen.fillStyle = spin < 0 ? "#bfefff" : "#ffffff"; screen.fillText("@", 0, 0);
+    screen.restore();
+    o.cx = cx; o.cy = cy;
+    return true;
+  }
+
+  // Called by the render loop each frame, after the picture is drawn.
+  orbFrame = (now, dt) => {
+    if (playing && !learnLive()) {
+      orbClock += dt;
+      if (orbClock >= ORB_EVERY_S) {
+        orbClock -= ORB_EVERY_S;
+        if (Math.random() < ORB_CHANCE) spawnOrb(now);
+      }
+    }
+    for (let i = orbs.length - 1; i >= 0; i--) {
+      const o = orbs[i];
+      if (!o.popped) {
+        const p = tileOnCanvas(o.gx, o.gy);
+        if (p) { o.x = p.x; o.y = p.y; }
+      }
+      if (learnLive() || !drawOrb(o, now)) orbs.splice(i, 1);
+    }
+  };
+
+  // Which orb (if any) is under a point of the page.
+  function orbAt(clientX, clientY) {
+    const r = canvas.getBoundingClientRect();
+    const x = ((clientX - r.left) / r.width) * 1200, y = ((clientY - r.top) / r.height) * 1200;
+    return orbs.find((o) => !o.popped && o.cx !== undefined && Math.hypot(x - o.cx, y - o.cy) < ORB_RADIUS * 1.8);
+  }
+  frameEl.addEventListener("mousemove", (e) => { canvas.style.cursor = orbAt(e.clientX, e.clientY) ? "pointer" : ""; });
+
+  // ---------------- CyberPal's insights
+  // Each is true for this piece (`when`) and filled with its own values.
+  // Topics: the music, the sound design, and the picture.
+  const s1 = (x, d = 1) => Number(x).toFixed(d).replace(/\.0+$/, "");
+  const on = (D) => D.loops.filter((l) => l.on);
+  const M = (D, ...ms) => ms.includes(D.mode.index);
+  const INSIGHTS = [
+    // The piece.
+    ["music", () => true, () => "Heads up, operator: nothing you hear is a recording. This page is a program composing the music live, one sample at a time, forever."],
+    ["music", () => true, (D) => `Every sound and every pixel here grows from one recipe of ${D.recipe.length} numbers. Same numbers, same piece, on any machine, now or in twenty years.`],
+    ["music", () => true, (D) => `Seven seeds drive the music: ${D.seeds.join(", ")}. Seed 1 builds the chords, 2 and 3 the glitch layers, 4 the bass, 5 the drums, 6 the atmosphere, 7 the drone's rhythm.`],
+    ["music", () => true, () => "No one arranged this. Seven slow cycles of 41, 61, 97, 151, 233, 307 and 113 seconds decide what plays when. Prime lengths, so they almost never line up the same way twice."],
+    ["visual", () => true, () => "Try the Learn button when you want the full schematic. I'm just the quick version."],
+    // Harmony.
+    ["music", () => true, (D) => `This piece lives in ${D.key.name} ${D.scale.name}: ${D.scale.mood}. Every note you hear, down to the tiniest glitch ping, is picked from that scale.`],
+    ["music", (D) => D.chords.length > 1, (D) => `${D.chords.length} chords take turns here, on degrees ${D.chords.map((c) => ROMAN[c.degree % 7]).join(", ")}. Each one is stacked from the scale in thirds and spread over about three octaves.`],
+    ["music", (D) => M(D, 0, 1), (D) => `The chords share a ${s1(D.cycle_s / 60, 1)}-minute cycle unevenly: ${D.chords.map((c) => c.bars).join(" / ")} bars. The first two do the heavy lifting; the rest pass through like colours.`],
+    ["music", (D) => M(D, 2), (D) => `2-step mode runs a chord progression: ${D.garage.progression}. It changes every two bars, right on the downbeat, so the loops and bass turn together.`],
+    ["music", (D) => M(D, 2) && D.garage.lift !== "off", (D) => `Key lift is on (${D.garage.lift}): the whole progression jumps up a whole tone for a while, then drops home. Old-school menu-music move.`],
+    ["music", (D) => M(D, 3) && D.micro.chords !== "slow", (D) => `In microsound the chords flip ${D.micro.chords}, crossing over in a single beat. Small sounds, quick changes.`],
+    // The drone.
+    ["sound", (D) => !M(D, 3), () => "The drone is a frozen chord. Each note is a three-operator FM voice; the chord is rendered once for eight seconds, then never played again."],
+    ["sound", () => true, (D) => `Freezing, decoded: the chord's spectrum is measured once, then rebuilt every ${s1(D.hop_s * 1000, 0)} ms with the same strengths but brand-new random phases. The colour stays, the motion vanishes.`],
+    ["sound", () => true, () => "Because every frozen frame gets fresh random phases, the left and right drones never cancel out, even in mono. Infinite width, zero phasing."],
+    ["sound", () => true, (D) => `A low-pass filter sweeps the drone between ${s1(D.drone_cutoff.min, 0)} Hz and ${s1((D.drone_cutoff.min * Math.pow(2, D.drone_cutoff.octaves)) / 1000, 1)} kHz, pushed by two slow cycles at once, so it never quite repeats.`],
+    ["sound", (D) => M(D, 3), () => "Microsound freezes the chord from pure sines: every FM index set to zero. What's left is a thin, glassy cluster of partials."],
+    ["sound", (D) => M(D, 3) && D.micro.drone_fragments, (D) => `The drone only speaks in fragments here: ${D.micro.drone_fragments[0]} sixteenths on, ${D.micro.drone_fragments[1]} off, locked to the bar. Short sounds are the whole genre.`],
+    ["sound", (D) => M(D, 3) && D.micro.shift !== "off" && D.micro.shift_figure, (D) => `Each drone fragment is transposed by the next step of a four-step figure: ${D.micro.shift_figure.map((x) => (x > 0 ? "+" : "") + x).join(", ")} semitones. A tune made of pitch jumps.`],
+    ["sound", (D) => M(D, 2), () => "In 2-step the drone steps back and holds an open fifth on the tonic. Under a chord that rubs against it, it ducks further."],
+    // Glitches.
+    ["sound", () => true, (D) => `Two glitch sequencers run side by side: ${D.glitch[0].steps} and ${D.glitch[1].steps} steps. Their patterns drift against each other and only realign after ${D.glitch[0].steps * D.glitch[1].steps} steps.`],
+    ["sound", () => true, () => "The glitch sounds are tiny: crushed FM blips, noise ticks, grains cut from the drone itself, bell pings, square-wave clicks, bit-crushed bursts."],
+    ["sound", () => true, () => "Every few loops, one glitch step mutates: a new sound, a rest, a new pitch, or a rotation. The pattern evolves one byte at a time."],
+    ["sound", () => true, () => "A slow cycle sets each glitch layer's density. Every step has its own threshold, so the loops thin out and fill back in like breathing."],
+    ["sound", () => true, (D) => `The glitches share a ping-pong echo ${s1(D.echo.delay_s * 1000, 0)} ms long, feeding ${s1(D.echo.feedback * 100, 0)} % back and darkening on every bounce.`],
+    // Drums.
+    ["music", (D) => D.drums.on && M(D, 0, 1), (D) => `The drum break is played once at start-up at ${s1(D.drums.source_bpm, 0)} BPM, sampled, then chopped into 32 slices and re-sequenced at ${D.bpm} BPM: sped up ${s1(D.drums.semitones_up, 1)} semitones. The classic jungle move.`],
+    ["music", (D) => D.drums.on && M(D, 0, 1), () => "Each bar's chop is a pure function of seed 5 and the bar number: repeats, reversals, stutters, pitch-downs. The edits are decided, not played."],
+    ["music", (D) => D.drums.on && M(D, 2), (D) => `The 2-step loop is built from rules: a kick on the one, a second that skips past beat three, claps on two and four, shuffled hats, all swung at ${D.garage.swing} %.`],
+    ["music", (D) => D.drums.on && M(D, 2), () => "Garage echoes repeat an even number of sixteenths later, so every repeat keeps its place in the swing. Odd ones would land off the groove."],
+    ["music", (D) => D.drums.on && M(D, 3), (D) => `The microsound pulse: a sub-sine kick on every beat (${D.micro.pulse}), clicks one to three samples long, and 2–8 ms grains on the sixteenths. No swing. Exact.`],
+    ["sound", (D) => D.drums.on && M(D, 3), () => "Microsound clicks skip the sampler colour completely, so each one stays as sharp as the moment it was synthesised."],
+    ["music", (D) => D.drums.on && M(D, 3) && D.micro.dropouts !== "off", () => "Those stumbles are on purpose: a step drops out, skips back to repeat the one before, or ratchets four times in a sixteenth. Digital failure as rhythm."],
+    ["sound", (D) => D.drums.on, (D) => `Drum kit: ${D.drums.kit}, ${D.drums.blurb}. The kit is your choice; seed 5 tunes every voice inside it.`],
+    ["sound", (D) => D.drums.on, () => "While the drums play, the drone dips a few dB, pumps a little with each hit and loses some top end. With the drums out, nothing moves."],
+    // Bass, loops, space.
+    ["music", (D) => M(D, 0, 1), () => "The bass is an FM voice plus a pure sine an octave below. It follows each chord's root and glides to the next one during the crossfade."],
+    ["music", (D) => M(D, 2) && D.garage.bass === "rhythmic", () => "The 2-step bassline walks into the top of the loop with a note a semitone under the next root. It also ducks under every kick."],
+    ["music", (D) => M(D, 3), () => "Microsound has no drone bass, just a short sine on the chord root between the kicks. They rock against each other without ever overlapping."],
+    ["sound", (D) => on(D).length > 0, (D) => `Atmosphere loops: ${on(D).map((l) => l.design.name).join(", ")}. Their lengths in beats (${on(D).map((l) => l.beats).join(", ")}) share no factor, so the texture keeps shifting.`],
+    ["sound", (D) => M(D, 3), (D) => `The grain cloud (${D.micro.grains}) listens to the bed and throws it back as 20–80 ms grains, now and then an octave up or down, each in its own spot.`],
+    ["sound", (D) => M(D, 3) && D.micro.pips !== "off", () => "Hear those high blips? Sine pips: chord tones lifted three or four octaves, 5–40 ms long, each pinned to an exact place in stereo."],
+    ["music", (D) => M(D, 2) && D.garage.stabs !== "off", (D) => `The stabs are seventh chords, voice-led so the top note moves by step, in a ${D.garage.tone} tone. They play on the pushes that make 2-step skip.`],
+    ["sound", () => true, (D) => `Everything shares one reverb: eight delay lines feeding back into each other, fading 60 dB in ${s1(D.reverb.decay_s, 1)} seconds.${D.reverb.decay_s < 5 ? " A small, close room, as microsound likes it." : ""}`],
+    ["sound", (D) => D.master.length > 0, (D) => `Master effects in the chain: ${D.master.join(", ")}.`],
+    // The picture.
+    ["visual", () => true, () => "The picture is drawn at 300×300, then enlarged exactly four times with no smoothing. Every art pixel is a crisp 4×4 block."],
+    ["visual", () => true, (D) => `The shrine is a ${D.shrine.size}×${D.shrine.size} field of solid columns centred on a ${D.shrine.grid}×${D.shrine.grid} isometric grid. Columns fill from the ground up, so no tile can ever float.`],
+    ["visual", () => true, () => "Tiles are drawn back to front, painter-style: far columns first, near ones last, so nearer stone covers what's behind it."],
+    ["visual", () => true, (D) => `Biome: ${D.biome.name}, ${D.biome.blurb}. The seed picks the palette's hues inside the biome's character.`],
+    ["visual", (D) => D.biome.roofed, () => "This one has a roof. Rain lands on the glass above you, and the weather sounds muffled, as if you're inside."],
+    ["visual", () => true, (D) => `Weather: ${D.weather.name}, ${D.weather.blurb}. It runs on the same clock as the music: a splash you see is a drop you hear, at the same instant.`],
+    ["visual", () => true, () => "The plants are grown by code: every stem and leaf comes from the seed, and they sway with the simulated wind."],
+    ["visual", (D) => D.camera_speed !== 0, (D) => `The camera orbits the shrine at ${D.camera_speed}° a second. I ride along on my tile, so I always stay put.`],
+    ["visual", () => true, () => "Move your pointer over the picture: the world tilts a little to follow. That's a shear and a squeeze on the grid, no 3D maths needed."],
+    ["visual", (D) => D.code.on, () => "That text drifting through the sky? It's this program's own source code, scrolling behind the shrine."],
+    ["visual", () => true, () => "Picture and sound never drift apart: the visuals are drawn from the audio clock the music reports, frame by frame."],
+    ["visual", (D) => !!D.wildlife, (D) => `Wildlife's on: ${D.wildlife}. They're seen and heard together.`],
+    // Determinism.
+    ["music", () => true, () => "Your computer's own sine function rounds a little differently from mine. So this program carries its own maths, built only from add, multiply, divide and square root, which every machine does exactly alike."],
+    ["music", () => true, () => "The browser and a native build produce the same output, bit for bit. It's checked automatically, every build."],
+    ["visual", () => true, () => "I'm CyberPal. I live in the gaps between the tiles. Catch another orb and I'll tell you more."],
+  ];
+  // Without a description (an older build), a few lines that need no values.
+  const FALLBACK = INSIGHTS.filter(([, when, text]) => text.length === 0 && when.length === 0);
+
+  let deck = [];         // a shuffled order: every true line once before any repeat
+  function nextInsight() {
+    const pool = D ? INSIGHTS.filter(([, when]) => { try { return when(D); } catch { return false; } }) : FALLBACK;
+    if (deck.length === 0) {
+      deck = pool.map((_, i) => i);
+      for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
+    }
+    const [, , text] = pool[deck.pop()] || pool[0];
+    try { return text(D); } catch { return "Signal lost. Catch another orb and I'll try again."; }
+  }
+
+  // The description is built once, in a quiet moment after play starts (it
+  // takes about a second), and shared with Learn.
+  function ensureDescription() {
+    if (D || typeof shr.shrine_learn_ptr !== "function") return;
+    try { D = describe(); } catch { D = null; }
+  }
+
+  // The bar: rises, types, holds, slides away.
+  let typing = null;     // { text, shown, started }
+  let holdTimer = 0;
+  function showInsight() {
+    ensureDescription();
+    const text = nextInsight();
+    clearTimeout(holdTimer);
+    insightEl.classList.remove("open");
+    void insightEl.offsetWidth;          // restart the rise and the glitch
+    insightEl.classList.add("open");
+    typing = { text, started: performance.now(), done: false };
+  }
+  function hideInsight() {
+    clearTimeout(holdTimer);
+    insightEl.classList.remove("open");
+    typing = null;
+  }
+  function finishTyping() {
+    if (!typing || typing.done) return;
+    typing.done = true;
+    insightText.textContent = typing.text;
+    insightText.dataset.cursor = "1";
+    holdTimer = setTimeout(hideInsight, INSIGHT_HOLD_S * 1000);
+  }
+  // The typewriter, driven by the render loop: a few characters ahead still
+  // "decoding" from random glyphs before they settle.
+  insightFrame = (now) => {
+    if (!typing || typing.done) return;
+    const n = Math.floor(((now - typing.started) / 1000) * INSIGHT_CPS);
+    if (n >= typing.text.length) return finishTyping();
+    let noise = "";
+    for (let k = 0; k < 2 && n + k < typing.text.length; k++) noise += typing.text[n + k] === " " ? " " : GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+    insightText.textContent = typing.text.slice(0, n) + noise;
+    insightText.dataset.cursor = "1";
+  };
+  insightEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (typing && !typing.done) finishTyping();
+    else hideInsight();
+  });
+
+  // A click on an orb pops it and calls CyberPal; anywhere else plays or pauses.
+  function onStageClick(e) {
+    const o = orbAt(e.clientX, e.clientY);
+    if (o) {
+      o.popped = performance.now();
+      showInsight();
+      return;
+    }
+    toggle();
+  }
+  // Build the description in a quiet moment once the music is going.
+  const idle = window.requestIdleCallback || ((f) => setTimeout(f, 1500));
+  const warm = setInterval(() => { if (playing) { clearInterval(warm); idle(() => ensureDescription()); } }, 2000);
+  if (orbTest) window.shrineOrbs = () => orbs.map((o) => ({ x: o.cx, y: o.cy, popped: !!o.popped }));
+
+  stage.addEventListener("click", onStageClick);
 
   function aim(clientX, clientY) {
     const r = canvas.getBoundingClientRect();
