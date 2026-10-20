@@ -121,6 +121,7 @@ enum Kind {
     ArchOffY,
     ArchOffZ,
     Name,
+    Randomize,
     StartAt,
     SeedN(usize),
     SavePng,
@@ -161,6 +162,7 @@ enum Screen {
     Fx,
     Glitch,
     Editor,
+    Randomize,
 }
 
 /// The setup is split into tabs; each is one or more of the menu's groups.
@@ -237,6 +239,7 @@ fn row_help(kind: Kind) -> &'static str {
     match kind {
         Kind::Header => "",
         Kind::Name => "The track's name: the page heading and the WAV title. Enter to type it.",
+        Kind::Randomize => "Roll any mix of settings at once: just the seed, the drums, the mode… Enter to open.",
         Kind::StartAt => "Join the piece part-way in. The music is fast-forwarded exactly; the visuals start there too.",
         Kind::Seed => "The seed builds the shrine, its plants, palette and weather. ←→ step, shift ±100, enter to type.",
         Kind::Biome => "What grows around the shrine, or which built future surrounds it.",
@@ -294,6 +297,30 @@ fn row_help(kind: Kind) -> &'static str {
         Kind::Reset => "Start a fresh project from the defaults.",
         Kind::Compile => "Build the self-contained web artifact from these settings.",
         Kind::Quit => "Save the answers and leave.",
+    }
+}
+
+/// The Randomize screen: which groups to roll (remembered for the session),
+/// the cursor, and the settings before the last roll (for undo).
+struct RandomForm {
+    sel: usize,
+    chosen: [bool; crate::randomize::GROUPS.len()],
+    before: Option<SimConfig>,
+}
+
+impl RandomForm {
+    fn new() -> Self {
+        // The shrine seed alone, to begin with.
+        let mut chosen = [false; crate::randomize::GROUPS.len()];
+        chosen[0] = true;
+        RandomForm { sel: 0, chosen, before: None }
+    }
+
+    /// The rows after the groups.
+    const ACTIONS: [&'static str; 3] = ["Randomize now", "Undo last roll", "Back"];
+
+    fn len(&self) -> usize {
+        self.chosen.len() + Self::ACTIONS.len()
     }
 }
 
@@ -638,6 +665,7 @@ struct App {
     gform: GlitchForm,
     edit: EditForm,
     picker: Option<Picker>,
+    rform: RandomForm,
     quit: bool,
 }
 
@@ -665,6 +693,7 @@ impl App {
             edit: EditForm::new(),
             fx: FxForm::new(),
             picker: None,
+            rform: RandomForm::new(),
             quit: false,
         }
     }
@@ -698,6 +727,7 @@ impl App {
         };
 
         head("Track", &mut rows);
+        field("Randomize…".into(), "choose what to roll".into(), Kind::Randomize, &mut rows);
         field(
             "Track name".into(),
             if s.name.is_empty() { "(unnamed)".into() } else { s.name.as_str().to_string() },
@@ -1262,6 +1292,10 @@ impl App {
                 set_seed(&mut self.config, i, if forward { v.wrapping_add(step) } else { v.wrapping_sub(step) });
             }
             Kind::Header => return,
+            Kind::Randomize => {
+                self.screen = Screen::Randomize;
+                return;
+            }
             Kind::Reset => {}
             Kind::EditArch => {}
             Kind::Glitch(i) => {
@@ -1320,6 +1354,9 @@ impl App {
                 self.screen = Screen::Glitch;
             }
             Kind::EditArch => self.open_editor(),
+            Kind::Randomize => {
+                self.screen = Screen::Randomize;
+            }
             Kind::Name => {
                 self.prompt = Some(Prompt {
                     label: "Track name".into(),
@@ -1553,6 +1590,101 @@ impl App {
         let preview = Rect::new(list_w, 0, area.width - list_w, help_y);
         draw_preview(buf, preview, &self.frame);
         put(buf, area, 0, help_y, "↑↓ move · enter toggle · esc back   (any combination)", style(FAINT));
+    }
+
+    /// Roll the chosen groups (keeping what was there, for undo).
+    fn roll(&mut self) {
+        let groups: Vec<crate::randomize::Group> =
+            crate::randomize::GROUPS.iter().zip(self.rform.chosen).filter(|(_, on)| *on).map(|(g, _)| *g).collect();
+        if groups.is_empty() {
+            self.status = "nothing chosen to randomize".into();
+            return;
+        }
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1);
+        let mut rng = shrine0015::rng::Rng::new(nanos);
+        self.rform.before = Some(self.config.clone());
+        crate::randomize::apply(&mut self.config, &groups, &mut rng);
+        self.rebuild();
+        self.status = format!("rolled {}", groups.iter().map(|g| g.name().to_lowercase()).collect::<Vec<_>>().join(", "));
+    }
+
+    fn handle_random_key(&mut self, code: KeyCode) {
+        let n = self.rform.len();
+        let groups = self.rform.chosen.len();
+        let sel = self.rform.sel;
+        match code {
+            KeyCode::Esc | KeyCode::Char('q') => self.screen = Screen::Main,
+            KeyCode::Up => self.rform.sel = (sel + n - 1) % n,
+            KeyCode::Down => self.rform.sel = (sel + 1) % n,
+            KeyCode::Char('a') => self.rform.chosen = [true; crate::randomize::GROUPS.len()],
+            KeyCode::Char('n') => self.rform.chosen = [false; crate::randomize::GROUPS.len()],
+            KeyCode::Char('r') => self.roll(),
+            KeyCode::Char('u') => self.undo_roll(),
+            KeyCode::Enter | KeyCode::Char(' ') | KeyCode::Left | KeyCode::Right => match sel {
+                i if i < groups => self.rform.chosen[i] = !self.rform.chosen[i],
+                i if i == groups => self.roll(),
+                i if i == groups + 1 => self.undo_roll(),
+                _ => self.screen = Screen::Main,
+            },
+            _ => {}
+        }
+    }
+
+    fn undo_roll(&mut self) {
+        match self.rform.before.take() {
+            Some(c) => {
+                self.config = c;
+                self.rebuild();
+                self.status = "undid the last roll".into();
+            }
+            None => self.status = "nothing to undo".into(),
+        }
+    }
+
+    fn draw_random(&self, f: &mut Frame) {
+        let area = f.area();
+        let buf = f.buffer_mut();
+        if area.width < 30 || area.height < 12 {
+            put(buf, area, 0, 0, "terminal too small", style(TEXT));
+            return;
+        }
+        let list_w = (area.width / 2).clamp(24, 46);
+        let help_y = area.height - 1;
+        let about_y = area.height - 2;
+        put(buf, area, 0, 0, concat!("ShrineGen · randomize · v", env!("BUILD_DATE")), style(ACCENT).add_modifier(Modifier::BOLD));
+        let status_x = area.width.saturating_sub(self.status.chars().count() as u16 + 1);
+        put(buf, area, status_x, 0, &self.status, style(DIM));
+        put(buf, area, 1, 1, "CHOOSE WHAT TO ROLL", style(DIM).add_modifier(Modifier::BOLD));
+        let groups = crate::randomize::GROUPS;
+        let list_h = about_y.saturating_sub(3) as usize;
+        let scroll = menu_scroll(self.rform.sel, self.rform.len(), list_h);
+        for i in (0..self.rform.len()).skip(scroll).take(list_h) {
+            let y = 2 + (i - scroll) as u16 + if i >= groups.len() { 1 } else { 0 };
+            if y >= about_y {
+                break;
+            }
+            let selected = i == self.rform.sel;
+            let marker = if selected { "›" } else { " " };
+            let st = if selected { style(SELECT).add_modifier(Modifier::BOLD) } else { style(TEXT) };
+            if i < groups.len() {
+                let mark = if self.rform.chosen[i] { "[x]" } else { "[ ]" };
+                put(buf, area, 0, y, &format!("{marker} {mark} {}", groups[i].name()), st);
+            } else {
+                let label = RandomForm::ACTIONS[i - groups.len()];
+                let st = if i == groups.len() { st.fg(color(ACCENT)) } else { st };
+                put(buf, area, 0, y, &format!("{marker} {label}"), st);
+            }
+        }
+        let preview = Rect::new(list_w, 1, area.width - list_w, about_y.saturating_sub(1));
+        draw_preview(buf, preview, &self.frame);
+        let about = match self.rform.sel {
+            i if i < groups.len() => groups[i].blurb(),
+            i if i == groups.len() => "roll every ticked group now (or press r anywhere here)",
+            i if i == groups.len() + 1 => "put back the settings from before the last roll",
+            _ => "back to the setup",
+        };
+        put(buf, area, 0, about_y, &format!(" {about}"), style(DIM));
+        put(buf, area, 0, help_y, "↑↓ move · space tick · r roll · u undo · a all · n none · esc back", style(FAINT));
     }
 
     fn gsetup(&self) -> GlitchSetup {
@@ -2076,6 +2208,10 @@ impl App {
         if self.screen == Screen::Editor {
             return self.handle_editor_key(code);
         }
+        if self.screen == Screen::Randomize {
+            self.handle_random_key(code);
+            return self.quit;
+        }
         match code {
             KeyCode::Char('q') | KeyCode::Esc => {
                 state::save(&self.config);
@@ -2090,6 +2226,7 @@ impl App {
             KeyCode::BackTab => self.switch_tab(-1),
             KeyCode::Char(d @ '1'..='8') => self.goto_tab(TABS[d as usize - '1' as usize]),
             KeyCode::Char('r') => self.randomize(),
+            KeyCode::Char('R') => self.screen = Screen::Randomize,
             _ => {}
         }
         self.quit
@@ -2101,6 +2238,7 @@ impl App {
             Screen::Fx => self.draw_fx(f),
             Screen::Glitch => self.draw_glitch(f),
             Screen::Editor => self.draw_editor(f),
+            Screen::Randomize => self.draw_random(f),
             Screen::Main => self.draw_main(f),
         }
         // A prompt can be open over any screen, so it is always drawn last.
@@ -3162,6 +3300,34 @@ mod tests {
         app.sel = app.rows().iter().position(|r| r.kind == Kind::CodeScale).unwrap();
         app.adjust(true, false);
         assert_eq!(app.config.settings.code.scale, 225);
+    }
+
+    #[test]
+    fn the_randomize_screen_rolls_only_what_is_ticked_and_can_undo() {
+        let mut app = App::new();
+        app.config = SimConfig::default();
+        let before = app.config.clone();
+        app.sel = app.rows().iter().position(|r| r.kind == Kind::Randomize).unwrap();
+        app.activate();
+        assert_eq!(app.screen, Screen::Randomize);
+        // Only the drums.
+        app.handle_key(KeyCode::Char('n'), KeyModifiers::NONE);
+        let drums = crate::randomize::GROUPS.iter().position(|g| *g == crate::randomize::Group::Drums).unwrap();
+        app.rform.sel = drums;
+        app.handle_key(KeyCode::Char(' '), KeyModifiers::NONE);
+        let mut moved = false;
+        for _ in 0..12 {
+            app.handle_key(KeyCode::Char('r'), KeyModifiers::NONE);
+            let s = &app.config.settings;
+            assert_eq!((app.config.seed, s.pace, s.scale, s.bpm), (before.seed, before.settings.pace, before.settings.scale, before.settings.bpm));
+            moved |= (s.kit, s.space, s.drum_reverse) != (before.settings.kit, before.settings.space, before.settings.drum_reverse);
+        }
+        assert!(moved, "rolling the drums never changed them");
+        let rolled = app.config.clone();
+        app.handle_key(KeyCode::Char('u'), KeyModifiers::NONE);
+        assert_ne!(shrine0015::recipe::encode(&app.config), shrine0015::recipe::encode(&rolled), "undo did nothing");
+        app.handle_key(KeyCode::Esc, KeyModifiers::NONE);
+        assert_eq!(app.screen, Screen::Main);
     }
 
     #[test]

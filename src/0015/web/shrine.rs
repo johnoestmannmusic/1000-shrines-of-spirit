@@ -12,9 +12,9 @@
 //         --crate-type cdylib shrine.rs -o shrine.wasm
 //
 // The shrine it draws and plays:
-//   seed 1000 · Moss · Clear
-//   Pentatonic minor, 2 chord(s), microsound, 120 BPM, root seed picks, kit Sub & clicks
-//   drone arc 0s up 0s, tone 0
+//   seed 65088 · Verdant · Dusk
+//   Phrygian, 1 chord(s), half-time, 156 BPM, root D#, kit Digital crush
+//   drone arc 0s up 0s, tone 6000
 //
 // Contents: crate docs and constants, then engine modules (iso, grid, render,
 // audio/…, sim), then the baked recipe and the C ABI. Read top to bottom.
@@ -8163,6 +8163,15 @@ pub struct WeatherState {
     pub drips: f64,
     /// Lightning: how bright the sky is flashing right now.
     pub flash: f64,
+    /// The sideways wind the particles travel on, −1 (left) .. 1 (right). It
+    /// turns round smoothly and slowly: each way for at least half a drift
+    /// period (30 s or more), never flipping in a moment.
+    pub wind_x: f64,
+    /// How far that wind has carried things since the start: the exact
+    /// integral of `wind_x`, in seconds at full wind. A particle drifting at
+    /// `v` pixels per second of full wind is `v * drift` along, so its motion
+    /// always matches the wind of the moment.
+    pub drift: f64,
 }
 
 /// What a scheduled event is.
@@ -8236,6 +8245,11 @@ const FLICKER: [(f64, f64); 3] = [(0.0, 1.0), (0.07, 0.6), (0.17, 0.85)];
 /// How long a flash pulse takes to halve, in seconds.
 const FLICKER_HALF: f64 = 0.03;
 
+/// The sideways wind's period range, seconds: it blows one way for half a
+/// period, so at least 30 s, before turning round.
+const MIN_DRIFT_PERIOD_S: f64 = 60.0;
+const MAX_DRIFT_PERIOD_S: f64 = 150.0;
+
 /// A shrine's weather: one kind, with its own slow phases.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Weather {
@@ -8246,6 +8260,9 @@ pub struct Weather {
     rain_period: f64,
     gust_periods: [f64; 3],
     gust_phases: [f64; 3],
+    /// The sideways wind's period, seconds, and its phase in turns.
+    drift_period: f64,
+    drift_phase: f64,
 }
 
 impl Weather {
@@ -8259,7 +8276,10 @@ impl Weather {
         // Drawn after the original three, so those keep their values.
         let gust_periods = [rng.range(3.0, 5.0), rng.range(6.0, 9.0), rng.range(11.0, 17.0)];
         let gust_phases = [rng.unit(), rng.unit(), rng.unit()];
-        Weather { kind, seed, phase, wind_period, rain_period, gust_periods, gust_phases }
+        // Its own stream, so nothing above moves.
+        let mut d = Rng::stream(seed, STREAM ^ 0x0D41_F7);
+        let (drift_period, drift_phase) = (d.range(MIN_DRIFT_PERIOD_S, MAX_DRIFT_PERIOD_S), d.unit());
+        Weather { kind, seed, phase, wind_period, rain_period, gust_periods, gust_phases, drift_period, drift_phase }
     }
 
     fn wind_cycle(&self, t: f64) -> f64 {
@@ -8268,6 +8288,18 @@ impl Weather {
 
     fn rain_cycle(&self, t: f64) -> f64 {
         0.5 - 0.5 * cos_turns(t / self.rain_period + self.phase * 0.7 + 0.13)
+    }
+
+    /// The sideways wind at `t` (−1..1) and its integral since 0 (seconds
+    /// at full wind): a sine of the drift period, scaled by the kind's wind,
+    /// so it reverses smoothly and only after half a period.
+    fn drift(&self, t: f64) -> (f64, f64) {
+        let u = self.kind.profile().wind.clamp(0.0, 1.0);
+        let (p, ph) = (self.drift_period, self.drift_phase);
+        let wind_x = u * sin_turns(t / p + ph);
+        // ∫ sin(2π(τ/p + ph)) dτ from 0 to t.
+        let drift = u * p / crate::math::TAU * (cos_turns(ph) - cos_turns(t / p + ph));
+        (wind_x, drift)
     }
 
     /// The fast gust envelope, in `[0, 1]`: three waves, squared so calm is
@@ -8290,7 +8322,10 @@ impl Weather {
         let wind = (p.wind * (0.3 + 0.45 * wind_cycle + 0.25 * gust)).clamp(0.0, 1.0);
         let rain = (p.rain * (0.25 + 0.75 * rain_cycle)).clamp(0.0, 1.0);
         let snow = (p.snow * (0.3 + 0.7 * rain_cycle)).clamp(0.0, 1.0);
+        let (wind_x, drift) = self.drift(t);
         WeatherState {
+            wind_x,
+            drift,
             wind_dir: wrap01(self.phase + t / (self.wind_period * 6.0)),
             wind_strength: wind,
             gust: (gust * p.wind).clamp(0.0, 1.0),
@@ -8444,6 +8479,10 @@ pub struct Fx<'a> {
     pub grade: &'a dyn Fn(Rgba) -> Rgba,
 }
 
+/// Rain's sideways speed as a share of its fall at full wind: the streaks
+/// lean by the same ratio, so they point along their travel.
+const RAIN_SLANT: f64 = 0.45;
+
 fn particle(seed: u64, layer: u64, i: usize) -> Rng {
     Rng::new(hash3(seed, layer, i as u64))
 }
@@ -8453,9 +8492,16 @@ fn wrap(x: f64, span: f64) -> f64 {
 }
 
 impl Fx<'_> {
-    /// Horizontal wind, -1 (left) .. 1 (right).
+    /// The sideways wind now, -1 (left) .. 1 (right).
     fn wind_x(&self) -> f64 {
-        (0.5 - self.w.wind_dir) * 2.0 * self.w.wind_strength
+        self.w.wind_x
+    }
+
+    /// How far the wind has carried things, in seconds at full wind: every
+    /// particle drifts by a multiple of this, so its motion always matches
+    /// the wind of the moment and turns round only when the wind does.
+    fn drift(&self) -> f64 {
+        self.w.drift
     }
 
     fn count(&self, max: usize, level: f64, fraction: f64) -> usize {
@@ -8521,14 +8567,13 @@ impl Fx<'_> {
         let dark = blend(self.palette.fog, [26, 28, 38, 255], (level * 85.0) as u32, 100);
         let lit = blend(dark, [235, 240, 255, 255], (self.w.flash * 80.0) as u32, 100);
         let colour = (self.grade)(lit);
-        let speed = 4.0 + 26.0 * self.w.wind_strength;
+        let speed = 18.0;
         let n = 3 + (level * 6.0) as usize;
         for i in 0..n {
             let mut r = particle(self.seed, CLOUDS, i);
             let (w, h) = (r.range(60.0, 150.0), r.range(9.0, 22.0));
             let span = W + w * 2.0;
-            let dir = if self.wind_x() < 0.0 { -1.0 } else { 1.0 };
-            let cx = wrap(r.unit() * span + dir * self.t * speed * r.range(0.7, 1.3), span) - w;
+            let cx = wrap(r.unit() * span + self.drift() * speed * r.range(0.7, 1.3), span) - w;
             let cy = r.range(6.0, 85.0);
             let alpha = level * r.range(90.0, 170.0);
             for y in (cy - h) as i32..=(cy + h) as i32 {
@@ -8553,7 +8598,8 @@ impl Fx<'_> {
             return;
         }
         let colour = (self.grade)(self.palette.fog);
-        let drift = self.wind_x() * 6.0 + 2.0;
+        // A slow creep of its own, plus the wind.
+        let travel = self.drift() * 6.0 + self.t * 2.0;
         for b in 0..bands {
             let mut r = particle(self.seed, FOG, (b + (y0 as u64) * 10) as usize);
             let cy = y0 + (y1 - y0) * (b as f64 + 0.5) / bands as f64;
@@ -8561,7 +8607,7 @@ impl Fx<'_> {
             let (f1, f2, ph) = (r.range(1.0, 2.5), r.range(3.0, 5.0), r.unit());
             let a = level * max_alpha as f64 * (0.6 + 0.4 * sin_turns(self.t * 0.03 + ph));
             for x in 0..LOGICAL_W as i32 {
-                let u = (x as f64 + self.t * drift) / W;
+                let u = (x as f64 + travel) / W;
                 let edge = cy + 6.0 * sin_turns(u * f1 + ph) + 3.0 * sin_turns(u * f2 - self.t * 0.05);
                 for y in (edge - thick) as i32..=(edge + thick) as i32 {
                     let d = ((y as f64 - edge) / thick).abs();
@@ -8625,8 +8671,10 @@ impl Fx<'_> {
             let mut r = particle(self.seed, layer, i);
             let (x, phase, v, l) = (r.unit() * W, r.unit(), r.range(speed.0, speed.1), r.int(len.0, len.1) as i32);
             let y = wrap(phase * span + self.t * v, span) - 20.0;
-            let x = wrap(x + self.t * wind_x * v * 0.3, W);
-            let dx = wind_x * l as f64 * 0.7;
+            let x = wrap(x + self.drift() * v * RAIN_SLANT, W);
+            // The streak lies along the drop's travel: across by the wind,
+            // down by its fall.
+            let dx = wind_x * RAIN_SLANT * l as f64;
             for k in 0..=l {
                 let f = k as f64 / l as f64; // 0 at the tail, 1 at the head
                 let px = (x + dx * f).round() as i32;
@@ -8643,7 +8691,6 @@ impl Fx<'_> {
             return;
         }
         let white = (self.grade)([246, 248, 255, 255]);
-        let wind_x = self.wind_x();
         let span = H + 20.0;
         for i in 0..n {
             let mut r = particle(self.seed, FLAKES, i);
@@ -8654,7 +8701,7 @@ impl Fx<'_> {
             let (x, phase, v) = (r.unit() * W, r.unit(), r.range(10.0, 22.0) * (1.0 + size as f64 * 0.6));
             let (sway, sway_hz, sway_at) = (r.range(2.0, 7.0), r.range(0.15, 0.4), r.unit());
             let y = wrap(phase * span + self.t * v, span) - 10.0;
-            let x = wrap(x + self.t * wind_x * 30.0 + sway * sin_turns(self.t * sway_hz + sway_at), W);
+            let x = wrap(x + self.drift() * 30.0 + sway * sin_turns(self.t * sway_hz + sway_at), W);
             let twinkle = 0.5 + 0.5 * sin_turns(self.t * r.range(0.5, 2.0) + r.unit());
             let alpha = match size {
                 0 => 150,
@@ -8679,14 +8726,12 @@ impl Fx<'_> {
             return;
         }
         let tones = [self.palette.foliage, self.palette.foliage_light, self.palette.accent, self.palette.ground];
-        let wind_x = self.wind_x();
-        let dir = if wind_x < 0.0 { -1.0 } else { 1.0 };
         let span = W + 40.0;
         for i in 0..n {
             let mut r = particle(self.seed, LEAVES, i);
-            let (x, y0, v) = (r.unit() * span, r.range(40.0, 270.0), r.range(50.0, 130.0) * (0.3 + wind_x.abs()));
+            let (x, y0, v) = (r.unit() * span, r.range(40.0, 270.0), r.range(50.0, 130.0));
             let (flutter, f_hz, at) = (r.range(3.0, 12.0), r.range(0.3, 0.9), r.unit());
-            let x = wrap(x + dir * self.t * v, span) - 20.0;
+            let x = wrap(x + self.drift() * v, span) - 20.0;
             let y = y0 + flutter * sin_turns(self.t * f_hz + at) + 4.0 * sin_turns(self.t * f_hz * 3.1 + at);
             let tumble = sin_turns(self.t * r.range(0.8, 2.2) + r.unit());
             // Lifted toward the light, so a leaf reads against the moss.
@@ -8713,12 +8758,11 @@ impl Fx<'_> {
             return;
         }
         let colour = (self.grade)([255, 244, 214, 255]);
-        let wind_x = self.wind_x();
         for i in 0..n {
             let mut r = particle(self.seed, MOTES, i);
             let (x0, y0) = (r.unit() * W, r.range(30.0, 260.0));
             let (ax, ay, hz, at) = (r.range(6.0, 20.0), r.range(4.0, 12.0), r.range(0.03, 0.09), r.unit());
-            let x = wrap(x0 + ax * sin_turns(self.t * hz + at) + self.t * wind_x * 8.0, W);
+            let x = wrap(x0 + ax * sin_turns(self.t * hz + at) + self.drift() * 8.0, W);
             let y = y0 + ay * sin_turns(self.t * hz * 1.3 + at * 2.0);
             let glint = 0.5 + 0.5 * sin_turns(self.t * r.range(0.2, 0.7) + r.unit());
             fb.blend_over(x as i32, y as i32, colour, (40.0 + 200.0 * glint * glint * self.w.light) as u32);
@@ -8741,7 +8785,7 @@ impl Fx<'_> {
             let climb = wrap(phase * span + self.t * v, span);
             let life = climb / span; // 0 just lifted, 1 burnt out
             let y = 290.0 - climb;
-            let x = wrap(x0 + sway * sin_turns(self.t * hz + at) + self.t * self.wind_x() * 10.0, W);
+            let x = wrap(x0 + sway * sin_turns(self.t * hz + at) + self.drift() * 10.0, W);
             let hot = [255, 214, 120, 255];
             let cool = [170, 50, 36, 255];
             let colour = (self.grade)(blend(hot, cool, (life * 100.0) as u32, 100));
@@ -19010,6 +19054,10 @@ const CONTROL: usize = 32;
 /// background rather than a foreground instrument.
 const BED_GAIN: f64 = 0.4;
 
+/// Whether each raindrop the scene draws is also heard as its own tap or
+/// plink. Off: the rain is heard as its wash.
+const RAINDROP_HITS: bool = false;
+
 /// Wind, rain, thunder and the small sounds, mixed into an existing
 /// interleaved stereo buffer.
 #[derive(Clone)]
@@ -19095,18 +19143,23 @@ impl WeatherBed {
         let mut due: Vec<(u64, Due)> = Vec::new();
         // Sounds owned by an event in this block but landing after it.
         let mut spill: Vec<(u64, Due)> = Vec::new();
-        for e in weather.events(EventKind::Splash, t0, t1) {
-            let (x, y) = e.spot();
-            let (pan, hard) = (e.pan(), self.is_hard(x, y));
-            let gain = e.rng().range(0.08, 0.22);
-            let mut r = Rng::new(e.hash ^ 0x4849_5453);
-            let hit = if hard { Hit::plink(0, &mut r, pan, gain) } else { Hit::tap(0, &mut r, pan, gain * 1.4) };
-            due.push((at_sample(e.at), Due::Hit(hit)));
-        }
-        // A drip is heard when it lands, at the end of its fall.
-        for e in weather.events(EventKind::Drip, t0 - DRIP_S, t1 - DRIP_S) {
-            let mut r = Rng::new(e.hash ^ 0x4452_4950);
-            due.push((at_sample(e.at + DRIP_S), Due::Hit(Hit::drip(0, &mut r, e.pan(), 0.16))));
+        // Single raindrops (taps, plinks, drips) are seen but no longer heard:
+        // as separate pitched hits they bubbled over the music. The rain is
+        // heard as its wash alone.
+        if RAINDROP_HITS {
+            for e in weather.events(EventKind::Splash, t0, t1) {
+                let (x, y) = e.spot();
+                let (pan, hard) = (e.pan(), self.is_hard(x, y));
+                let gain = e.rng().range(0.08, 0.22);
+                let mut r = Rng::new(e.hash ^ 0x4849_5453);
+                let hit = if hard { Hit::plink(0, &mut r, pan, gain) } else { Hit::tap(0, &mut r, pan, gain * 1.4) };
+                due.push((at_sample(e.at), Due::Hit(hit)));
+            }
+            // A drip is heard when it lands, at the end of its fall.
+            for e in weather.events(EventKind::Drip, t0 - DRIP_S, t1 - DRIP_S) {
+                let mut r = Rng::new(e.hash ^ 0x4452_4950);
+                due.push((at_sample(e.at + DRIP_S), Due::Hit(Hit::drip(0, &mut r, e.pan(), 0.16))));
+            }
         }
         for e in weather.events(EventKind::Spark, t0, t1) {
             let pan = e.pan();
@@ -19264,7 +19317,7 @@ pub use self::track::*;
 // Baked recipe — this artifact is this shrine
 // ============================================================================
 /// `recipe::encode` of the settings the setup menu produced.
-const RECIPE: [u32; 168] = [18, 0, 1000, 0, 1000, 0, 9, 0, 1009, 0, 2026, 0, 168, 0, 11, 0, 7, 0, 0, 10, 2, 3, 0, 1, 120, 0, 12, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 3358395905, 51380, 188928180, 133152, 13376511, 66404, 9721599, 49764, 178, 0, 5434, 0, 2646, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 892416048, 0, 0, 0, 0, 0, 0, 0];
+const RECIPE: [u32; 168] = [18, 0, 65088, 0, 40762, 0, 29313, 0, 97911, 0, 9058, 0, 72736, 0, 71667, 0, 91505, 1, 6, 3, 1, 0, 8, 1, 156, 4, 12, 0, 0, 6000, 1, 14, 0, 0, 0, 0, 0, 1, 15, 0, 0, 0, 300, 226, 1, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 120, 77, 0, 72, 3358395905, 51380, 188928180, 133152, 9592815, 57929, 14049389, 42053, 178, 1, 5434, 0, 2646, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 892416048, 0, 0, 0, 0, 0, 0, 0];
 
 /// Build date as `YYYYMMDD`, stamped when this file was emitted.
 const BUILD: u32 = 20261020;
@@ -19285,7 +19338,7 @@ const CAMERA_SPEED: i32 = -2;
 const NAME: &str = "0015";
 
 /// Everything needed to recreate this shrine.
-const INFO: &str = "ShrineGen  v20261020\n\nseed       1000\nbiome      Moss\nweather    Clear\nwildlife   off\n\nscale      Pentatonic minor\nroot note  seed picks\nchords     2\nmode       microsound · pulse sub + click · grains medium · pips sparse · dropouts some · chords every 2 bars · drone shift fifths\ntempo      120 BPM\nstart      at the beginning\nkit        Sub & clicks\nspace      Wide\ndrum rev   on\nmaster fx  off\ncode over  on · 14% · speed 45 · text 200%\narch       centred, upright\ncamera     -2°/s\nglitch 1   6 kinds · 55% · ×1 · 7 steps\nglitch 2   6 kinds · 45% · ×2 · 11 steps\ntranspose  0 semitones\n\ndrone arc  always on\ndrone tone off\nlayer 1    Voices\n  arc 1    always on\nlayer 2    Bells\n  arc 2    always on\nlayer 3    Off\n  arc 3    always on\nlayer 4    Off\n  arc 4    always on\n\nseeds      1000 9 1009 2026 168 11 7\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone off · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
+const INFO: &str = "ShrineGen  v20261020\n\nseed       65088\nbiome      Verdant\nweather    Dusk\nwildlife   off\n\nscale      Phrygian\nroot note  D#\nchords     1\nmode       half-time\ntempo      156 BPM\nstart      at the beginning\nkit        Digital crush\nspace      Wide\ndrum rev   off\nmaster fx  off\ncode over  on · 14% · speed 45 · text 200%\narch       centred, upright\ncamera     -2°/s\nglitch 1   5 kinds · 63% · ×2 · 10 steps\nglitch 2   4 kinds · 64% · ×2 · 12 steps\ntranspose  0 semitones\n\ndrone arc  always on\ndrone tone 6000 Hz low-pass\nlayer 1    Ripple\n  arc 1    always on\nlayer 2    Ebb\n  arc 2    300s cycle, 226s up\nlayer 3    Gust\n  arc 3    always on\nlayer 4    Off\n  arc 4    120s cycle, 77s up\n\nseeds      40762 29313 97911 9058 72736 71667 91505\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone on · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
 
 // ============================================================================
 // C ABI — plain extern "C", loadable with the standard WebAssembly API

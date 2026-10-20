@@ -11,18 +11,18 @@ import { readFile } from "node:fs/promises";
 
 // Re-locked in 0014: the weather bed is now block-independent (see
 // AUDIO_GOLDEN in engine/tests/parity_golden.rs).
-const AUDIO_GOLDEN = 0x4431b25653cbda5cn;
+const AUDIO_GOLDEN = 0x70545ad52e582d4cn; // re-locked in 0015: raindrops no longer heard
 // Re-locked when `raster::fill_face` was fixed (side faces had been drawn with
 // x and y swapped), for the weather rework (FEAT-40), for the textured, lit
 // architecture (FEAT-44), for its paler palette (FEAT-45), and for the default
-// camera turning at -2°/s (frames 1-4). These mirror
+// camera turning at -2°/s, and for the particles' smooth wind drift. These mirror
 // VISUAL_GOLDEN in engine/tests/parity_golden.rs.
 const VISUAL_GOLDEN = [
-	0xba5ce76b7435b6f1n,
-	0x45d1c475b1940cfcn,
-	0xe3f880345775ef2en,
-	0x96f34aa3ec60d4fbn,
-	0xee7f6469f21fd637n,
+	0x259177ba49068105n,
+	0x3f8b7f61cf5efa11n,
+	0x38cef5aedfc22271n,
+	0xd7e6abfcd43f53afn,
+	0x77670ffc29613ff0n,
 ];
 const SR = 48000;
 const LOGICAL = 300;

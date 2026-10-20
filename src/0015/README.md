@@ -30,7 +30,15 @@ under the menu says what the selected row is for. `Enter` on a choice (marked
 `▾`) opens its list: every value with a one-line description. Moving through
 the list applies each one live (picture and audition), and typing a letter
 jumps to it. `Enter` keeps it; `Esc` puts back what was there. Numbers open a
-small box to type an exact value. Choose the
+small box to type an exact value. **Randomize…** (top of the Track tab, or
+`Shift+R`) opens a checklist of sixteen groups of settings. The groups are:
+shrine seed, music seeds, biome, weather, mode, scale/root/chords, tempo, drum
+kit, the mode's own details, atmosphere layers, drone, glitch layers, master
+FX, wildlife, code overlay & camera, and architecture. Tick any mix with
+`space`, or all with `a` and none with `n`. Then `r` rolls just those, within
+ranges that suit the music, and leaves everything else as it was; `u` undoes
+the last roll. The preview updates as you go. Plain `r` on the main screen
+still re-rolls only the seed under the cursor. Choose the
 seed, biome, weather, and every part of the music; set a **Track name** (it heads
 the page and titles the WAV); toggle **Audition** to hear it live; **Master FX**
 opens a screen of end-of-chain glitch effects (Tape, CD artifacts, pitch drift,
@@ -49,8 +57,11 @@ shafts of light, layered rain splashing on the stone, blown leaves and gust
 whistles, drifting fog and drips, lightning with its thunder arriving after the
 flash, snowfall whitening the tops, and rising embers under a low sun. The
 picture and the weather sound play from the same levels and the same events, so
-heavier rain is both denser and louder, and every splash you see is a drop you
-hear. **Wildlife** (off by default) adds a few creatures chosen by the biome and
+heavier rain is both denser and louder (the rain is heard as its wash; single
+drops are seen, not heard). Everything the wind carries — rain, snow, leaves,
+motes, embers, fog and clouds — drifts on one smooth sideways wind that turns
+round only every half-minute or more, and the rain streaks lean along their
+travel. **Wildlife** (off by default) adds a few creatures chosen by the biome and
 seed — frogs and doves in moss, songbirds and crickets in verdant growth,
 cicadas, owls and fireflies among the fungi — whose calls thin out in bad
 weather. The atmosphere layers offer twenty loop timbres, from Voices and Bells
@@ -247,16 +258,25 @@ The tweakable values sit at the top of the page's `@ Orbs & CyberPal` block:
 
 | Constant | Default | What it sets |
 |---|---|---|
-| `ORB_EVERY_S` | 8 | seconds between rolls |
+| `ORB_EVERY_S` | 6 | seconds between rolls |
 | `ORB_CHANCE` | 0.4 | chance of an orb on each roll |
 | `ORB_LIFE_S` | 20 | seconds an unclicked orb lasts |
 | `ORB_MAX` | 4 | orbs at once |
 | `ORB_RADIUS` | 24 | the orb's size, in canvas pixels (1200 across) |
 | `INSIGHT_HOLD_S` | 15 | seconds a line stays up after typing |
 | `INSIGHT_CPS` | 40 | typing speed, characters per second |
+| `UI_SOUND_LEVEL` | 0.05 | loudness of the orbs' hover and click blips (0 = silent) |
 
 `?orbs=test` in the URL makes an orb appear every second, for trying it out.
-The insight lines live in `INSIGHTS`.
+
+The insight lines live in `INSIGHTS`. Each is a short, practical note on how
+one part is made, so you could rebuild it yourself. Each is at most
+`INSIGHT_MAX` (110) characters, and the bar's text scales with the picture,
+so a line always fits in two rows.
+
+Hovering an orb plays a soft rising blip; catching one plays two quick pips
+and a tick. Both are synthesised on the page, panned to the orb, and kept very
+quiet.
 
 ## Releasing
 

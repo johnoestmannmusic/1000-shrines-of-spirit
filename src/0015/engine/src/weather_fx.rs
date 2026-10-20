@@ -65,6 +65,10 @@ pub struct Fx<'a> {
     pub grade: &'a dyn Fn(Rgba) -> Rgba,
 }
 
+/// Rain's sideways speed as a share of its fall at full wind: the streaks
+/// lean by the same ratio, so they point along their travel.
+const RAIN_SLANT: f64 = 0.45;
+
 fn particle(seed: u64, layer: u64, i: usize) -> Rng {
     Rng::new(hash3(seed, layer, i as u64))
 }
@@ -74,9 +78,16 @@ fn wrap(x: f64, span: f64) -> f64 {
 }
 
 impl Fx<'_> {
-    /// Horizontal wind, -1 (left) .. 1 (right).
+    /// The sideways wind now, -1 (left) .. 1 (right).
     fn wind_x(&self) -> f64 {
-        (0.5 - self.w.wind_dir) * 2.0 * self.w.wind_strength
+        self.w.wind_x
+    }
+
+    /// How far the wind has carried things, in seconds at full wind: every
+    /// particle drifts by a multiple of this, so its motion always matches
+    /// the wind of the moment and turns round only when the wind does.
+    fn drift(&self) -> f64 {
+        self.w.drift
     }
 
     fn count(&self, max: usize, level: f64, fraction: f64) -> usize {
@@ -142,14 +153,13 @@ impl Fx<'_> {
         let dark = blend(self.palette.fog, [26, 28, 38, 255], (level * 85.0) as u32, 100);
         let lit = blend(dark, [235, 240, 255, 255], (self.w.flash * 80.0) as u32, 100);
         let colour = (self.grade)(lit);
-        let speed = 4.0 + 26.0 * self.w.wind_strength;
+        let speed = 18.0;
         let n = 3 + (level * 6.0) as usize;
         for i in 0..n {
             let mut r = particle(self.seed, CLOUDS, i);
             let (w, h) = (r.range(60.0, 150.0), r.range(9.0, 22.0));
             let span = W + w * 2.0;
-            let dir = if self.wind_x() < 0.0 { -1.0 } else { 1.0 };
-            let cx = wrap(r.unit() * span + dir * self.t * speed * r.range(0.7, 1.3), span) - w;
+            let cx = wrap(r.unit() * span + self.drift() * speed * r.range(0.7, 1.3), span) - w;
             let cy = r.range(6.0, 85.0);
             let alpha = level * r.range(90.0, 170.0);
             for y in (cy - h) as i32..=(cy + h) as i32 {
@@ -174,7 +184,8 @@ impl Fx<'_> {
             return;
         }
         let colour = (self.grade)(self.palette.fog);
-        let drift = self.wind_x() * 6.0 + 2.0;
+        // A slow creep of its own, plus the wind.
+        let travel = self.drift() * 6.0 + self.t * 2.0;
         for b in 0..bands {
             let mut r = particle(self.seed, FOG, (b + (y0 as u64) * 10) as usize);
             let cy = y0 + (y1 - y0) * (b as f64 + 0.5) / bands as f64;
@@ -182,7 +193,7 @@ impl Fx<'_> {
             let (f1, f2, ph) = (r.range(1.0, 2.5), r.range(3.0, 5.0), r.unit());
             let a = level * max_alpha as f64 * (0.6 + 0.4 * sin_turns(self.t * 0.03 + ph));
             for x in 0..LOGICAL_W as i32 {
-                let u = (x as f64 + self.t * drift) / W;
+                let u = (x as f64 + travel) / W;
                 let edge = cy + 6.0 * sin_turns(u * f1 + ph) + 3.0 * sin_turns(u * f2 - self.t * 0.05);
                 for y in (edge - thick) as i32..=(edge + thick) as i32 {
                     let d = ((y as f64 - edge) / thick).abs();
@@ -246,8 +257,10 @@ impl Fx<'_> {
             let mut r = particle(self.seed, layer, i);
             let (x, phase, v, l) = (r.unit() * W, r.unit(), r.range(speed.0, speed.1), r.int(len.0, len.1) as i32);
             let y = wrap(phase * span + self.t * v, span) - 20.0;
-            let x = wrap(x + self.t * wind_x * v * 0.3, W);
-            let dx = wind_x * l as f64 * 0.7;
+            let x = wrap(x + self.drift() * v * RAIN_SLANT, W);
+            // The streak lies along the drop's travel: across by the wind,
+            // down by its fall.
+            let dx = wind_x * RAIN_SLANT * l as f64;
             for k in 0..=l {
                 let f = k as f64 / l as f64; // 0 at the tail, 1 at the head
                 let px = (x + dx * f).round() as i32;
@@ -264,7 +277,6 @@ impl Fx<'_> {
             return;
         }
         let white = (self.grade)([246, 248, 255, 255]);
-        let wind_x = self.wind_x();
         let span = H + 20.0;
         for i in 0..n {
             let mut r = particle(self.seed, FLAKES, i);
@@ -275,7 +287,7 @@ impl Fx<'_> {
             let (x, phase, v) = (r.unit() * W, r.unit(), r.range(10.0, 22.0) * (1.0 + size as f64 * 0.6));
             let (sway, sway_hz, sway_at) = (r.range(2.0, 7.0), r.range(0.15, 0.4), r.unit());
             let y = wrap(phase * span + self.t * v, span) - 10.0;
-            let x = wrap(x + self.t * wind_x * 30.0 + sway * sin_turns(self.t * sway_hz + sway_at), W);
+            let x = wrap(x + self.drift() * 30.0 + sway * sin_turns(self.t * sway_hz + sway_at), W);
             let twinkle = 0.5 + 0.5 * sin_turns(self.t * r.range(0.5, 2.0) + r.unit());
             let alpha = match size {
                 0 => 150,
@@ -300,14 +312,12 @@ impl Fx<'_> {
             return;
         }
         let tones = [self.palette.foliage, self.palette.foliage_light, self.palette.accent, self.palette.ground];
-        let wind_x = self.wind_x();
-        let dir = if wind_x < 0.0 { -1.0 } else { 1.0 };
         let span = W + 40.0;
         for i in 0..n {
             let mut r = particle(self.seed, LEAVES, i);
-            let (x, y0, v) = (r.unit() * span, r.range(40.0, 270.0), r.range(50.0, 130.0) * (0.3 + wind_x.abs()));
+            let (x, y0, v) = (r.unit() * span, r.range(40.0, 270.0), r.range(50.0, 130.0));
             let (flutter, f_hz, at) = (r.range(3.0, 12.0), r.range(0.3, 0.9), r.unit());
-            let x = wrap(x + dir * self.t * v, span) - 20.0;
+            let x = wrap(x + self.drift() * v, span) - 20.0;
             let y = y0 + flutter * sin_turns(self.t * f_hz + at) + 4.0 * sin_turns(self.t * f_hz * 3.1 + at);
             let tumble = sin_turns(self.t * r.range(0.8, 2.2) + r.unit());
             // Lifted toward the light, so a leaf reads against the moss.
@@ -334,12 +344,11 @@ impl Fx<'_> {
             return;
         }
         let colour = (self.grade)([255, 244, 214, 255]);
-        let wind_x = self.wind_x();
         for i in 0..n {
             let mut r = particle(self.seed, MOTES, i);
             let (x0, y0) = (r.unit() * W, r.range(30.0, 260.0));
             let (ax, ay, hz, at) = (r.range(6.0, 20.0), r.range(4.0, 12.0), r.range(0.03, 0.09), r.unit());
-            let x = wrap(x0 + ax * sin_turns(self.t * hz + at) + self.t * wind_x * 8.0, W);
+            let x = wrap(x0 + ax * sin_turns(self.t * hz + at) + self.drift() * 8.0, W);
             let y = y0 + ay * sin_turns(self.t * hz * 1.3 + at * 2.0);
             let glint = 0.5 + 0.5 * sin_turns(self.t * r.range(0.2, 0.7) + r.unit());
             fb.blend_over(x as i32, y as i32, colour, (40.0 + 200.0 * glint * glint * self.w.light) as u32);
@@ -362,7 +371,7 @@ impl Fx<'_> {
             let climb = wrap(phase * span + self.t * v, span);
             let life = climb / span; // 0 just lifted, 1 burnt out
             let y = 290.0 - climb;
-            let x = wrap(x0 + sway * sin_turns(self.t * hz + at) + self.t * self.wind_x() * 10.0, W);
+            let x = wrap(x0 + sway * sin_turns(self.t * hz + at) + self.drift() * 10.0, W);
             let hot = [255, 214, 120, 255];
             let cool = [170, 50, 36, 255];
             let colour = (self.grade)(blend(hot, cool, (life * 100.0) as u32, 100));

@@ -12,6 +12,7 @@ mod audition;
 mod emit;
 mod png;
 mod preview;
+mod randomize;
 mod seed;
 mod serve;
 mod state;

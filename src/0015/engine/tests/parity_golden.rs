@@ -37,29 +37,32 @@ const AUDIO_SECONDS: usize = 5;
 // splash, drip and crackle now draws its own randomness and starts on its
 // exact sample, so the browser's 128-frame blocks and the exporters' 4096
 // give the same samples (and a start offset is exact). The music is unchanged.
-const AUDIO_GOLDEN: u64 = 0x4431_b256_53cb_da5c;
+// Re-locked in 0015 when single raindrops stopped being heard (the wash stays).
+const AUDIO_GOLDEN: u64 = 0x7054_5ad5_2e58_2d4c;
 /// The drone rhythm switched on: locked so the LFO cannot drift silently
 /// (`HC004`). Off, the coupled audio above is unchanged.
-const DRONE_RHYTHM_GOLDEN: u64 = 0x1dd1_af04_2c30_7b07;
+const DRONE_RHYTHM_GOLDEN: u64 = 0xd145_6f48_cc4e_bf4e;
 /// The same rhythm also shaping the atmosphere loops.
-const LOOP_RHYTHM_GOLDEN: u64 = 0xf885_744b_4745_15b7;
+const LOOP_RHYTHM_GOLDEN: u64 = 0x031b_5728_98c7_abfb;
 /// A deliberately turned architecture, locked so a change to the transform
 /// maths cannot pass silently (`HC004`).
 // Re-locked for the textured, lit architecture (FEAT-44), its paler
 // palette with the white altar (FEAT-45), and the depth test on the turned
 // path (BUG-11).
 // Re-locked (frames 1 and 2) when the default camera began turning at -2°/s.
-const ARCH_ROTATED_GOLDEN: [u64; 3] = [5606981425953137516, 11710460452663874062, 10617532798070711494];
+// Re-locked again in 0015 when the particles began drifting on the wind's integral.
+const ARCH_ROTATED_GOLDEN: [u64; 3] = [17908989690630947625, 16433218340908629111, 4621609053951884191];
 const VISUAL_GOLDEN: [u64; 5] = [
     // Re-locked when `raster::fill_face` was fixed (it drew side faces with x
     // and y swapped), for the weather rework (FEAT-40), for the textured, lit
     // architecture (FEAT-44), for its paler palette (FEAT-45), and when the
-    // default camera began turning at -2°/s (frames 1-4; frame 0 is unturned).
-    13428862637609170673,
-    5031018268519042300,
-    16427020603127885614,
-    10877119592935773435,
-    17185565109265618487,
+    // default camera began turning at -2°/s, and when the particles began
+    // drifting on the smooth sideways wind (rain leaning along its travel).
+    2707076492999164165,
+    4578893504219904529,
+    4093479242753516145,
+    15557311065178985391,
+    8603863188815036400,
 ];
 
 #[test]
@@ -152,13 +155,14 @@ const FUTURE_GOLDEN: [(u64, [u64; 2]); 5] = [
     // with the bass, every echo keeps its hit's place in the swing, the loops'
     // grains and the glitch ratchets swing with the drums, and the bass glides
     // faster. The second frames re-locked when the default camera began
-    // turning at -2°/s.
-    (0x49f2_ebac_73cd_214c, [6579003113373532395, 4395191951363905427]),
-    (0x8644_1f47_3bc4_2566, [13912267995583014935, 12835428784991641825]),
-    (0xb37b_73ba_d941_6b80, [3398551927623433174, 14924866735832440461]),
-    (0xec32_597d_0672_f60a, [15606822369550803988, 17043975138364091053]),
+    // turning at -2°/s. The storm, rain and microsound audio re-locked when
+    // single raindrops stopped being heard.
+    (0x49f2_ebac_73cd_214c, [6579003113373532395, 17412602403879097409]),
+    (0xdde4_43af_eae0_af21, [7132316931383400372, 11513448211578082979]),
+    (0xb37b_73ba_d941_6b80, [3398551927623433174, 18153324263042612487]),
+    (0x2f23_fde2_de4e_a7b7, [5907740838678343107, 7288214402333182214]),
     // 0015: microsound (locked after John's listen).
-    (0x8a62_c979_a2a9_f0bb, [13428862637609170673, 10877119592935773435]),
+    (0xe7d3_52bf_3bfb_6d78, [2707076492999164165, 15557311065178985391]),
 ];
 
 fn future_configs() -> Vec<(&'static str, SimConfig)> {

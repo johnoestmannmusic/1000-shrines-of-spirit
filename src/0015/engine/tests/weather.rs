@@ -279,3 +279,38 @@ fn the_wind_is_dry() {
         assert!(w.events(EventKind::Splash, 0.0, 600.0).is_empty(), "seed {seed}: splashes in the wind");
     }
 }
+
+#[test]
+fn the_wind_turns_round_slowly_and_particles_follow_it_exactly() {
+    use shrine0015::weather::{Weather, WeatherKind};
+    for seed in 0..16u64 {
+        for kind in WeatherKind::ALL {
+            let w = Weather::new(kind, seed);
+            // Each way for at least 10 s (in fact half the drift period, 30 s or more).
+            // (The wind was already blowing before t = 0, so the first run is
+            // only timed from its first turn.)
+            let (mut last_sign, mut since, mut seen_turn) = (0.0f64, 0.0f64, false);
+            let mut t = 0.0;
+            while t < 600.0 {
+                let s = w.state(t);
+                let sign = if s.wind_x > 1e-9 { 1.0 } else if s.wind_x < -1e-9 { -1.0 } else { last_sign };
+                if sign != last_sign && last_sign != 0.0 {
+                    if seen_turn {
+                        assert!(since >= 10.0, "{kind:?} seed {seed}: turned round after {since} s at t = {t}");
+                    }
+                    seen_turn = true;
+                    since = 0.0;
+                }
+                last_sign = sign;
+                since += 0.25;
+                t += 0.25;
+            }
+            // The drift is the wind's integral: its rate of change is the wind.
+            for t in [3.0, 47.5, 211.0] {
+                let (a, b) = (w.state(t - 0.01), w.state(t + 0.01));
+                let rate = (b.drift - a.drift) / 0.02;
+                assert!((rate - w.state(t).wind_x).abs() < 1e-3, "{kind:?}: drift does not follow the wind");
+            }
+        }
+    }
+}

@@ -156,6 +156,15 @@ pub struct WeatherState {
     pub drips: f64,
     /// Lightning: how bright the sky is flashing right now.
     pub flash: f64,
+    /// The sideways wind the particles travel on, −1 (left) .. 1 (right). It
+    /// turns round smoothly and slowly: each way for at least half a drift
+    /// period (30 s or more), never flipping in a moment.
+    pub wind_x: f64,
+    /// How far that wind has carried things since the start: the exact
+    /// integral of `wind_x`, in seconds at full wind. A particle drifting at
+    /// `v` pixels per second of full wind is `v * drift` along, so its motion
+    /// always matches the wind of the moment.
+    pub drift: f64,
 }
 
 /// What a scheduled event is.
@@ -229,6 +238,11 @@ const FLICKER: [(f64, f64); 3] = [(0.0, 1.0), (0.07, 0.6), (0.17, 0.85)];
 /// How long a flash pulse takes to halve, in seconds.
 const FLICKER_HALF: f64 = 0.03;
 
+/// The sideways wind's period range, seconds: it blows one way for half a
+/// period, so at least 30 s, before turning round.
+const MIN_DRIFT_PERIOD_S: f64 = 60.0;
+const MAX_DRIFT_PERIOD_S: f64 = 150.0;
+
 /// A shrine's weather: one kind, with its own slow phases.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Weather {
@@ -239,6 +253,9 @@ pub struct Weather {
     rain_period: f64,
     gust_periods: [f64; 3],
     gust_phases: [f64; 3],
+    /// The sideways wind's period, seconds, and its phase in turns.
+    drift_period: f64,
+    drift_phase: f64,
 }
 
 impl Weather {
@@ -252,7 +269,10 @@ impl Weather {
         // Drawn after the original three, so those keep their values.
         let gust_periods = [rng.range(3.0, 5.0), rng.range(6.0, 9.0), rng.range(11.0, 17.0)];
         let gust_phases = [rng.unit(), rng.unit(), rng.unit()];
-        Weather { kind, seed, phase, wind_period, rain_period, gust_periods, gust_phases }
+        // Its own stream, so nothing above moves.
+        let mut d = Rng::stream(seed, STREAM ^ 0x0D41_F7);
+        let (drift_period, drift_phase) = (d.range(MIN_DRIFT_PERIOD_S, MAX_DRIFT_PERIOD_S), d.unit());
+        Weather { kind, seed, phase, wind_period, rain_period, gust_periods, gust_phases, drift_period, drift_phase }
     }
 
     fn wind_cycle(&self, t: f64) -> f64 {
@@ -261,6 +281,18 @@ impl Weather {
 
     fn rain_cycle(&self, t: f64) -> f64 {
         0.5 - 0.5 * cos_turns(t / self.rain_period + self.phase * 0.7 + 0.13)
+    }
+
+    /// The sideways wind at `t` (−1..1) and its integral since 0 (seconds
+    /// at full wind): a sine of the drift period, scaled by the kind's wind,
+    /// so it reverses smoothly and only after half a period.
+    fn drift(&self, t: f64) -> (f64, f64) {
+        let u = self.kind.profile().wind.clamp(0.0, 1.0);
+        let (p, ph) = (self.drift_period, self.drift_phase);
+        let wind_x = u * sin_turns(t / p + ph);
+        // ∫ sin(2π(τ/p + ph)) dτ from 0 to t.
+        let drift = u * p / crate::math::TAU * (cos_turns(ph) - cos_turns(t / p + ph));
+        (wind_x, drift)
     }
 
     /// The fast gust envelope, in `[0, 1]`: three waves, squared so calm is
@@ -283,7 +315,10 @@ impl Weather {
         let wind = (p.wind * (0.3 + 0.45 * wind_cycle + 0.25 * gust)).clamp(0.0, 1.0);
         let rain = (p.rain * (0.25 + 0.75 * rain_cycle)).clamp(0.0, 1.0);
         let snow = (p.snow * (0.3 + 0.7 * rain_cycle)).clamp(0.0, 1.0);
+        let (wind_x, drift) = self.drift(t);
         WeatherState {
+            wind_x,
+            drift,
             wind_dir: wrap01(self.phase + t / (self.wind_period * 6.0)),
             wind_strength: wind,
             gust: (gust * p.wind).clamp(0.0, 1.0),

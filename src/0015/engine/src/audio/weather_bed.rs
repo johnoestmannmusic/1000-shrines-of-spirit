@@ -28,6 +28,10 @@ const CONTROL: usize = 32;
 /// background rather than a foreground instrument.
 const BED_GAIN: f64 = 0.4;
 
+/// Whether each raindrop the scene draws is also heard as its own tap or
+/// plink. Off: the rain is heard as its wash.
+const RAINDROP_HITS: bool = false;
+
 /// Wind, rain, thunder and the small sounds, mixed into an existing
 /// interleaved stereo buffer.
 #[derive(Clone)]
@@ -113,18 +117,23 @@ impl WeatherBed {
         let mut due: Vec<(u64, Due)> = Vec::new();
         // Sounds owned by an event in this block but landing after it.
         let mut spill: Vec<(u64, Due)> = Vec::new();
-        for e in weather.events(EventKind::Splash, t0, t1) {
-            let (x, y) = e.spot();
-            let (pan, hard) = (e.pan(), self.is_hard(x, y));
-            let gain = e.rng().range(0.08, 0.22);
-            let mut r = Rng::new(e.hash ^ 0x4849_5453);
-            let hit = if hard { Hit::plink(0, &mut r, pan, gain) } else { Hit::tap(0, &mut r, pan, gain * 1.4) };
-            due.push((at_sample(e.at), Due::Hit(hit)));
-        }
-        // A drip is heard when it lands, at the end of its fall.
-        for e in weather.events(EventKind::Drip, t0 - DRIP_S, t1 - DRIP_S) {
-            let mut r = Rng::new(e.hash ^ 0x4452_4950);
-            due.push((at_sample(e.at + DRIP_S), Due::Hit(Hit::drip(0, &mut r, e.pan(), 0.16))));
+        // Single raindrops (taps, plinks, drips) are seen but no longer heard:
+        // as separate pitched hits they bubbled over the music. The rain is
+        // heard as its wash alone.
+        if RAINDROP_HITS {
+            for e in weather.events(EventKind::Splash, t0, t1) {
+                let (x, y) = e.spot();
+                let (pan, hard) = (e.pan(), self.is_hard(x, y));
+                let gain = e.rng().range(0.08, 0.22);
+                let mut r = Rng::new(e.hash ^ 0x4849_5453);
+                let hit = if hard { Hit::plink(0, &mut r, pan, gain) } else { Hit::tap(0, &mut r, pan, gain * 1.4) };
+                due.push((at_sample(e.at), Due::Hit(hit)));
+            }
+            // A drip is heard when it lands, at the end of its fall.
+            for e in weather.events(EventKind::Drip, t0 - DRIP_S, t1 - DRIP_S) {
+                let mut r = Rng::new(e.hash ^ 0x4452_4950);
+                due.push((at_sample(e.at + DRIP_S), Due::Hit(Hit::drip(0, &mut r, e.pan(), 0.16))));
+            }
         }
         for e in weather.events(EventKind::Spark, t0, t1) {
             let pan = e.pan();
