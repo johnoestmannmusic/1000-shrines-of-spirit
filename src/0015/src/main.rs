@@ -180,7 +180,7 @@ fn main() {
     match command {
         Some("--preview") => {
             let a = parse(&args);
-            let out = a.out.unwrap_or_else(|| format!("previews/shrine-{}.png", a.seed));
+            let out = a.out.unwrap_or_else(|| format!("artifacts/shrine-{}.png", a.seed));
             match preview::write(a.seed, a.biome, a.weather, 0.0, &out) {
                 Ok(()) => println!("wrote {out} (seed {}, {}, {})", a.seed, a.biome.name(), a.weather.name()),
                 Err(e) => fail(&e.to_string()),
@@ -188,7 +188,7 @@ fn main() {
         }
         Some("--cover") => {
             let a = parse(&args);
-            let out = a.out.unwrap_or_else(|| format!("previews/ShrineGen-{}-cover.png", a.seed));
+            let out = a.out.unwrap_or_else(|| format!("artifacts/ShrineGen-{}-cover.png", a.seed));
             let fb = preview::render(a.seed, a.biome, a.weather, 0.0);
             match preview::write_cover(&fb, &out, 1600) {
                 Ok(()) => println!("wrote {out} (1600×1600, seed {}, {}, {})", a.seed, a.biome.name(), a.weather.name()),
@@ -204,7 +204,7 @@ fn main() {
                 sim.render_audio(chunk);
             }
             wav::fade_edges(&mut buf, SAMPLE_RATE, 0.03);
-            let out = a.out.unwrap_or_else(|| format!("previews/shrine-{}.wav", a.seed));
+            let out = a.out.unwrap_or_else(|| format!("artifacts/shrine-{}.wav", a.seed));
             match wav::write_stereo_16(&out, SAMPLE_RATE, &buf) {
                 Ok(()) => println!(
                     "wrote {out} ({:.0}s, seed {}, {}, {})",

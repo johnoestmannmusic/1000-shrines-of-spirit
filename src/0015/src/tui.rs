@@ -290,7 +290,7 @@ fn row_help(kind: Kind) -> &'static str {
         Kind::EditArch => "Edit the shrine square by square. Enter to open.",
         Kind::SeedN(_) => "One of the music's seeds. ←→ step, shift ±100, enter to type.",
         Kind::SavePng => "Save the picture as it is now.",
-        Kind::CoverPng => "Save a 1600×1600 cover image.",
+        Kind::CoverPng => "Save a 1600×1600 cover: the start of the piece, unturned (as the WAV embeds it).",
         Kind::WavExport => "Render the music to a WAV with metadata and cover art.",
         Kind::ExportSeed => "Write these settings to a .shrineseed file.",
         Kind::ImportSeed => "Load settings from a .shrineseed file.",
@@ -382,7 +382,7 @@ impl WavForm {
         WavForm {
             length_s: WAV_SECONDS as f64,
             fade_s: 3.0,
-            filename: format!("previews/ShrineGen-{seed}.wav"),
+            filename: format!("artifacts/ShrineGen-{seed}.wav"),
             artist: String::new(),
             album: "ShrineGen".to_string(),
             normalize: false,
@@ -872,7 +872,7 @@ impl App {
         }
 
         head("Do", &mut rows);
-        field("Save PNG".into(), format!("previews/shrine-{}.png", c.seed), Kind::SavePng, &mut rows);
+        field("Save PNG".into(), format!("artifacts/shrine-{}.png", c.seed), Kind::SavePng, &mut rows);
         field("Cover PNG".into(), "1600×1600 export".into(), Kind::CoverPng, &mut rows);
         field("Export WAV".into(), "metadata + cover art".into(), Kind::WavExport, &mut rows);
         field("Export seed".into(), format!("artifacts/ShrineGen-{}.shrineseed", c.seed), Kind::ExportSeed, &mut rows);
@@ -2050,7 +2050,7 @@ impl App {
     }
 
     fn save_png(&mut self) {
-        let out = format!("previews/shrine-{}.png", self.config.seed);
+        let out = format!("artifacts/shrine-{}.png", self.config.seed);
         let caption = format!(
             "seed {} · {} · {} · 300×300 logical → 1200×1200 nearest",
             self.config.seed,
@@ -2064,8 +2064,9 @@ impl App {
     }
 
     fn cover_png(&mut self) {
-        let out = format!("previews/ShrineGen-{}-cover.png", self.config.seed);
-        self.status = match preview::write_cover(&self.frame, &out, COVER_SIZE) {
+        let out = format!("artifacts/ShrineGen-{}-cover.png", self.config.seed);
+        // The same picture the WAV export embeds: the start, unturned.
+        self.status = match preview::write_cover(&preview::cover_frame(&self.config), &out, COVER_SIZE) {
             Ok(()) => format!("saved {out} ({COVER_SIZE}×{COVER_SIZE})"),
             Err(e) => format!("cover failed: {e}"),
         };
@@ -2631,11 +2632,8 @@ fn run_wav_export(config: SimConfig, opts: wav::WavOptions, tx: Sender<Progress>
     }
 
     let _ = tx.send(Progress::Fraction(0.85, "rendering cover".to_string()));
-    let mut fb = Framebuffer::logical();
-    // The cover shows where the piece starts.
-    let state = sim.state(sim.start_offset());
-    sim.scene.render_state(&mut fb, &state, Quality::High);
-    let cover = preview::cover_png(&fb, COVER_SIZE);
+    // The cover shows where the piece starts, seen straight on.
+    let cover = preview::cover_png(&preview::cover_frame(&config), COVER_SIZE);
 
     let _ = tx.send(Progress::Fraction(0.92, "writing WAV + metadata".to_string()));
     let build = emit::build_date();
@@ -2690,6 +2688,9 @@ mod tests {
     /// tests must not depend on whatever is stored on this machine.
     fn editor_app() -> App {
         let mut app = App::new();
+        // From the defaults, not whatever is saved on this machine (an offset
+        // or turned architecture changes what the editor allows).
+        app.config = SimConfig::default();
         app.config.settings.model = ShrineModel::EMPTY;
         app.open_editor();
         app

@@ -13,7 +13,7 @@
 //
 // The shrine it draws and plays:
 //   seed 65088 · Verdant · Dusk
-//   Phrygian, 1 chord(s), half-time, 156 BPM, root D#, kit Digital crush
+//   Phrygian, 3 chord(s), half-time, 156 BPM, root D#, kit Digital crush
 //   drone arc 0s up 0s, tone 6000
 //
 // Contents: crate docs and constants, then engine modules (iso, grid, render,
@@ -19317,13 +19317,13 @@ pub use self::track::*;
 // Baked recipe — this artifact is this shrine
 // ============================================================================
 /// `recipe::encode` of the settings the setup menu produced.
-const RECIPE: [u32; 168] = [18, 0, 65088, 0, 40762, 0, 29313, 0, 97911, 0, 9058, 0, 72736, 0, 71667, 0, 91505, 1, 6, 3, 1, 0, 8, 1, 156, 4, 12, 0, 0, 6000, 1, 14, 0, 0, 0, 0, 0, 1, 15, 0, 0, 0, 300, 226, 1, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 120, 77, 0, 72, 3358395905, 51380, 188928180, 133152, 9592815, 57929, 14049389, 42053, 178, 1, 5434, 0, 2646, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 892416048, 0, 0, 0, 0, 0, 0, 0];
+const RECIPE: [u32; 168] = [18, 0, 65088, 0, 40762, 0, 29313, 0, 97911, 0, 9058, 0, 72736, 0, 71667, 0, 91505, 1, 6, 3, 3, 0, 8, 1, 156, 4, 12, 0, 0, 6000, 1, 1, 0, 0, 0, 40, 25, 1, 15, 0, 0, 0, 300, 226, 1, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 120, 77, 0, 72, 3358395393, 51380, 188928180, 133152, 9592815, 57929, 14049389, 42053, 178, 1, 5434, 0, 2646, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 892416048, 1444949280, 1633905775, 7173486, 0, 0, 0, 0];
 
 /// Build date as `YYYYMMDD`, stamped when this file was emitted.
-const BUILD: u32 = 20261020;
+const BUILD: u32 = 20261021;
 
 /// The source-code overlay word: bit 0 enabled, byte 1 opacity, byte 2 speed, byte 3 text scale.
-const CODE_OVERLAY: u32 = 3358395905;
+const CODE_OVERLAY: u32 = 3358395393;
 
 /// The overlay's tilt: positive leans the drift to the left.
 const CODE_ANGLE: i32 = 0;
@@ -19335,10 +19335,10 @@ const CODE_OFFSET: i32 = 0;
 const CAMERA_SPEED: i32 = -2;
 
 /// The track name, shown at the head of the page and used as the WAV title.
-const NAME: &str = "0015";
+const NAME: &str = "0015 - Volcanum";
 
 /// Everything needed to recreate this shrine.
-const INFO: &str = "ShrineGen  v20261020\n\nseed       65088\nbiome      Verdant\nweather    Dusk\nwildlife   off\n\nscale      Phrygian\nroot note  D#\nchords     1\nmode       half-time\ntempo      156 BPM\nstart      at the beginning\nkit        Digital crush\nspace      Wide\ndrum rev   off\nmaster fx  off\ncode over  on · 14% · speed 45 · text 200%\narch       centred, upright\ncamera     -2°/s\nglitch 1   5 kinds · 63% · ×2 · 10 steps\nglitch 2   4 kinds · 64% · ×2 · 12 steps\ntranspose  0 semitones\n\ndrone arc  always on\ndrone tone 6000 Hz low-pass\nlayer 1    Ripple\n  arc 1    always on\nlayer 2    Ebb\n  arc 2    300s cycle, 226s up\nlayer 3    Gust\n  arc 3    always on\nlayer 4    Off\n  arc 4    120s cycle, 77s up\n\nseeds      40762 29313 97911 9058 72736 71667 91505\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone on · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
+const INFO: &str = "ShrineGen  v20261021\n\nseed       65088\nbiome      Verdant\nweather    Dusk\nwildlife   off\n\nscale      Phrygian\nroot note  D#\nchords     3\nmode       half-time\ntempo      156 BPM\nstart      at the beginning\nkit        Digital crush\nspace      Wide\ndrum rev   off\nmaster fx  off\ncode over  on · 12% · speed 45 · text 200%\narch       centred, upright\ncamera     -2°/s\nglitch 1   5 kinds · 63% · ×2 · 10 steps\nglitch 2   4 kinds · 64% · ×2 · 12 steps\ntranspose  0 semitones\n\ndrone arc  always on\ndrone tone 6000 Hz low-pass\nlayer 1    Bells\n  arc 1    40s cycle, 25s up\nlayer 2    Ebb\n  arc 2    300s cycle, 226s up\nlayer 3    Gust\n  arc 3    always on\nlayer 4    Off\n  arc 4    120s cycle, 77s up\n\nseeds      40762 29313 97911 9058 72736 71667 91505\n           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm\nrhythm     drone on · loops off\n\nMusic License: CC0 / Public Domain\nCode License: MIT";
 
 // ============================================================================
 // C ABI — plain extern "C", loadable with the standard WebAssembly API

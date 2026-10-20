@@ -76,6 +76,17 @@ pub fn upscale(fb: &Framebuffer, size: u32) -> Framebuffer {
     out
 }
 
+/// The cover's picture: the piece where it starts, seen straight on (the
+/// camera's orbit at 0°, whatever its speed), as the WAV export embeds it.
+pub fn cover_frame(config: &shrine0015::sim::SimConfig) -> Framebuffer {
+    let sim = shrine0015::sim::Sim::new_visual(config.clone());
+    let mut state = sim.state(sim.start_offset());
+    state.orbit_turns = 0.0;
+    let mut fb = Framebuffer::logical();
+    sim.scene.render_state(&mut fb, &state, Quality::High);
+    fb
+}
+
 /// Encode the current frame as a square PNG cover of `size` x `size`.
 pub fn cover_png(fb: &Framebuffer, size: u32) -> Vec<u8> {
     let big = upscale(fb, size);
@@ -92,4 +103,21 @@ pub fn write_cover(fb: &Framebuffer, out: &str, size: u32) -> io::Result<()> {
         }
     }
     fs::write(path, png)
+}
+
+#[cfg(test)]
+mod cover_tests {
+    use super::*;
+    use shrine0015::sim::SimConfig;
+
+    #[test]
+    fn the_cover_is_unturned_whatever_the_camera_speed() {
+        let mut still = SimConfig::default();
+        still.settings.camera_speed = 0;
+        let mut turning = still.clone();
+        turning.settings.camera_speed = -37;
+        turning.settings.start_s = 90;
+        still.settings.start_s = 90;
+        assert_eq!(cover_frame(&turning).hash(), cover_frame(&still).hash());
+    }
 }

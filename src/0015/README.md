@@ -13,7 +13,7 @@ builds with bare `rustc`.
 | Path | What |
 |---|---|
 | `engine/` | the artifact: zero-dependency isometric framework, shrine/plant/weather generators, the music engine, and the coupled simulation clock |
-| `src/` | the host: the setup TUI, previews, `--emit`, the WAV/cover exporters, the dev server, the seed files |
+| `src/` | the host: the setup TUI, previews, `--emit`, the WAV/cover exporters, the dev server, the seed files (every export lands in `artifacts/`) |
 | `web/` | the uploadable page: `index.html` + `shrine.worklet.js` + `shrine.wasm`, plus `shrine.rs` (the exported source, for the code overlay) and `wav/` (an optional bundled render) |
 
 ## Run it
@@ -265,14 +265,20 @@ The tweakable values sit at the top of the page's `@ Orbs & CyberPal` block:
 | `ORB_RADIUS` | 24 | the orb's size, in canvas pixels (1200 across) |
 | `INSIGHT_HOLD_S` | 15 | seconds a line stays up after typing |
 | `INSIGHT_CPS` | 40 | typing speed, characters per second |
+| `INSIGHT_MAX` | 122 | longest line, so it fits two rows |
 | `UI_SOUND_LEVEL` | 0.05 | loudness of the orbs' hover and click blips (0 = silent) |
 
 `?orbs=test` in the URL makes an orb appear every second, for trying it out.
 
-The insight lines live in `INSIGHTS`. Each is a short, practical note on how
-one part is made, so you could rebuild it yourself. Each is at most
-`INSIGHT_MAX` (110) characters, and the bar's text scales with the picture,
-so a line always fits in two rows.
+The insight lines live in `INSIGHTS`: 111 in all, of which a given piece
+shows the 75–80 that are true for it. Each is a short, practical note on how
+one part is made, in CyberPal's voice, so you could rebuild it yourself.
+Each is at most `INSIGHT_MAX` (122) characters, and the bar's text scales
+with the picture, so a line fits in two rows even on a 360-pixel phone.
+Lines are drawn at random from the ones you haven't seen yet. That run is
+remembered for the browser tab's session, so a reload carries on rather
+than starting again. Nothing repeats until every line has been seen, and a
+new run never opens with the line you just read.
 
 Hovering an orb plays a soft rising blip; catching one plays two quick pips
 and a tick. Both are synthesised on the page, panned to the orb, and kept very
