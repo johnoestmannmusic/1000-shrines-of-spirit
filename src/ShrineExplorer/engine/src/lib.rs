@@ -31,6 +31,7 @@
 pub mod audio;
 pub mod arch;
 pub mod budget;
+pub mod card;
 pub mod explore;
 pub mod framebuffer;
 pub mod future;

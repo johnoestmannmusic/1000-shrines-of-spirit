@@ -243,6 +243,27 @@ pub extern "C" fn shrine_map_glance(x: i32, y: i32) -> u32 {
     crate::explore::glance(&SimConfig::default(), x, y)
 }
 
+/// The recipe card of the shrine `player` shows, standing at `(x, y)` on the
+/// map: UTF-8, `shrine_card_len` bytes (valid until the next call).
+///
+/// # Safety
+/// `player` must come from [`shrine_new`].
+#[no_mangle]
+pub unsafe extern "C" fn shrine_card_ptr(player: *mut Player, x: i32, y: i32) -> *const u8 {
+    let p = unsafe { &mut *player };
+    p.card(0, (x, y)).as_ptr()
+}
+
+/// Length of the card last built by `shrine_card_ptr`.
+///
+/// # Safety
+/// `player` must come from [`shrine_new`].
+#[no_mangle]
+pub unsafe extern "C" fn shrine_card_len(player: *mut Player, x: i32, y: i32) -> u32 {
+    let p = unsafe { &mut *player };
+    p.card(0, (x, y)).len() as u32
+}
+
 /// Hear one layer alone (1 drone, 2–3 glitch layers, 4 bass, 5 drums, 6–9
 /// atmosphere loops, 10 the echo and reverb), or 0 for the full mix.
 ///

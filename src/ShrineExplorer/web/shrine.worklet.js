@@ -1,70 +1,98 @@
-// Runs the shrine's music on the audio thread.
+// Plays the shrine's music on the audio thread.
 //
-// Plain WebAssembly only (HC006): the module is instantiated here and asked for
-// interleaved stereo samples. It never knows about blocks, so native and browser
-// output are identical.
+// The music itself is computed ahead of time in background workers (one per
+// shrine, on the page): each renders its shrine's samples in 4096-frame
+// chunks and sends them here over its own message port. This thread only
+// plays them, so it never stalls while a shrine's music is being built, and
+// moving to another shrine is a crossfade from one stream to the next,
+// without a gap.
 //
-// The page's Learn mode can ask for two more things, neither of which changes
-// the music: the engine's moving parts (posted now and then while it is
-// watching), and to hear one layer on its own. The explorer can ask it to
-// travel: to play the shrine at another spot on the map instead.
+// Plain WebAssembly only (HC006): the workers run the engine; native and
+// browser output are identical sample for sample.
 
-class ShrineGen extends AudioWorkletProcessor {
-  constructor(options) {
+const ACK_EVERY = 2048;   // frames between "played" reports to a stream's worker
+
+class ShrinePlayer extends AudioWorkletProcessor {
+  constructor() {
     super();
-    const { wasm } = options.processorOptions;
-    const module = new WebAssembly.Module(wasm);
-    const instance = new WebAssembly.Instance(module, {});
-    this.shrine = instance.exports;
-    // Mode 1: audio only, for the shrine at the page's spot on the map.
-    const at = options.processorOptions.at || [0, 0];
-    this.player = this.player_at(at[0], at[1]);
-    this.samples = 0;
-    this.live = false;
+    // Streams by id: queued chunks, the read position, frames played.
+    this.streams = new Map();
+    this.current = null;     // the stream being heard
+    this.fading = null;      // { from, pos, len }: crossfading from `from` to current
+    this.out = 0;            // frames output in total (the page's clock)
     this.port.onmessage = (e) => {
       const m = e.data || {};
-      if (typeof m.live === "boolean") this.live = m.live;
-      if (typeof m.solo === "number" && typeof this.shrine.shrine_set_solo === "function") {
-        this.shrine.shrine_set_solo(this.player, m.solo);
+      if (m.connect !== undefined && m.port) {
+        const s = { queue: [], at: 0, played: 0, acked: 0, port: m.port };
+        m.port.onmessage = (ev) => {
+          if (ev.data && ev.data.frames) s.queue.push(ev.data.frames);
+        };
+        this.streams.set(m.connect, s);
       }
-      // Travel: build the next shrine's music (the page has faded out, so
-      // the moment this takes is silent), then say it has arrived.
-      if (Array.isArray(m.travel)) {
-        this.shrine.shrine_free(this.player);
-        this.player = this.player_at(m.travel[0], m.travel[1]);
-        this.samples = 0;
-        this.port.postMessage("arrived");
+      if (m.play !== undefined) {
+        this.current = m.play;
+      }
+      if (m.crossfade) {
+        const { to, seconds } = m.crossfade;
+        if (this.current !== null && this.current !== to) {
+          this.fading = { from: this.current, pos: 0, len: Math.max(1, Math.round(seconds * sampleRate)) };
+        }
+        this.current = to;
+      }
+      if (m.drop !== undefined) {
+        const s = this.streams.get(m.drop);
+        if (s) s.port.close();
+        this.streams.delete(m.drop);
+        if (this.fading && this.fading.from === m.drop) this.fading = null;
       }
     };
     this.port.postMessage("ready");
   }
 
-  player_at(x, y) {
-    return typeof this.shrine.shrine_new_at === "function" ? this.shrine.shrine_new_at(x, y, 1) : this.shrine.shrine_new(0, 0, 1);
+  // The next stereo frame of stream `id` (silence if it has run dry).
+  frame(id) {
+    const s = this.streams.get(id);
+    if (!s) return [0, 0];
+    while (s.queue.length && s.at >= s.queue[0].length) {
+      s.queue.shift();
+      s.at = 0;
+    }
+    if (!s.queue.length) return [0, 0];
+    const c = s.queue[0];
+    const l = c[s.at], r = c[s.at + 1];
+    s.at += 2;
+    s.played += 1;
+    if (s.played - s.acked >= ACK_EVERY) {
+      s.acked = s.played;
+      s.port.postMessage({ played: s.played });
+    }
+    return [l, r];
   }
 
   process(_inputs, outputs) {
     const [left, right] = outputs[0];
-    const frames = left.length;
-    const ptr = this.shrine.shrine_render_audio(this.player, frames);
-    // Fresh view each call: rendering may have grown memory.
-    const buf = new Float32Array(this.shrine.memory.buffer, ptr, frames * 2);
-    for (let i = 0; i < frames; i++) {
-      left[i] = buf[2 * i];
-      right[i] = buf[2 * i + 1];
-    }
-    this.samples += frames;
-    // Report the clock now and then, so the page can keep the visuals in step.
-    if (this.samples % 4096 < frames) {
-      this.port.postMessage(this.samples);
-      if (this.live && typeof this.shrine.shrine_learn_state === "function") {
-        const n = this.shrine.shrine_learn_state_len();
-        const s = new Float64Array(this.shrine.memory.buffer, this.shrine.shrine_learn_state(this.player), n);
-        this.port.postMessage({ state: Float64Array.from(s) });
+    for (let i = 0; i < left.length; i++) {
+      let [l, r] = this.current === null ? [0, 0] : this.frame(this.current);
+      if (this.fading) {
+        // Equal-power: the new stream rises as the old one sinks.
+        const t = this.fading.pos / this.fading.len;
+        const gin = Math.sin((t * Math.PI) / 2), gout = Math.cos((t * Math.PI) / 2);
+        const [ol, or] = this.frame(this.fading.from);
+        l = l * gin + ol * gout;
+        r = r * gin + or * gout;
+        if (++this.fading.pos >= this.fading.len) {
+          this.port.postMessage({ faded: this.fading.from });
+          this.fading = null;
+        }
       }
+      left[i] = l;
+      right[i] = r;
     }
+    this.out += left.length;
+    // Report the clock now and then, so the page can keep the visuals in step.
+    if (this.out % 4096 < left.length) this.port.postMessage(this.out);
     return true;
   }
 }
 
-registerProcessor("shrinegen", ShrineGen);
+registerProcessor("shrinegen", ShrinePlayer);

@@ -165,8 +165,8 @@ const FUTURE_GOLDEN: [(u64, [u64; 2]); 7] = [
     // 0015: microsound (locked after John's listen).
     (0xe7d3_52bf_3bfb_6d78, [2707076492999164165, 1345914533913460905]),
     // ShrineExplorer: two places on the map.
-    (0x548d_f7f5_04ec_6d78, [13919080986479252035, 17099393413621174909]),
-    (0x1eaa_a8cb_82f3_170e, [2536346570171508168, 4478966220302572998]),
+    (0x1a57_449e_e1cb_d827, [3174675246471570580, 16236045077743484201]),
+    (0x3fec_5ef6_783b_adbf, [7570690331405592819, 4895045011719900988]),
 ];
 
 fn future_configs() -> Vec<(&'static str, SimConfig)> {

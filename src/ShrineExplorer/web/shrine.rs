@@ -345,6 +345,145 @@ impl Default for Budget {
 
 }
 
+// ---- src/card.rs ----
+pub mod card {
+//! The recipe card: everything needed to recreate a shrine, as plain text.
+//! The artifact bakes the home's; the explorer asks for the card of
+//! whichever shrine is showing.
+
+use crate::sim::SimConfig;
+use crate::track::LoopDesign;
+
+/// The card for `config`, built on `build` (YYYYMMDD), standing at `map` on
+/// its home's map.
+pub fn card(config: &SimConfig, build: u32, map: (i32, i32)) -> String {
+    let mut config = config.clone();
+    config.settings.map = map;
+    info(&config, build)
+}
+
+pub fn info(config: &SimConfig, build: u32) -> String {
+    let s = &config.settings;
+    let key = match s.key {
+        crate::track::KeyChoice::Seed => "seed picks".to_string(),
+        crate::track::KeyChoice::Note(n) => crate::harmony::key_name(n).to_string(),
+    };
+    let fx = if !s.master.enabled {
+        "off".to_string()
+    } else {
+        let on: Vec<&str> = s.master.labels().iter().filter(|(_, on)| *on).map(|(name, _)| *name).collect();
+        if on.is_empty() { "on · none".to_string() } else { on.join(", ") }
+    };
+    let mut lines = vec![
+        format!("ShrineGen  v{build}"),
+        String::new(),
+        format!("seed       {}", config.seed),
+        format!("biome      {}", config.biome.name()),
+        format!("weather    {}", config.weather.name()),
+        format!(
+            "wildlife   {}",
+            if config.settings.wildlife {
+                crate::wildlife::Wildlife::new(config.seed, config.biome).summary()
+            } else {
+                "off".to_string()
+            }
+        ),
+        String::new(),
+        format!("scale      {}", s.scale.name()),
+        format!("root note  {key}"),
+        format!("chords     {}", s.chords),
+        format!(
+            "mode       {}",
+            match s.pace {
+                crate::harmony::Pace::Garage => {
+                    format!("{} · {} · key lift {}", s.pace.name(), s.garage.progression_name(), s.garage.lift.name())
+                }
+                crate::harmony::Pace::Micro => format!(
+                    "{} · pulse {} · grains {} · pips {} · dropouts {} · chords {} · drone shift {}",
+                    s.pace.name(),
+                    s.micro.pulse.name(),
+                    s.micro.grains.name(),
+                    s.micro.pips.name(),
+                    s.micro.dropouts.name(),
+                    s.micro.chords.name(),
+                    s.micro.shift.name()
+                ),
+                _ => s.pace.name().to_string(),
+            }
+        ),
+        format!("tempo      {} BPM", s.bpm),
+        format!("start      {}", if s.start_s == 0 { "at the beginning".to_string() } else { format!("{} s in", s.start_s) }),
+        format!("map        {}", if s.map == (0, 0) { "home · 0, 0".to_string() } else { format!("{}, {} from home", s.map.0, s.map.1) }),
+        format!("kit        {}", s.kit.name()),
+        format!("space      {}", s.space.name()),
+        format!("drum rev   {}", if s.drum_reverse { "on" } else { "off" }),
+        format!("master fx  {fx}"),
+        format!("code over  {}", s.code.summary()),
+        format!("arch       {}", s.arch.summary()),
+        format!(
+            "camera     {}",
+            if s.camera_speed == 0 { "still".to_string() } else { format!("{:+}°/s", s.camera_speed) }
+        ),
+        format!("glitch 1   {}", s.glitch[0].summary()),
+        format!("glitch 2   {}", s.glitch[1].summary()),
+        format!("transpose  {} semitones", s.loop_transpose),
+        String::new(),
+        format!("drone arc  {}", arc(s.drone)),
+        format!("drone tone {}", tone(s.drone_tone)),
+    ];
+    for i in 0..4 {
+        lines.push(format!("layer {}    {}", i + 1, layer(s.loops[i])));
+        lines.push(format!("  arc {}    {}", i + 1, arc(s.loop_arcs[i])));
+    }
+    lines.push(String::new());
+    lines.push(format!(
+        "seeds      {} {} {} {} {} {} {}",
+        config.seeds.s1,
+        config.seeds.s2,
+        config.seeds.s3,
+        config.seeds.s4,
+        config.seeds.s5,
+        config.seeds.s6,
+        config.seeds.s7
+    ));
+    lines.push("           keys&chords · glitch1 · glitch2 · bass · drums · atmosphere · drone rhythm".to_string());
+    lines.push(format!(
+        "rhythm     drone {} · loops {}",
+        if config.settings.drone_rhythm { "on" } else { "off" },
+        if config.settings.loop_rhythm { "on" } else { "off" }
+    ));
+    lines.push(String::new());
+    lines.push("Music License: CC0 / Public Domain".to_string());
+    lines.push("Code License: MIT".to_string());
+    lines.join("\n")
+}
+
+fn arc(a: crate::track::DroneArc) -> String {
+    if a.cycle_s == 0 {
+        "always on".to_string()
+    } else {
+        format!("{}s cycle, {}s up", a.cycle_s, a.hold_s)
+    }
+}
+
+fn tone(hz: u16) -> String {
+    if hz == 0 {
+        "off".to_string()
+    } else {
+        format!("{hz} Hz low-pass")
+    }
+}
+
+fn layer(d: LoopDesign) -> String {
+    match d {
+        LoopDesign::Sustained(t) => t.name().to_string(),
+        LoopDesign::Events(_) => "event grid".to_string(),
+    }
+}
+
+
+}
+
 // ---- src/explore.rs ----
 pub mod explore {
 //! The explorer's map: an endless grid of shrines around a home.
@@ -356,17 +495,23 @@ pub mod explore {
 //!
 //! Neighbours are slight mutations of each other:
 //! - every spot has its own architecture (a new shrine seed);
-//! - every other group of settings (those in [`crate::randomize::GROUPS`])
-//!   changes only across the borders of its own square regions, each group
-//!   with its own region size and offset, so a step usually crosses one to
-//!   three borders and the rest carries over;
+//! - every other group of settings (those in [`crate::randomize::GROUPS`],
+//!   but never the architecture's position or turn) changes only across the
+//!   borders of its own square regions, each group with its own region size
+//!   and offset;
+//! - the music changes with the biome, whose regions are small (a new biome
+//!   is a step or two away); neighbouring biomes always differ in biome, mode
+//!   and scale;
 //! - the region around the home keeps the home's values, so the map grows
 //!   out of the home.
 //!
 //! The master effects are always the home's, and every shrine away from home
 //! holds still (no camera turn, so the map keeps its directions on screen)
-//! and starts at the beginning.
+//! and starts [`MAP_START_S`] seconds in, already under way.
 
+use crate::harmony::{Pace, PACES, SCALES};
+use crate::kits::Kit;
+use crate::plants::Biome;
 use crate::randomize::{apply, Group, GROUPS};
 use crate::rng::{hash3, Rng};
 use crate::sim::SimConfig;
@@ -374,6 +519,11 @@ use crate::sim::SimConfig;
 /// How large every group's regions are, as a multiple of its own size: above
 /// 1 the map changes more gently from step to step, below 1 more busily.
 pub const MAP_REGION_SCALE: f64 = 0.5;
+
+/// Where every shrine away from home starts, in seconds into its piece: past
+/// the slow fade-in and the drum-free opening phrases, so arriving somewhere
+/// joins music already under way.
+pub const MAP_START_S: u16 = 24;
 
 /// The camera turn of every shrine away from home, degrees per second: none,
 /// so the map's directions always look the same way on screen.
@@ -388,10 +538,11 @@ fn region_size(g: Group) -> f64 {
         Group::Seed => 1.0,
         // The music changes with the biome (see `MUSIC`), so these four
         // sizes are not used.
-        Group::MusicSeeds | Group::Mode | Group::Harmony | Group::Tempo => 12.0,
-        Group::Biome => 12.0,
+        Group::MusicSeeds | Group::Mode | Group::Harmony | Group::Tempo => 4.0,
+        // Two spots across at the explorer's scale: a new biome is never far.
+        Group::Biome => 4.0,
         Group::Weather => 4.0,
-        Group::Drums | Group::ModeDetails | Group::Atmosphere | Group::Drone => 12.0,
+        Group::Drums | Group::ModeDetails | Group::Atmosphere | Group::Drone => 4.0,
         Group::Glitches => 2.0,
         Group::Wildlife => 6.0,
         Group::CodeOverlay => 6.0,
@@ -451,6 +602,11 @@ pub fn at(home: &SimConfig, x: i32, y: i32) -> SimConfig {
             c.seed = hash3(w, 0x5EED, pack(x as i64, y as i64)) % 100_000;
             continue;
         }
+        // The shrine's position and turn are never mutated: every shrine
+        // stands where the home's does.
+        if *g == Group::Architecture {
+            continue;
+        }
         // The music follows the biome's regions (its offsets and size).
         let ((rx, ry), home_region) = if MUSIC.contains(g) {
             let biome = GROUPS.iter().position(|b| *b == Group::Biome).unwrap_or(k);
@@ -462,7 +618,29 @@ pub fn at(home: &SimConfig, x: i32, y: i32) -> SimConfig {
             continue;
         }
         let mut rng = Rng::new(hash3(w, 0x6E00 + k as u64, pack(rx, ry)));
-        apply(&mut c, &[*g], &mut rng);
+        // Biome, mode and scale come from a lattice over the biome regions,
+        // so neighbouring biomes always differ in all three.
+        let home_r = home_biome_region(w, x, y);
+        match g {
+            Group::Biome => {
+                let i = lattice(w, 0xB10E, Biome::ALL.len(), index_of(&Biome::ALL, home.biome), (rx, ry), home_r);
+                c.biome = Biome::ALL[i];
+            }
+            Group::Mode => {
+                let i = lattice(w, 0x30DE, PACES.len(), index_of(&PACES, home.settings.pace), (rx, ry), home_r);
+                let s = &mut c.settings;
+                s.set_mode(PACES[i]);
+                if s.pace == Pace::Micro && !s.kit.is_light() && s.kit != Kit::Off {
+                    s.kit = Kit::MicroBlips;
+                }
+            }
+            Group::Harmony => {
+                apply(&mut c, &[*g], &mut rng);
+                let i = lattice(w, 0x5CA1E, SCALES.len(), index_of(&SCALES, home.settings.scale), (rx, ry), home_r);
+                c.settings.scale = SCALES[i];
+            }
+            _ => apply(&mut c, &[*g], &mut rng),
+        }
     }
     // Each shrine nudges the tempo a little, so neighbours in one biome are
     // close but never identical.
@@ -471,8 +649,41 @@ pub fn at(home: &SimConfig, x: i32, y: i32) -> SimConfig {
     c.settings.bpm = (c.settings.bpm as i64 + nudge).clamp(70, 180) as u16;
     c.settings.camera_speed = MAP_CAMERA_SPEED;
     c.settings.master = home.settings.master;
-    c.settings.start_s = 0;
+    c.settings.start_s = MAP_START_S;
     c
+}
+
+fn index_of<T: PartialEq>(all: &[T], v: T) -> usize {
+    all.iter().position(|x| *x == v).unwrap_or(0)
+}
+
+/// The biome region holding the home.
+fn home_biome_region(w: u64, x: i32, y: i32) -> (i64, i64) {
+    let _ = (x, y);
+    let k = GROUPS.iter().position(|g| *g == Group::Biome).unwrap_or(0);
+    region(w, k, Group::Biome, 0, 0).0
+}
+
+/// One of `n` options for biome region `r`, laid out so that the regions
+/// either side of it (in x or in y) always get a different one: option
+/// `perm[(a·rx + b·ry) mod n]`, with `a` and `b` never 0 mod `n`. The
+/// shuffle is fixed by the world, and arranged so the home's region gets the
+/// home's own option.
+fn lattice(w: u64, salt: u64, n: usize, home: usize, r: (i64, i64), home_r: (i64, i64)) -> usize {
+    if n < 2 {
+        return 0;
+    }
+    let mut rng = Rng::new(hash3(w, salt, 0x1A77));
+    let a = 1 + rng.below(n - 1) as i64;
+    let b = 1 + rng.below(n - 1) as i64;
+    let mut perm: Vec<usize> = (0..n).collect();
+    for i in (1..n).rev() {
+        perm.swap(i, rng.below(i + 1));
+    }
+    let at = |(x, y): (i64, i64)| (a * x + b * y).rem_euclid(n as i64) as usize;
+    let j = perm.iter().position(|v| *v == home).unwrap_or(0);
+    perm.swap(at(home_r), j);
+    perm[at(r)]
 }
 
 /// The configuration a sim plays: the shrine at the config's map position
@@ -4320,6 +4531,7 @@ pub struct Player {
     weather: [f64; 6],
     point: [f64; 3],
     side: [f64; 4],
+    card: String,
 }
 
 impl Player {
@@ -4337,6 +4549,7 @@ impl Player {
             weather: [0.0; 6],
             point: [0.0; 3],
             side: [0.0; 4],
+            card: String::new(),
         }
     }
 
@@ -4408,6 +4621,13 @@ impl Player {
         let (x, y, dx, dy) = self.sim.scene.side_point(&state, side);
         self.side = [x, y, dx, dy];
         &self.side
+    }
+
+    /// The recipe card of the shrine this player shows, as standing at `map`
+    /// on its home's map (UTF-8).
+    pub fn card(&mut self, build: u32, map: (i32, i32)) -> &[u8] {
+        self.card = crate::card::card(&self.sim.config, build, map);
+        self.card.as_bytes()
     }
 
     /// Hear one layer alone: 1.. = `learn::SOLOS`, 0 = the full mix.
@@ -20041,6 +20261,27 @@ pub extern "C" fn shrine_map_y() -> i32 {
 #[no_mangle]
 pub extern "C" fn shrine_map_glance(x: i32, y: i32) -> u32 {
     crate::explore::glance(&crate::recipe::decode(&RECIPE), x, y)
+}
+
+/// The recipe card of the shrine `player` shows, standing at `(x, y)` on the
+/// map: UTF-8, `shrine_card_len` bytes (valid until the next call).
+///
+/// # Safety
+/// `player` must come from `shrine_new`.
+#[no_mangle]
+pub unsafe extern "C" fn shrine_card_ptr(player: *mut crate::player::Player, x: i32, y: i32) -> *const u8 {
+    let p = unsafe { &mut *player };
+    p.card(BUILD, (x, y)).as_ptr()
+}
+
+/// Length of the card last built by `shrine_card_ptr`.
+///
+/// # Safety
+/// `player` must come from `shrine_new`.
+#[no_mangle]
+pub unsafe extern "C" fn shrine_card_len(player: *mut crate::player::Player, x: i32, y: i32) -> u32 {
+    let p = unsafe { &mut *player };
+    p.card(BUILD, (x, y)).len() as u32
 }
 
 /// Hear one layer alone (1 drone, 2–3 glitch layers, 4 bass, 5 drums, 6–9

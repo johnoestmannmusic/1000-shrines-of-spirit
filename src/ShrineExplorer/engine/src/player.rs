@@ -24,6 +24,7 @@ pub struct Player {
     weather: [f64; 6],
     point: [f64; 3],
     side: [f64; 4],
+    card: String,
 }
 
 impl Player {
@@ -41,6 +42,7 @@ impl Player {
             weather: [0.0; 6],
             point: [0.0; 3],
             side: [0.0; 4],
+            card: String::new(),
         }
     }
 
@@ -112,6 +114,13 @@ impl Player {
         let (x, y, dx, dy) = self.sim.scene.side_point(&state, side);
         self.side = [x, y, dx, dy];
         &self.side
+    }
+
+    /// The recipe card of the shrine this player shows, as standing at `map`
+    /// on its home's map (UTF-8).
+    pub fn card(&mut self, build: u32, map: (i32, i32)) -> &[u8] {
+        self.card = crate::card::card(&self.sim.config, build, map);
+        self.card.as_bytes()
     }
 
     /// Hear one layer alone: 1.. = `learn::SOLOS`, 0 = the full mix.

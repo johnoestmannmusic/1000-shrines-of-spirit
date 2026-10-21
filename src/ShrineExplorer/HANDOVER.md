@@ -57,6 +57,11 @@ At hand-off, `cargo test --workspace --release`, `./build-web.sh && node web/ver
 - The arrival banner (`arrive()`).
 - The picture's clock carries across arrival via `clockShift`.
 
+### Second pass (2026-10-22)
+- **Map:** small biomes; the lattice for biome, mode and scale; no architecture mutation; map shrines start 24 s in.
+- **Recipe card:** moved to `engine/src/card.rs`; the page refreshes it on every move.
+- **Audio architecture changed:** `web/shrine.worklet.js` now only plays streams. Each shrine's music runs in an inline Blob worker (`AUDIO_WORKER` in `index.html`, ~0.6 s ahead, acked by the worklet every 2048 frames). Travel crossfades streams; solo and Learn's live state go to the current worker (`musicSend`).
+
 ### Open ideas
 - The code overlay's look on the page comes from the home's baked exports, not each map shrine's own (mutated) overlay settings.
 - Orbs and arrows are drawn over everything, even when behind tall columns.

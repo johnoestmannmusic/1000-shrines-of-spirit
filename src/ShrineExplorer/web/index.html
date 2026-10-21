@@ -416,7 +416,7 @@
   // Learn mode's hooks (set up below).
   let learnFrame = null, learnState = null, learnLive = () => false;
   // The explorer's hooks (set up below).
-  let exploreFrame = null, onArrived = null, arrowsDraw = null, transDraw = null;
+  let exploreFrame = null, arrowsDraw = null, transDraw = null;
   // The orbs' and CyberPal's hooks (set up below).
   let orbFrame = null, insightFrame = null;
 
@@ -483,37 +483,93 @@
     hint.textContent = on ? "" : "click to pause";
   }
 
+  // ---- The music: each shrine's music runs in a background worker that
+  // renders a little ahead and streams its samples to the audio thread
+  // (shrine.worklet.js), which only plays them. A move starts the next
+  // shrine's worker while this one keeps playing, then crossfades.
+  const MUSIC_CROSSFADE_S = 4;
+  const AUDIO_WORKER = `
+  let x = null, p = 0, port = null, id = 0, sent = 0, played = 0, live = false;
+  const AHEAD = 48000 * 0.6, CHUNK = 4096;
+  function pump() {
+    while (x && sent - played < AHEAD) {
+      const ptr = x.shrine_render_audio(p, CHUNK);
+      const frames = new Float32Array(x.memory.buffer, ptr, CHUNK * 2).slice();
+      port.postMessage({ frames }, [frames.buffer]);
+      sent += CHUNK;
+      if (live && typeof x.shrine_learn_state === "function" && (sent / CHUNK) % 2 === 0) {
+        const n = x.shrine_learn_state_len();
+        self.postMessage({ id, state: Float64Array.from(new Float64Array(x.memory.buffer, x.shrine_learn_state(p), n)) });
+      }
+    }
+  }
+  self.onmessage = async (e) => {
+    const m = e.data;
+    if (m.init) {
+      id = m.id; port = m.port;
+      const { instance } = await WebAssembly.instantiate(m.wasm, {});
+      x = instance.exports;
+      p = x.shrine_new_at ? x.shrine_new_at(m.at[0], m.at[1], 1) : x.shrine_new(0, 0, 1);
+      port.onmessage = (ev) => { if (ev.data && typeof ev.data.played === "number") { played = ev.data.played; pump(); } };
+      pump();
+      self.postMessage({ id, ready: true });
+    }
+    if (typeof m.solo === "number" && x && x.shrine_set_solo) x.shrine_set_solo(p, m.solo);
+    if (typeof m.live === "boolean") live = m.live;
+  };`;
+  const audioWorkerUrl = URL.createObjectURL(new Blob([AUDIO_WORKER], { type: "text/javascript" }));
+  const workers = new Map();          // stream id → its worker
+  let streamCount = 0;
+  let currentStream = null;           // the id being heard (or crossfaded to)
+
+  // Start a shrine's music in the background; resolves with its stream id
+  // once its first samples are on their way.
+  function startStream(x, y) {
+    const id = ++streamCount;
+    const w = new Worker(audioWorkerUrl);
+    workers.set(id, w);
+    const ch = new MessageChannel();
+    node.port.postMessage({ connect: id, port: ch.port1 }, [ch.port1]);
+    return new Promise((resolve) => {
+      w.onmessage = (e) => {
+        const m = e.data || {};
+        if (m.ready) resolve(id);
+        if (m.state && m.id === currentStream && learnState) learnState(m.state);
+      };
+      w.postMessage({ init: true, id, wasm: wasmBytes, at: [x, y], port: ch.port2 }, [ch.port2]);
+    });
+  }
+  function stopStream(id) {
+    const w = workers.get(id);
+    if (w) w.terminate();
+    workers.delete(id);
+    if (node) node.port.postMessage({ drop: id });
+  }
+  // Messages for the music being heard (solo, Learn's live view).
+  function musicSend(m) {
+    const w = workers.get(currentStream);
+    if (w) w.postMessage(m);
+  }
+
   async function startAudio() {
     audio = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: "playback" });
     await audio.audioWorklet.addModule("shrine.worklet.js");
-    node = new AudioWorkletNode(audio, "shrinegen", {
-      numberOfInputs: 0,
-      outputChannelCount: [2],
-      processorOptions: { wasm: wasmBytes, at: [mapX, mapY] },
-    });
-    let readySeen = false;
-    let readyResolve = null;
+    node = new AudioWorkletNode(audio, "shrinegen", { numberOfInputs: 0, outputChannelCount: [2] });
     node.port.onmessage = (e) => {
-      if (e.data === "ready") {
-        readySeen = true;
-        if (readyResolve) readyResolve();
-      } else if (typeof e.data === "number") {
+      if (typeof e.data === "number") {
         clockBase = e.data;
         clockBaseAt = performance.now();
         haveClockBase = true;
-      } else if (e.data === "arrived") {
-        if (onArrived) onArrived();
-      } else if (e.data && e.data.state && learnState) {
-        learnState(e.data.state);
+      } else if (e.data && e.data.faded !== undefined) {
+        // The old music has faded out completely: close its worker.
+        stopStream(e.data.faded);
       }
     };
-    if (learnLive()) node.port.postMessage({ live: true });
     gain = new GainNode(audio, { gain: 1 });
     node.connect(gain).connect(audio.destination);
-    await new Promise((resolve) => {
-      readyResolve = resolve;
-      if (readySeen) resolve();
-    });
+    currentStream = await startStream(mapX, mapY);
+    node.port.postMessage({ play: currentStream });
+    if (learnLive()) musicSend({ live: true });
   }
 
   async function toggle() {
@@ -1066,7 +1122,7 @@
 
   function setSolo(n) {
     soloOn = n;
-    if (node) node.port.postMessage({ solo: n });
+    musicSend({ solo: n });
     lSolo.setAttribute("aria-pressed", n ? "true" : "false");
     lSolo.textContent = n ? "Back to the full mix" : "Hear it alone";
   }
@@ -1135,7 +1191,7 @@
   function openLearn() {
     learning = true;
     document.body.classList.add("learning");
-    if (node) node.port.postMessage({ live: true });
+    musicSend({ live: true });
     // CyberPal may have built the description already.
     if (D && !lessonsEl.children.length) {
       buildNav();
@@ -1162,7 +1218,7 @@
     learning = false;
     document.body.classList.remove("learning");
     if (soloOn) setSolo(0);
-    if (node) node.port.postMessage({ live: false });
+    musicSend({ live: false });
   }
 
   document.getElementById("learn-open").addEventListener("click", openLearn);
@@ -1625,6 +1681,15 @@
       travel: (side) => travel(side),
       at: () => [mapX, mapY],
       busy: () => travelling,
+      // The output's loudness right now (RMS), from an analyser on the gain.
+      level: () => {
+        if (!gain) return -1;
+        if (!window.__an) { window.__an = new AnalyserNode(audio, { fftSize: 2048 }); gain.connect(window.__an); window.__buf = new Float32Array(2048); }
+        window.__an.getFloatTimeDomainData(window.__buf);
+        let e = 0; for (const v of window.__buf) e += v * v;
+        return Math.sqrt(e / window.__buf.length);
+      },
+      streams: () => workers.size,
       arrows: () => arrows.map((a) => a && { x: a.x, y: a.y, show: a.show }),
       frameHash: (t) => {
         // Upright and untilted, so only the shrine itself decides it.
@@ -1661,8 +1726,6 @@
   // so a place can be shared or typed into the setup to rebuild it.
   const ARROW_REACH = 150;        // canvas px from an arrow at which it appears
   const ARROW_HIT = 80;           // canvas px from an arrow that a click counts
-  const TRAVEL_FADE_S = 0.6;      // the music fading out before a move
-  const ARRIVE_FADE_S = 1.5;      // and fading in at the new shrine
   const SLIDE_MS = 650;           // the picture sliding across
   const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]];   // +x, −x, +y, −y on the map
   const coordsEl = document.getElementById("coords");
@@ -1670,6 +1733,7 @@
   let arrows = [];                // per side: { x, y, dx, dy, show }
   let hoverArrow = -1;
   let travelling = false;
+  let moveCount = 0;
 
   function showCoords() {
     coordsEl.textContent = mapX === 0 && mapY === 0 ? "⌖ home · 0, 0" : `⌖ ${mapX}, ${mapY}`;
@@ -1752,6 +1816,16 @@
   // Drawn after the orbs, on top.
   arrowsDraw = (now) => arrows.forEach((a, i) => drawArrow(a, i, now));
 
+  // ---- The recipe panel follows you: the card of the shrine you're at.
+  const infoEl = document.getElementById("info");
+  function showCard() {
+    if (typeof shr.shrine_card_ptr !== "function") return;
+    const len = shr.shrine_card_len(visual, mapX, mapY);
+    const ptr = shr.shrine_card_ptr(visual, mapX, mapY);
+    infoEl.textContent = new TextDecoder().decode(new Uint8Array(shr.memory.buffer, ptr, len));
+  }
+  showCard();
+
   // ---- The move between islands.
   const T_FADE_IN = 450, T_PAN_FROM = 300, T_PAN_TO = 1250, T_FADE_OUT_FROM = 1000, T_END = 1650;
   const offOld = document.createElement("canvas");
@@ -1811,6 +1885,7 @@
     screen.drawImage(off, 0, 0, LOGICAL, LOGICAL, sx * (1 - pan), sy * (1 - pan), 1200, 1200);
     screen.restore();
     if (t >= T_END) {
+      arrive();
       shr.shrine_free(trans.old);
       if (!skyOverlayWanted) shr.shrine_set_sky_transparent(visual, 0);
       trans = null;
@@ -1904,11 +1979,6 @@
     hideInsight();
     orbs.length = 0;
     hoverArrow = -1;
-    // 1. The music fades out.
-    if (gain && audio) {
-      gain.gain.cancelScheduledValues(audio.currentTime);
-      gain.gain.setTargetAtTime(0, audio.currentTime, TRAVEL_FADE_S / 4);
-    }
     // 2. The picture: the next island fades in beside this one, the view
     // pans across to it, and this one fades away behind; the sky between
     // them blends rather than moving.
@@ -1920,37 +1990,34 @@
     trans = { old, oldClock: clock, start: performance.now(), span, from: [mapX, mapY] };
     [mapX, mapY] = [nx, ny];
     cameraSpeed = mapX === 0 && mapY === 0 ? homeCameraSpeed : MAP_CAMERA_SPEED;
-    clock = 0; clockBase = 0; haveClockBase = false; clockShift = 0;
-    const movedAt = performance.now();
-    audioStartedAt = clockBaseAt = movedAt;
+    // The new island's clock starts now (the audio thread's own clock runs on).
+    clockShift = -(clock - clockShift);
+    clock = 0;
     showCoords();
     markVisited();
+    showCard();
     // 3. Learn and CyberPal describe the new shrine.
     // (CyberPal keeps its run: lines already read are not repeated.)
     D = null; described = null; lessonsEl.textContent = "";
     description();
-    // 4. Once the music is quiet, the audio thread builds the new shrine's
-    // music (a moment of silence) and says when it has arrived.
-    await new Promise((r) => setTimeout(r, TRAVEL_FADE_S * 1000));
+    // 4. The next shrine's music starts in the background while this one
+    // plays on; when it is ready the audio thread crossfades to it. (A move
+    // made before it is ready simply replaces it.)
     if (node) {
-      await new Promise((resolve) => {
-        onArrived = resolve;
-        node.port.postMessage({ travel: [nx, ny] });
-        setTimeout(resolve, 8000);           // never wait forever
+      const move = ++moveCount;
+      startStream(nx, ny).then((id) => {
+        if (move !== moveCount) {
+          stopStream(id);
+          return;
+        }
+        // The stream being left fades out and is closed by the audio thread.
+        currentStream = id;
+        node.port.postMessage({ crossfade: { to: id, seconds: MUSIC_CROSSFADE_S } });
+        musicSend({ live: learnLive() });
+        if (soloOn) setSolo(0);
       });
-      onArrived = null;
-      arrive();
-      // The music starts now; the picture carries on from where it is.
-      const arrivedAt = performance.now();
-      clockShift = ((arrivedAt - movedAt) * SAMPLE_RATE) / 1000;
-      audioStartedAt = clockBaseAt = arrivedAt;
-      haveClockBase = false;
-      if (gain && audio) {
-        gain.gain.cancelScheduledValues(audio.currentTime);
-        gain.gain.setValueAtTime(0, audio.currentTime);
-        gain.gain.setTargetAtTime(1, audio.currentTime, ARRIVE_FADE_S / 4);
-      }
     }
+    await new Promise((r) => setTimeout(r, T_END));
     travelling = false;
   }
 

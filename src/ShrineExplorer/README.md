@@ -256,13 +256,18 @@ shrine grown from the home.
 - **The music belongs to the biome.** Its core (seeds, mode, scale and
   chords, tempo, drums, the mode's own details, atmosphere and drone)
   changes all at once at a biome's border, so each biome is a musical world
-  of its own. Within a biome, shrines differ only in their glitches and a
-  nudge of tempo (±3 BPM). Weather, architecture, wildlife and the code
-  overlay change more often.
+  of its own. Biomes are small, two spots across, so a new one is never more
+  than a step or two away.
+  - Neighbouring biomes always differ in biome, mode and scale: they are laid
+    out on a seeded lattice.
+  - Within a biome, shrines differ only in their glitches and a nudge of
+    tempo (±3 BPM).
+  - Weather, wildlife and the code overlay change more often.
+  - The shrine's position and turn are never mutated.
 - **What stays the same:** the master effects are always the home's. Every
   shrine away from home holds still (no camera turn, so the map's directions
-  always look the same) and starts at the beginning. The default Rotation
-  speed is 0 here too.
+  always look the same), and starts 24 s into its piece, with the music
+  already under way. The default Rotation speed is 0 here too.
 - **Deterministic:** the same home and coordinates always give the same
   shrine, natively and in the browser (`engine/src/explore.rs`;
   `MAP_REGION_SCALE` makes the map gentler or livelier).
@@ -273,7 +278,10 @@ shrine grown from the home.
   1. the next island fades in beside this one, joined edge to edge as on a map;
   2. the view pans across to it while the sky blends from one to the other;
   3. the old island fades away;
-  4. the music fades out and the new shrine's fades in;
+  4. the music crossfades from the old shrine's to the new one's over 4 s,
+     with no silence and no restart. Each shrine's music runs in its own
+     background worker, rendering a little ahead and streaming to the audio
+     thread, so the current music plays on while the next is being built;
   5. a banner names the zone (biome, weather, mode, coordinates), and marks a
      biome you haven't been to yet.
 - The readout at the top left shows where you are (`⌖ 3, −2`). Under it, a
@@ -281,6 +289,8 @@ shrine grown from the home.
   like the island, so its directions match the arrows. Places you've visited
   are bright, the rest dimmed; `⌂` is home.
 - The address bar follows (`#at=3,-2`), so a link opens that very shrine.
+  The recipe panel follows too: it shows the card of the shrine you're at,
+  with its map position. Learn and CyberPal describe that shrine as well.
 
 **In the setup** (Track section):
 - **Map position** takes `x, y` (or `←→` for x and `Shift+←→` for y). The

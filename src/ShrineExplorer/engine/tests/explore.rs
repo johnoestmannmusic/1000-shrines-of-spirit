@@ -1,7 +1,7 @@
 //! The explorer's map: every spot is a fixed shrine, neighbours differ only a
 //! little, and the home stays the home.
 
-use shrine_explorer::explore::{at, changed_groups, resolve, MAP_CAMERA_SPEED};
+use shrine_explorer::explore::{at, changed_groups, resolve, MAP_CAMERA_SPEED, MAP_START_S};
 use shrine_explorer::framebuffer::Framebuffer;
 use shrine_explorer::randomize::Group;
 use shrine_explorer::recipe;
@@ -50,7 +50,9 @@ fn neighbours_differ_a_little_and_always_in_architecture() {
         }
     }
     let mean = total as f64 / steps as f64;
-    assert!((2.5..=6.0).contains(&mean), "a step changes {mean:.2} groups on average");
+    // (About half the steps cross a biome border, which changes the whole
+    // musical world; the rest change a few details.)
+    assert!((2.5..=9.0).contains(&mean), "a step changes {mean:.2} groups on average");
 }
 
 #[test]
@@ -87,7 +89,7 @@ fn master_fx_and_camera_never_wander() {
         let c = at(&h, x, y);
         assert_eq!(c.settings.master, h.settings.master);
         assert_eq!(c.settings.camera_speed, MAP_CAMERA_SPEED);
-        assert_eq!(c.settings.start_s, 0);
+        assert_eq!(c.settings.start_s, MAP_START_S);
         assert_eq!(c.settings.map, (0, 0), "a resolved shrine stands on its own");
     }
 }
@@ -122,4 +124,29 @@ fn a_spot_is_reached_by_its_coordinates_and_plays() {
     words_cfg.settings.map = (3, -2);
     let back = recipe::decode(&recipe::encode(&words_cfg));
     assert_eq!(back.settings.map, (3, -2));
+}
+
+#[test]
+fn neighbouring_biomes_differ_in_biome_mode_and_scale_and_nothing_moves_the_shrine() {
+    let h = home();
+    let (mut borders, mut differ) = (0, 0);
+    for x in -30..30 {
+        for y in -30..30 {
+            let a = at(&h, x, y);
+            assert_eq!(a.settings.arch, h.settings.arch, "{x},{y}: the shrine moved or turned");
+            for (dx, dy) in [(1, 0), (0, 1)] {
+                let b = at(&h, x + dx, y + dy);
+                let music_changed = a.seeds != b.seeds;
+                if music_changed {
+                    borders += 1;
+                    differ += (a.biome != b.biome && a.settings.pace != b.settings.pace && a.settings.scale != b.settings.scale) as u32;
+                } else {
+                    // The same biome region: the same biome, mode and scale.
+                    assert_eq!((a.biome, a.settings.pace, a.settings.scale), (b.biome, b.settings.pace, b.settings.scale), "{x},{y}");
+                }
+            }
+        }
+    }
+    assert!(borders > 500, "only {borders} biome borders crossed");
+    assert_eq!(differ, borders, "a biome border kept the biome, mode or scale");
 }
