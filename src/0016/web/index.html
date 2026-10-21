@@ -1,0 +1,1604 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShrineGen — isometric shrine</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #0d0c10; color: #c9c4d0;
+    font: 14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  body { overflow: hidden; }
+  main { display: flex; gap: 16px; box-sizing: border-box;
+    height: 100vh; height: 100dvh; padding: 16px; }
+  /* The stage takes the leftover space and centres the square. The frame
+     shrink-wraps the canvas so the overlay lines up with it exactly. */
+  .stage { flex: 1 1 auto; min-width: 0; min-height: 0;
+    display: flex; align-items: center; justify-content: center; }
+  /* The frame is the square itself (not the canvas's 1200-pixel intrinsic
+     size), so the overlay, the orbs' hit area and CyberPal's bar all fit it. */
+  .frame { position: relative; display: block; width: min(100%, calc(100vh - 32px)); width: min(100%, calc(100dvh - 32px));
+    aspect-ratio: 1; line-height: 0; background: #0d0c10; container-type: inline-size; }
+  canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; border: 1px solid #2a2732; box-sizing: border-box;
+    background: #0d0c10; cursor: pointer; }
+  .overlay { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center;
+    gap: 8px; text-align: center; background: rgba(13, 12, 16, 0.42);
+    color: #d7d3de; cursor: pointer; user-select: none; transition: opacity 0.25s; }
+  .overlay .icon { font-size: 3rem; line-height: 1; color: #96dcb4; }
+  .overlay small { font-size: 0.8rem; color: #8a8596; }
+  .frame.playing .overlay { opacity: 0; pointer-events: none; }
+  /* CyberPal's insights: a cyberspace text box that rises from the bottom of
+     the picture, types its line, then slides away. */
+  .frame { overflow: hidden; }
+  .insight { position: absolute; left: 3%; right: 3%; bottom: 3%; z-index: 1; line-height: 1.45;
+    padding: 18px 20px 14px; color: #d8fbff; cursor: pointer;
+    /* Scaled with the picture, so a line of INSIGHT_MAX characters always fits in two rows. */
+    font: clamp(8px, 1.72cqw, 15px)/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background:
+      repeating-linear-gradient(0deg, rgba(95, 247, 255, 0.05) 0 1px, transparent 1px 3px),
+      linear-gradient(90deg, rgba(95, 247, 255, 0.04) 1px, transparent 1px) 0 0 / 14px 14px,
+      linear-gradient(180deg, rgba(6, 12, 28, 0.9), rgba(10, 4, 24, 0.92));
+    border: 1px solid rgba(95, 247, 255, 0.75);
+    box-shadow: 0 0 14px rgba(95, 247, 255, 0.35), inset 0 0 18px rgba(255, 79, 216, 0.12);
+    clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+    text-shadow: 0 0 6px rgba(95, 247, 255, 0.55);
+    transform: translateY(140%); opacity: 0; transition: transform 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.1), opacity 0.2s; }
+  .insight.open { transform: translateY(0); opacity: 1; animation: glitch-in 0.32s steps(2) 1; }
+  .insight .tag { position: absolute; top: 4px; left: 14px; font-size: 0.72em; letter-spacing: 0.22em; color: #ff4fd8;
+    text-shadow: 0 0 6px rgba(255, 79, 216, 0.8); }
+  .insight .tag::before { content: "["; color: #5ff7ff; margin-right: 2px; }
+  .insight .tag::after { content: "]_"; color: #5ff7ff; margin-left: 2px; }
+  .insight .portrait { display: none; }            /* CyberPal's face, coming later */
+  .insight .line { margin: 6px 0 0; min-height: 3em; white-space: pre-wrap; padding-right: 1.2em; }
+  .insight .line[data-cursor]::after { content: "█"; color: #5ff7ff; animation: blink 0.8s steps(1) infinite; }
+  .insight .more { position: absolute; right: 18px; bottom: 6px; font-size: 0.7em; color: #ff4fd8; animation: blink 1.2s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes glitch-in {
+    0% { clip-path: polygon(0 40%, 100% 40%, 100% 60%, 0 60%); filter: hue-rotate(80deg); }
+    50% { transform: translate(3px, 0); filter: hue-rotate(-60deg); }
+    100% { transform: translate(0, 0); filter: none; }
+  }
+  body.learning .insight { display: none; }
+  /* A small picture (phones): a tighter box and a slightly smaller floor, so
+     a full insight still fits in two rows. */
+  @container (max-width: 520px) {
+    .insight { left: 2%; right: 2%; bottom: 2%; padding: 15px 10px 10px;
+      font-size: clamp(7.5px, 1.72cqw, 15px); }
+    .insight .tag { left: 10px; top: 3px; }
+    .insight .line { padding-right: 0.8em; }
+  }
+  aside.info { flex: 0 0 300px; min-width: 0; max-height: 100%;
+    display: flex; flex-direction: column; min-height: 0; }
+  aside.info h2 { font-size: 0.8rem; font-weight: 400; letter-spacing: 0.12em;
+    text-transform: uppercase; color: #8a8596; margin: 4px 0 8px; }
+  aside.info h1 { font-size: 1.05rem; font-weight: 400; letter-spacing: 0.16em;
+    text-transform: uppercase; color: #e6e2ec; margin: 2px 0 10px; }
+  /* The recipe scrolls on its own so the buttons below it always fit. */
+  aside.info pre { flex: 1 1 auto; min-height: 0; overflow: auto; }
+  aside.info .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; flex: 0 0 auto; }
+  aside.info .button { display: inline-block; padding: 6px 12px; font-family: inherit; line-height: 1.4; font-size: 0.82rem; letter-spacing: 0.04em;
+    color: #d7f2e3; text-decoration: none; border: 1px solid #2f5a45; border-radius: 4px;
+    background: #121a16; cursor: pointer; }
+  aside.info .button:hover { border-color: #96dcb4; color: #ffffff; }
+  aside.info .button[hidden] { display: none; }
+  pre { margin: 0; padding: 12px; border: 1px solid #2a2732; background: #100f14;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #c2bfca; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Learn: a full-screen explainer. The live shrine shrinks to a tile above
+     the lesson list and keeps playing. */
+  .learn { position: fixed; inset: 0; z-index: 2; display: none; background: #0d0c10;
+    grid-template-columns: 272px minmax(0, 1fr); gap: 0; }
+  body.learning .learn { display: grid; }
+  body.learning aside.info { display: none; }
+  body.learning .stage { position: fixed; z-index: 3; left: 16px; top: 16px; width: 240px; height: 240px; }
+  body.learning .frame { width: 240px; }
+  .learn nav { padding: 272px 16px 16px; border-right: 1px solid #2a2732; overflow: auto; }
+  .learn nav h3 { font-size: 0.72rem; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase;
+    color: #8a8596; margin: 14px 0 6px; }
+  .learn nav button { display: block; width: 100%; text-align: left; font: inherit; font-size: 0.85rem;
+    color: #c9c4d0; background: none; border: 0; border-radius: 4px; padding: 5px 8px; cursor: pointer; }
+  .learn nav button:hover { background: #17151d; }
+  .learn nav button[aria-current="true"] { background: #96dcb4; color: #0d0c10; }
+  .learn article { overflow: auto; padding: 20px 28px 40px; max-width: 980px; }
+  .learn .top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .learn .top h2 { font-size: 1.15rem; font-weight: 400; letter-spacing: 0.08em; margin: 0; color: #e6e2ec; flex: 1 1 auto; }
+  .learn .kicker { color: #8a8596; margin: 6px 0 14px; }
+  .learn .diagram { width: 100%; height: 300px; display: block; border: 1px solid #2a2732; background: #100f14;
+    image-rendering: auto; cursor: default; }
+  .learn .live { color: #8a8596; font-size: 0.8rem; margin: 6px 0 0; min-height: 1.2em; }
+  .learn h4 { font-size: 0.75rem; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase;
+    color: #96dcb4; margin: 22px 0 8px; }
+  .learn p { line-height: 1.6; margin: 0 0 10px; }
+  .learn ul { margin: 0; padding-left: 1.2em; line-height: 1.6; }
+  .learn li { margin-bottom: 6px; }
+  .learn li::marker { color: #96dcb4; }
+  .learn .solo[aria-pressed="true"] { background: #96dcb4; color: #0d0c10; border-color: #96dcb4; }
+  .learn .button { display: inline-block; padding: 6px 12px; font: inherit; font-size: 0.82rem; letter-spacing: 0.04em;
+    color: #d7f2e3; border: 1px solid #2f5a45; border-radius: 4px; background: #121a16; cursor: pointer; }
+  .learn .button:hover { border-color: #96dcb4; color: #ffffff; }
+  .learn .button[hidden] { display: none; }
+  /* Narrow screens: the lessons become a strip under a small tile. */
+  @media (max-width: 780px) {
+    .learn { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+    body.learning .stage { left: 16px; top: 12px; width: 96px; height: 96px; }
+    body.learning .frame { width: 96px; }
+    .learn nav { padding: 120px 16px 8px; border-right: 0; border-bottom: 1px solid #2a2732;
+      display: flex; gap: 4px; overflow-x: auto; white-space: nowrap; }
+    .learn nav h3 { display: none; }
+    .learn nav button { width: auto; flex: 0 0 auto; }
+    .learn article { padding: 16px; }
+    .learn .diagram { height: 220px; }
+  }
+  /* Narrow screens: stack, and let the panel scroll below the shrine. */
+  @media (max-width: 780px) {
+    main { flex-direction: column; }
+    .frame { width: min(100%, calc(60dvh - 32px)); }
+    aside.info { flex: 0 0 auto; max-height: 34%; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="stage" id="stage">
+    <div class="frame" id="frame">
+      <canvas id="screen" width="1200" height="1200" aria-label="Procedural isometric shrine"></canvas>
+      <div class="insight" id="insight" role="status" aria-live="polite">
+        <div class="tag"><span class="handle">CYBERPAL</span></div>
+        <div class="portrait" aria-hidden="true"></div>
+        <p class="line" id="insight-text"></p>
+        <span class="more" aria-hidden="true">▼</span>
+      </div>
+      <div class="overlay" id="overlay">
+        <span class="icon" id="icon">▶</span>
+        <small id="hint">click to begin</small>
+      </div>
+    </div>
+  </div>
+  <aside class="info">
+    <h1 id="track">ShrineGen</h1>
+    <h2>Recipe</h2>
+    <pre id="info">loading…</pre>
+    <div class="actions">
+      <button id="learn-open" class="button" type="button">Learn</button>
+      <a id="download-wav" class="button" href="wav/track.wav" download hidden>Download WAV</a>
+      <a class="button" href="https://github.com/johnoestmannmusic/1000-shrines-of-spirit" target="_blank" rel="noopener noreferrer">View Source</a>
+    </div>
+  </aside>
+</main>
+<section class="learn" id="learn" aria-label="How this piece is made">
+  <nav id="lessons" aria-label="Lessons"></nav>
+  <article>
+    <div class="top">
+      <h2 id="l-title">How this piece is made</h2>
+      <button id="l-solo" class="button solo" type="button" aria-pressed="false" hidden>Hear it alone</button>
+      <button id="learn-close" class="button" type="button">Close ✕</button>
+    </div>
+    <p class="kicker" id="l-kicker"></p>
+    <canvas class="diagram" id="l-canvas" aria-label="A live diagram for this lesson"></canvas>
+    <p class="live" id="l-live"></p>
+    <h4>How it's made here</h4>
+    <div id="l-how"></div>
+    <h4>Recreate it</h4>
+    <ul id="l-recreate"></ul>
+  </article>
+</section>
+<script type="module">
+  // Self-contained: no external scripts, styles, fonts or CDNs (HC010).
+  const SAMPLE_RATE = 48000;
+  const LOGICAL = 300;
+  const stage = document.getElementById("stage");
+  const frameEl = document.getElementById("frame");
+  const canvas = document.getElementById("screen");
+  const screen = canvas.getContext("2d");
+  screen.imageSmoothingEnabled = false;
+  const off = document.createElement("canvas");
+  off.width = LOGICAL;
+  off.height = LOGICAL;
+  const offCtx = off.getContext("2d");
+  const image = offCtx.createImageData(LOGICAL, LOGICAL);
+  const overlay = document.getElementById("overlay");
+  const icon = document.getElementById("icon");
+  const hint = document.getElementById("hint");
+
+  const wasmBytes = await fetch("shrine.wasm").then((r) => {
+    if (!r.ok) throw new Error("shrine.wasm: " + r.status);
+    return r.arrayBuffer();
+  });
+  const { instance } = await WebAssembly.instantiate(wasmBytes, {});
+  const shr = instance.exports;
+
+  // The recipe panel: the artifact bakes a human-readable card plus its build
+  // date. A module built straight from the engine carries neither.
+  (function showInfo() {
+    const info = document.getElementById("info");
+    // The heading is the track name the setup chose (falling back to the
+    // product name when the artifact carries none).
+    const track = document.getElementById("track");
+    let trackName = "";
+    if (typeof shr.shrine_name_ptr === "function" && shr.shrine_name_len() > 0) {
+      trackName = new TextDecoder()
+        .decode(new Uint8Array(shr.memory.buffer, shr.shrine_name_ptr(), shr.shrine_name_len()))
+        .trim();
+      if (trackName) track.textContent = trackName;
+    }
+    // Offer the bundled render. Candidates are tried in order and the button is
+    // only revealed for one that really exists, so a statically hosted folder
+    // works with no server to list the directory: the manifest first (written
+    // beside the artifact), then a file named after the track, then track.wav.
+    const wav = document.getElementById("download-wav");
+    (async () => {
+      const names = [];
+      try {
+        const list = await (await fetch("wav/manifest.json", { cache: "no-store" })).json();
+        if (Array.isArray(list)) names.push(...list.filter((n) => typeof n === "string"));
+      } catch {}
+      if (trackName) names.push(trackName + ".wav");
+      names.push("track.wav");
+      for (const name of names) {
+        try {
+          const head = await fetch("wav/" + encodeURIComponent(name), { method: "HEAD" });
+          if (head.ok) {
+            wav.setAttribute("href", "wav/" + encodeURIComponent(name));
+            wav.hidden = false;
+            return;
+          }
+        } catch {}
+      }
+    })();
+    if (typeof shr.shrine_info_ptr === "function") {
+      const ptr = shr.shrine_info_ptr();
+      const len = shr.shrine_info_len();
+      info.textContent = new TextDecoder().decode(new Uint8Array(shr.memory.buffer, ptr, len));
+    } else {
+      info.textContent =
+        "ShrineGen (development build)\n\nThis module was built from the engine directly, so it carries no baked recipe.\n\nUse the setup menu's Compile WASM action to emit a self-describing artifact.";
+    }
+  })();
+
+  // Visual instance: mode 2 (no audio engine).
+  const visual = shr.shrine_new(0, 0, 2);
+
+  // The exported source is drawn into the sky, behind the shrine: the engine
+  // leaves the sky unfilled, we paint the lit sky gradient ourselves, then draw
+  // the frame over it so the shrine occludes the text. Reading starts at the
+  // top of the file and the text moves upward, wrapping seamlessly.
+  const overlayWord = typeof shr.shrine_code_overlay === "function" ? shr.shrine_code_overlay() : 0;
+  const skyOverlay = (overlayWord & 1) !== 0;
+  const overlayAlpha = Math.min(1, Math.max(0, ((overlayWord >> 8) & 0xff) / 100));
+  const overlaySpeed = ((overlayWord >> 16) & 0xff) || 45;
+  const overlayScale = ((overlayWord >>> 24) & 0xff) || 200;    // percent (100 = normal)
+  const overlayAngle = typeof shr.shrine_code_angle === "function" ? shr.shrine_code_angle() : 0;
+  const overlayOffset = typeof shr.shrine_code_offset === "function" ? shr.shrine_code_offset() : 0;
+  // 0 static, 1 flat, 2 sphere. Bits 1-3 of the overlay word.
+  const overlayPlane = (overlayWord >> 1) & 0x7;
+  const cameraSpeed = typeof shr.shrine_camera_speed === "function" ? shr.shrine_camera_speed() : 0;
+  const BASE_LINE_H = 13;                                       // px per source line at 100%
+  const LINE_H = Math.max(8, Math.round((BASE_LINE_H * overlayScale) / 100));
+  // Keep the reading rate steady: bigger text scrolls proportionally faster.
+  const CODE_PX_PER_S = (20 + overlaySpeed * 3.8) * (overlayScale / 100);
+  let codeLines = [];
+  let codeScroll = 0;                             // px advanced through the file
+  if (skyOverlay) {
+    // Let the sky show through the canvas; the shrine stays opaque over it.
+    if (typeof shr.shrine_set_sky_transparent === "function") {
+      shr.shrine_set_sky_transparent(visual, 1);
+    }
+    fetch("shrine.rs")
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error("no shrine.rs"))))
+      .then((text) => { codeLines = text.split("\n"); })
+      .catch(() => {});
+  }
+
+  // Paint the lit sky (as reported by the last engine frame) plus the scrolling
+  // source. Kept inside the canvas: no DOM blend layers over a transparent
+  // canvas, so nothing smears or leaves copies when the camera moves.
+  function drawSkyAndSource(lit) {
+    // Sky colours arrive packed 0xRRGGBB, top in the low 24 bits.
+    const rgb = (v) => `rgb(${(v >> 16) & 0xff},${(v >> 8) & 0xff},${v & 0xff})`;
+    const grad = screen.createLinearGradient(0, 0, 0, 1200);
+    grad.addColorStop(0, rgb(Number(lit & 0xffffffn)));
+    grad.addColorStop(1, rgb(Number((lit >> 24n) & 0xffffffn)));
+    screen.fillStyle = grad;
+    screen.fillRect(0, 0, 1200, 1200);
+    if (codeLines.length === 0) return;
+    const n = codeLines.length;
+    const total = n * LINE_H;
+    codeScroll = total > 0 ? codeScroll % total : 0;
+    const first = Math.floor(codeScroll / LINE_H);
+    const offset = codeScroll - first * LINE_H;
+    // The drift is tilted by `overlayAngle` (positive leans left) and advances
+    // along that tilted axis. Rotating about the centre means the drawn block
+    // must be a square of `span` centred on the canvas, and the vertical shift
+    // grows it again, or bare sky would show at the edges.
+    const rad = (-overlayAngle * Math.PI) / 180;
+    const shift = (overlayOffset / 100) * 1200;
+    const span = 1200 * (Math.abs(Math.cos(rad)) + Math.abs(Math.sin(rad))) + 2 * Math.abs(shift);
+    const from = 600 - span / 2;
+    const kStart = Math.floor((from + offset) / LINE_H) - 1;
+    const kEnd = Math.ceil((from + span + offset) / LINE_H) + 1;
+    // The code plane: how the drift answers the camera orbit.
+    //   static — pinned to the frame; the camera does not move it
+    //   flat   — a flat band that slides across as the camera turns
+    //   sphere — the same slide wrapped around the viewer, repeated so it is
+    //            visible whichever way the camera points, and fading out
+    //            towards the top where the seam sits out of frame
+    const orbit = cameraSpeed === 0 || overlayPlane === 0 ? 0 : ((cameraSpeed * (clock / SAMPLE_RATE)) / 360) % 1;
+    const period = overlayPlane === 2 ? 600 : 1200;
+    const slide = overlayPlane === 0 ? 0 : -orbit * period;
+    const repeats = overlayPlane === 0 ? [0] : [-1, 0, 1];
+
+    screen.save();
+    screen.globalCompositeOperation = "screen";
+    screen.fillStyle = "#8fe0b0";
+    screen.font = `${LINE_H - 2}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    screen.textBaseline = "top";
+    screen.translate(0, shift);
+    screen.translate(600, 600);
+    screen.rotate(rad);
+    screen.translate(-600, -600);
+    // One column, drawn exactly like the file: each line starts at the same x
+    // and keeps its own line break, so the source stays human-readable. Raise
+    // the text size or the vertical offset to cover more of the sky.
+    for (let k = kStart; k < kEnd; k++) {
+      const line = codeLines[(((first + k) % n) + n) % n];
+      if (line.length === 0) continue;
+      const y = k * LINE_H - offset;
+      // On the sphere the code curls away from the viewer, so it dissolves as
+      // it approaches the top of the sky — which is also where the last line
+      // meets the first, keeping that seam out of sight.
+      let alpha = overlayAlpha;
+      if (overlayPlane === 2) {
+        const lift = Math.min(1, Math.max(0, (y + 260) / 420));
+        const sink = Math.min(1, Math.max(0, (1100 - y) / 320));
+        alpha *= lift * sink;
+        if (alpha <= 0.001) continue;
+      }
+      screen.globalAlpha = alpha;
+      for (const rep of repeats) {
+        screen.fillText(line, 8 + slide + rep * period, y);
+      }
+    }
+    screen.restore();
+  }
+
+  let clock = 0;            // sample clock driving the visuals (frozen when paused)
+  let clockBase = 0;        // last sample count reported by the worklet
+  let clockBaseAt = 0;      // performance.now() when it arrived
+  let haveClockBase = false;
+  let audioStartedAt = 0;
+  let playing = false;
+  let audio = null;
+  let node = null;
+  let gain = null;
+  let last = performance.now();
+
+  // Learn mode's hooks (set up below).
+  let learnFrame = null, learnState = null, learnLive = () => false;
+  // The orbs' and CyberPal's hooks (set up below).
+  let orbFrame = null, insightFrame = null;
+
+  // Camera: eased toward the pointer, bounded.
+  let camYaw = 0, camPitch = 0, targetYaw = 0, targetPitch = 0;
+  // How quickly the camera eases, in seconds (time to cover about 63 % of
+  // the way): brisk while following the pointer, slow and soft when it
+  // drifts back to centre after the pointer leaves.
+  const CAM_FOLLOW_S = 0.13;
+  const CAM_RETURN_S = 1.6;
+  // When the pointer comes (back) in, the camera starts as softly as it
+  // returns and firms up to its brisk follow over this long.
+  const CAM_ENGAGE_S = 1.2;
+  let camReturning = false;
+  let camEngage = 1;       // 0 just (re)entered … 1 fully following
+
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (playing) {
+      clock = haveClockBase
+        ? clockBase + ((now - clockBaseAt) * SAMPLE_RATE) / 1000
+        : ((now - audioStartedAt) * SAMPLE_RATE) / 1000;
+    }
+    // Frame-rate independent easing; the return also starts gently.
+    if (!camReturning) camEngage = Math.min(1, camEngage + dt / CAM_ENGAGE_S);
+    const e = camEngage * camEngage * (3 - 2 * camEngage);
+    const tau = camReturning ? CAM_RETURN_S : CAM_RETURN_S + (CAM_FOLLOW_S - CAM_RETURN_S) * e;
+    const k = 1 - Math.exp(-dt / tau);
+    camYaw += (targetYaw - camYaw) * k;
+    camPitch += (targetPitch - camPitch) * k;
+    if (typeof shr.shrine_set_camera === "function") {
+      shr.shrine_set_camera(visual, camYaw, camPitch);
+    }
+    const ptr = shr.shrine_render_visual(visual, BigInt(Math.floor(clock)));
+    const src = new Uint8ClampedArray(shr.memory.buffer, ptr, LOGICAL * LOGICAL * 4);
+    image.data.set(src);
+    offCtx.putImageData(image, 0, 0);
+    if (skyOverlay) {
+      codeScroll += CODE_PX_PER_S * dt;
+      const lit = typeof shr.shrine_sky_colors === "function" ? shr.shrine_sky_colors(visual) : 0n;
+      drawSkyAndSource(lit);
+    } else {
+      screen.clearRect(0, 0, 1200, 1200);
+    }
+    screen.drawImage(off, 0, 0, LOGICAL, LOGICAL, 0, 0, 1200, 1200);
+    if (orbFrame) orbFrame(now, dt);
+    if (insightFrame) insightFrame(now);
+    if (learnFrame) learnFrame(now);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  function setPlaying(on) {
+    playing = on;
+    frameEl.classList.toggle("playing", on);
+    icon.textContent = on ? "❚❚" : "▶";
+    hint.textContent = on ? "" : "click to pause";
+  }
+
+  async function startAudio() {
+    audio = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: "playback" });
+    await audio.audioWorklet.addModule("shrine.worklet.js");
+    node = new AudioWorkletNode(audio, "shrinegen", {
+      numberOfInputs: 0,
+      outputChannelCount: [2],
+      processorOptions: { wasm: wasmBytes },
+    });
+    let readySeen = false;
+    let readyResolve = null;
+    node.port.onmessage = (e) => {
+      if (e.data === "ready") {
+        readySeen = true;
+        if (readyResolve) readyResolve();
+      } else if (typeof e.data === "number") {
+        clockBase = e.data;
+        clockBaseAt = performance.now();
+        haveClockBase = true;
+      } else if (e.data && e.data.state && learnState) {
+        learnState(e.data.state);
+      }
+    };
+    if (learnLive()) node.port.postMessage({ live: true });
+    gain = new GainNode(audio, { gain: 1 });
+    node.connect(gain).connect(audio.destination);
+    await new Promise((resolve) => {
+      readyResolve = resolve;
+      if (readySeen) resolve();
+    });
+  }
+
+  async function toggle() {
+    try {
+      if (!audio) {
+        hint.textContent = "starting…";
+        await startAudio();
+        audioStartedAt = performance.now();
+        clockBaseAt = performance.now();
+        await audio.resume();
+        setPlaying(true);
+        return;
+      }
+      if (playing) {
+        gain.gain.setTargetAtTime(0, audio.currentTime, 0.3);
+        await new Promise((r) => setTimeout(r, 900));
+        await audio.suspend();
+        setPlaying(false);
+      } else {
+        gain.gain.cancelScheduledValues(audio.currentTime);
+        gain.gain.setTargetAtTime(1, audio.currentTime, 0.3);
+        await audio.resume();
+        audioStartedAt = performance.now();
+        clockBaseAt = performance.now();
+        setPlaying(true);
+      }
+    } catch (e) {
+      hint.textContent = "audio failed: " + e.message;
+    }
+  }
+
+  // ---------------------------------------------------------------- Learn
+  // A full-screen explainer: how this very piece is made, lesson by lesson,
+  // from the engine's own description of it (shrine_learn_*) and, while it
+  // plays, its moving parts (posted by the worklet). Nothing here changes the
+  // music; "Hear it alone" only changes what you listen to.
+  const learnEl = document.getElementById("learn");
+  const lessonsEl = document.getElementById("lessons");
+  const lTitle = document.getElementById("l-title");
+  const lKicker = document.getElementById("l-kicker");
+  const lCanvas = document.getElementById("l-canvas");
+  const lLive = document.getElementById("l-live");
+  const lHow = document.getElementById("l-how");
+  const lRecreate = document.getElementById("l-recreate");
+  const lSolo = document.getElementById("l-solo");
+  const SR = SAMPLE_RATE;
+  const C = { text: "#c9c4d0", dim: "#8a8596", faint: "#3a3644", line: "#2a2732", accent: "#96dcb4", warm: "#f5cd78", cool: "#7fb4ff", rose: "#e98fb0", bg: "#100f14" };
+  // Live state layout: engine/src/learn.rs (STATE_LEN).
+  const S = { clock: 0, chord: 1, next: 2, morph: 3, bar: 4, step: 5, section: 6, dbar: 7, hits: 8, cutoff: 9, bass: 10, duck: 11, dronewin: 12, lw: 13, dens: 17, m: 19, lfo: 34, gstep: 41, solo: 43, soloAmt: 44 };
+  const METERS = ["drone", "bass", "glitch 1", "glitch 2", "echo L", "echo R", "reverb", "drums", "tape echo", "loop 1", "loop 2", "loop 3", "loop 4", "out L", "out R"];
+  const LFO_PERIODS = [41, 61, 97, 151, 233, 307, 113];
+  const NOTE = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
+  const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
+  const noteName = (m) => { const r = Math.round(m); return NOTE[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1); };
+  const hzOf = (m) => 440 * Math.pow(2, (m - 69) / 12);
+  const fx = (x, d = 1) => Number(x).toFixed(d).replace(/\.0+$/, "");
+  const secs = (s) => (s >= 90 ? `${fx(s / 60, 1)} min` : `${fx(s, s < 10 ? 2 : 1)} s`);
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+  let D = null;          // the description (JSON from the engine)
+  let L = null;          // the latest live state (Float64Array), while playing
+  let lesson = 0;
+  let learning = false;
+  let soloOn = 0;        // the layer asked for (0 = full mix)
+
+  const modeIx = () => D.mode.index;          // 0 half-time, 1 jungle, 2 garage, 3 microsound
+  const chordNow = () => (L ? L[S.chord] : 0);
+  const tNow = () => (L ? L[S.clock] / SR : clock / SR + (D ? D.start_s : 0));
+  const firstLoop = () => Math.max(0, D.loops.findIndex((l) => l.on));
+  const stepped = () => Math.abs(D.cycle_s - D.chords.length * D.chord_s) < 0.01 || modeIx() === 2;
+  const chordName = (c) => `${ROMAN[c.degree % 7] || c.degree + 1} (${NOTE[c.tones[0] % 12]})`;
+  const meter = (i) => (L ? L[S.m + i] : 0);
+
+  function fit() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = lCanvas.clientWidth, h = lCanvas.clientHeight;
+    if (lCanvas.width !== Math.round(w * dpr) || lCanvas.height !== Math.round(h * dpr)) {
+      lCanvas.width = Math.round(w * dpr);
+      lCanvas.height = Math.round(h * dpr);
+    }
+    const g = lCanvas.getContext("2d");
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    g.font = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+    g.textBaseline = "middle";
+    return { g, w, h };
+  }
+  const label = (g, t, x, y, col = C.dim, align = "left") => { g.fillStyle = col; g.textAlign = align; g.fillText(t, x, y); };
+  const sectionColour = (i) => ["#26232e", "#3d5a6e", "#5b6e8a", "#96dcb4", "#f5cd78", "#7fb4ff", "#96dcb4", "#e98fb0", "#5b6e8a", "#96dcb4", "#e98fb0"][i] || C.faint;
+
+  // A step ring: `steps` cells around a circle, `lit` highlighted.
+  function ring(g, cx, cy, r, steps, lit, col, name) {
+    for (let i = 0; i < steps; i++) {
+      const a0 = -Math.PI / 2 + (i / steps) * Math.PI * 2, a1 = a0 + (Math.PI * 2) / steps - 0.04;
+      g.beginPath();
+      g.arc(cx, cy, r, a0, a1);
+      g.strokeStyle = i === lit ? col : C.faint;
+      g.lineWidth = i === lit ? 9 : 6;
+      g.stroke();
+    }
+    label(g, name, cx, cy, C.text, "center");
+  }
+
+  // A fragment strip: on/off sixteenths over two bars, the current one lit.
+  function fragments(g, x, y, w, h, pattern, phase16, name) {
+    const [on, off] = pattern, period = on + off;
+    const cells = 32, cw = w / cells;
+    label(g, name, x, y - 9);
+    for (let i = 0; i < cells; i++) {
+      const p = (i % period) < on;
+      g.fillStyle = p ? (i === phase16 % cells ? C.warm : C.accent) : (i === phase16 % cells ? C.dim : C.faint);
+      g.globalAlpha = p ? 0.9 : 0.5;
+      g.fillRect(x + i * cw + 1, y, cw - 2, h);
+    }
+    g.globalAlpha = 1;
+    for (let b = 0; b <= 2; b++) { g.fillStyle = C.dim; g.fillRect(x + b * 16 * cw - 1, y - 3, 1, h + 6); }
+  }
+
+  const LESSONS = [
+    // ---------------- music
+    {
+      group: "The music", title: "The score",
+      kicker: () => "Nothing here is arranged by hand. Slow cycles decide what plays when, so the whole form is known in advance — and never quite repeats.",
+      draw({ g, w, h }) {
+        const t = tNow(), phrases = D.drums.sections.length, span = phrases * D.phrase_s;
+        const x0 = 110, ww = w - x0 - 16;
+        label(g, "drums", 12, 30);
+        D.drums.sections.forEach((sec, i) => {
+          g.fillStyle = sectionColour(sec);
+          g.fillRect(x0 + (i / phrases) * ww, 20, ww / phrases - 1, 20);
+        });
+        label(g, "chords", 12, 66);
+        let x = 0, k = 0;
+        while (x < span && k < 4096) {
+          const ci = k % D.chords.length, len = stepped() ? D.chord_s : D.chords[ci].bars * D.chord_s;
+          g.fillStyle = [C.accent, C.cool, C.warm, C.rose][ci % 4];
+          g.globalAlpha = 0.75;
+          g.fillRect(x0 + (x / span) * ww, 56, Math.max(1, (len / span) * ww - 1), 20);
+          x += len; k++;
+        }
+        g.globalAlpha = 1;
+        const px = x0 + ((t % span) / span) * ww;
+        g.fillStyle = C.text; g.fillRect(px, 14, 2, 68);
+        label(g, `0`, x0, 92); label(g, secs(span), x0 + ww, 92, C.dim, "right");
+        // The seven slow cycles.
+        label(g, "slow cycles", 12, 112);
+        LFO_PERIODS.forEach((p, i) => {
+          const y = 134 + i * 22, mid = x0 + ww / 2;
+          // How fast each one turns across the strip's span (its shape, not its phase).
+          g.beginPath();
+          for (let k = 0; k <= 200; k++) { const x = x0 + (k / 200) * ww, v = Math.sin((2 * Math.PI * (k / 200) * span) / p); k ? g.lineTo(x, y - v * 7) : g.moveTo(x, y - v * 7); }
+          g.strokeStyle = C.faint; g.lineWidth = 1; g.stroke();
+          if (L) { const v = L[S.lfo + i]; g.fillStyle = C.accent; g.fillRect(Math.min(mid, mid + v * ww / 2), y - 4, Math.abs(v) * ww / 2, 8); }
+          label(g, `${p} s`, x0 - 10, y, C.dim, "right");
+        });
+        const names = [...new Set(D.drums.sections)].map((i) => D.section_names[i]);
+        return `drum sections in this piece: ${names.join(" · ")}`;
+      },
+      how: () => [
+        `The drums play in phrases of four bars (${secs(D.phrase_s)} each). Each phrase's section — ${[...new Set(D.drums.sections)].map((i) => D.section_names[i]).join(", ")} — is chosen from a slow "energy" cycle plus a little chance, decided ahead of time from seed 5. The strip above is the first ${D.drums.sections.length} phrases.`,
+        `Underneath run seven slow cycles of 41, 61, 97, 151, 233, 307 and 113 seconds. Their lengths share no common factor, so they line up again only after days. One opens the drone's filter, others thin out the glitches, brighten the bass and swell the atmosphere.`,
+        `The chords go round every ${secs(D.cycle_s)} (${D.chords.length} chord${D.chords.length > 1 ? "s" : ""}).`,
+      ],
+      recreate: () => [
+        "Write the form as automation lanes rather than sections: one slow LFO per layer, each of a different, unrelated length (use prime numbers of seconds).",
+        "Let one lane decide how busy the drums are each phrase, another how open the drone is, a third how dense the glitches are.",
+        `Change chords on a fixed plan: here ${D.chords.length} chord${D.chords.length > 1 ? "s" : ""} every ${secs(D.cycle_s)}.`,
+      ],
+    },
+    {
+      group: "The music", title: "Harmony",
+      kicker: () => `${D.key.name} ${D.scale.name}: ${D.scale.mood}.`,
+      draw({ g, w, h }) {
+        // The twelve notes, the scale's lit.
+        const cx = 120, cy = h / 2, r = 90;
+        const inScale = new Set(D.scale.intervals.map((i) => (i + D.key.pc) % 12));
+        const cur = D.chords[Math.min(chordNow(), D.chords.length - 1)];
+        const inChord = new Set(cur.tones.map((t) => t % 12));
+        for (let pc = 0; pc < 12; pc++) {
+          const a = -Math.PI / 2 + (pc / 12) * Math.PI * 2, x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+          g.beginPath(); g.arc(x, y, 15, 0, Math.PI * 2);
+          g.fillStyle = inChord.has(pc) ? C.warm : inScale.has(pc) ? C.accent : C.bg;
+          g.fill(); g.strokeStyle = pc === D.key.pc ? C.text : C.line; g.lineWidth = pc === D.key.pc ? 2 : 1; g.stroke();
+          label(g, NOTE[pc], x, y, inScale.has(pc) ? "#0d0c10" : C.faint, "center");
+        }
+        label(g, "scale · chord", cx, cy, C.dim, "center");
+        // The chords as a piano roll.
+        const x0 = 270, ww = w - x0 - 16, n = D.chords.length, cw = Math.min(90, ww / n);
+        const lo = 36, hi = 96, y = (m) => h - 20 - ((m - lo) / (hi - lo)) * (h - 40);
+        D.chords.forEach((c, i) => {
+          const on = i === chordNow();
+          c.notes.forEach((m) => { g.fillStyle = on ? C.warm : C.accent; g.globalAlpha = on ? 1 : 0.45; g.fillRect(x0 + i * cw + 6, y(m) - 2, cw - 12, 4); });
+          g.globalAlpha = 1;
+          g.fillStyle = on ? C.text : C.dim; g.fillRect(x0 + i * cw + 6, y(c.bass) - 1, cw - 12, 2);
+          label(g, chordName(c), x0 + i * cw + cw / 2, h - 8, on ? C.text : C.dim, "center");
+        });
+        return L ? `now: chord ${chordNow() + 1} of ${n}${L[S.morph] > 0.01 ? `, turning into ${L[S.next] + 1}` : ""}` : "press play to follow the chords";
+      },
+      how() {
+        const m = modeIx();
+        const out = [`The scale decides which notes exist; seed 1 decides the key (here ${D.key.name}) and how each chord is stacked from the scale in thirds — root, third, fifth, seventh, ninth and up — spread over about three octaves. Every note you hear, down to the glitch pings, is drawn from these.`];
+        if (m === 2) out.push(`In 2-step garage the chords follow a progression (${esc(D.garage.progression)}), changing every two bars on the downbeat, with a key lift ${esc(D.garage.lift)}. The drone holds an open fifth on ${D.key.name} underneath.`);
+        else if (m === 3) out.push(`In microsound the chords change ${esc(D.micro.chords)}${D.micro.chords === "slow" ? " — on the slow, weighted cycle" : ""}, crossing over in a single beat.`);
+        else out.push(`The chords share a 32-bar cycle unevenly (${D.chords.map((c) => c.bars).join(" / ")} bars): the first two do most of the work, the later ones pass by as colours. Each change is a crossfade a bar long.`);
+        return out;
+      },
+      recreate: () => [
+        `Pick ${D.scale.name} on ${D.key.name}. Use only its notes.`,
+        `Build ${D.chords.length} chord${D.chords.length > 1 ? "s" : ""} on scale degrees ${D.chords.map((c) => ROMAN[c.degree % 7]).join(", ")}, stacked in thirds and spread wide: ${D.chords.map((c) => c.notes.map(noteName).join(" ")).join("  |  ")}.`,
+        "Leave out a tone or two from each stack, so the chords sound suspended rather than resolved.",
+      ],
+    },
+    {
+      group: "The music", title: "The drone", solo: () => 1,
+      kicker: () => (modeIx() === 3 ? "The chord, frozen from pure sines, heard only in short fragments that keep time with the bar." : "The chord, frozen: the same colour forever, with no movement at all."),
+      draw({ g, w, h }) {
+        const sp = D.spectra[Math.min(chordNow(), D.spectra.length - 1)];
+        const x0 = 40, ww = w - 56, base = modeIx() === 3 ? h - 90 : h - 30, top = 20, bw = ww / sp.length;
+        sp.forEach((v, i) => { g.fillStyle = C.accent; g.globalAlpha = 0.35 + 0.65 * v; g.fillRect(x0 + i * bw, base - v * (base - top), bw - 1, v * (base - top)); });
+        g.globalAlpha = 1;
+        const xOf = (hz) => x0 + (Math.log(hz / 40) / Math.log(400)) * ww;
+        [100, 1000, 10000].forEach((f) => { label(g, f >= 1000 ? `${f / 1000} kHz` : `${f} Hz`, xOf(f), base + 12, C.dim, "center"); g.fillStyle = C.line; g.fillRect(xOf(f), top, 1, base - top); });
+        if (L) { const x = xOf(Math.min(16000, Math.max(40, L[S.cutoff]))); g.fillStyle = C.warm; g.fillRect(x, top, 2, base - top); label(g, "filter", x + 4, top + 8, C.warm); }
+        if (modeIx() === 3 && D.micro.drone_fragments) {
+          const p16 = Math.floor(tNow() / D.drum16_s);
+          fragments(g, x0, h - 46, ww, 18, D.micro.drone_fragments, p16, `fragments: ${D.micro.drone_fragments[0]} sixteenths on, ${D.micro.drone_fragments[1]} off${D.micro.shift_figure ? ` · shifted ${D.micro.shift_figure.map((x) => (x > 0 ? "+" : "") + x).join(", ")} semitones in turn` : ""}`);
+        }
+        return L ? `filter at ${fx(L[S.cutoff], 0)} Hz · level ${fx(meter(0), 2)}` : "the frozen spectrum of the first chord";
+      },
+      how() {
+        const r = D.recipes[Math.min(chordNow(), D.recipes.length - 1)];
+        const out = [
+          modeIx() === 3
+            ? `Each of the chord's ${r.length} notes is a pure sine. The chord is rendered once, for eight seconds, and never played back.`
+            : `Each note of the chord is a three-operator FM voice (${r.length} notes; the first with modulators at ×${fx(r[0].r2, 2)} and ×${fx(r[0].r3, 2)}, wired as ${r[0].stack ? "a stack" : "a pair"}). The chord is rendered once, for eight seconds, and never played back.`,
+          `Instead its spectrum is measured — a ${D.fft_size}-point window, about 0.68 s — and averaged. Then it is rebuilt every ${fx(D.hop_s * 1000, 0)} ms with the same strengths but brand-new random phases, four frames overlapping: the colour stays, every bit of motion is gone. The bars above are that frozen spectrum.`,
+          `A low-pass filter moves over it between ${fx(D.drone_cutoff.min, 0)} Hz and ${fx(D.drone_cutoff.min * Math.pow(2, D.drone_cutoff.octaves) / 1000, 1)} kHz, pushed by two of the slow cycles.`,
+        ];
+        if (modeIx() === 3) out.push(`In microsound the lowest 220 Hz are left empty, and the drone is heard only in fragments — ${D.micro.drone_fragments[0]} sixteenths on, ${D.micro.drone_fragments[1]} off — each ${D.micro.shift === "off" ? "at home pitch" : `transposed by the next step of the figure ${D.micro.shift_figure.join(", ")}`}.`);
+        if (modeIx() === 2) out.push("In 2-step garage the drone holds an open fifth on the tonic, stepping back under any chord that rubs against it.");
+        return out;
+      },
+      recreate: () => [
+        modeIx() === 3
+          ? `Play the chord (${D.chords[0].notes.map(noteName).join(" ")}) on plain sine oscillators and record eight seconds.`
+          : `In any FM synth with three operators: carrier ×1, modulators ×${fx(D.recipes[0][0].r2, 2)} and ×${fx(D.recipes[0][0].r3, 2)}, index about ${fx(D.recipes[0][0].i2, 1)} and ${fx(D.recipes[0][0].i3, 1)}. Play the chord and record eight seconds.`,
+        "Freeze the recording with a spectral freeze, or a time-stretch of 50× or more with long windows (about 0.7 s). Do it twice and pan one left, one right.",
+        `Cut everything under ${modeIx() === 3 ? 220 : 110} Hz from the freeze, and sweep a low-pass over it slowly.`,
+        ...(modeIx() === 3 ? ["Gate the freeze in a strict rhythm (here " + D.micro.drone_fragments.join(" on / ") + " off, in sixteenths), with a 3 ms attack and 25 ms release."] : []),
+      ],
+    },
+    {
+      group: "The music", title: "Atmosphere loops", solo: () => 6 + firstLoop(),
+      kicker: () => `${D.loops.filter((l) => l.on).length} short loops of their own lengths, drifting against each other.`,
+      draw({ g, w, h }) {
+        const on = D.loops.map((l, i) => [l, i]).filter(([l]) => l.on);
+        if (on.length === 0) { label(g, "no atmosphere loops in this version", w / 2, h / 2, C.dim, "center"); return ""; }
+        const t = tNow(), cw = w / on.length;
+        on.forEach(([l, i], k) => {
+          const cx = cw * k + cw / 2, cy = h / 2 - 10, r = Math.min(70, cw / 2 - 20);
+          g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.strokeStyle = C.faint; g.lineWidth = 6; g.stroke();
+          const ph = (t % l.len_s) / l.len_s;
+          g.beginPath(); g.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + ph * Math.PI * 2); g.strokeStyle = [C.accent, C.cool, C.warm, C.rose][i]; g.lineWidth = 6 + 10 * Math.min(1, meter(9 + i) * 3); g.stroke();
+          label(g, l.design.name, cx, cy - 6, C.text, "center");
+          label(g, `${fx(l.len_s, 2)} s · ${l.beats} beats`, cx, cy + 10, C.dim, "center");
+          if (modeIx() === 3 && D.micro.loop_fragments) fragments(g, cx - r - 10, h - 34, 2 * r + 20, 12, D.micro.loop_fragments[i], Math.floor(t / D.drum16_s), "");
+        });
+        return "each ring goes round once per loop";
+      },
+      how: () => [
+        `Each layer is a short recorded performance of the current chord — ${D.loops.filter((l) => l.on).map((l) => `${l.design.name} (${l.design.blurb})`).join("; ")} — looped with a soft crossfade at the seam.`,
+        `Their lengths are whole beats, picked so no two share a factor (${D.loops.filter((l) => l.on).map((l) => l.beats).join(", ")} beats): together they only line up after a very long time, so the texture keeps shifting. Seed 6 shapes their details.`,
+        ...(modeIx() === 3 ? [`In microsound each loop sounds only in its own steady fragments, in sixteenths (${D.loops.map((l, i) => [l, i]).filter(([l]) => l.on).map(([l, i]) => `${l.design.name}: ${D.micro.loop_fragments[i].join(" on / ")} off`).join("; ")}), and a grain cloud scatters the whole bed back as 20–80 ms grains (${esc(D.micro.grains)}).`] : []),
+      ],
+      recreate: () => [
+        "Record each pad or texture on the chord for a few seconds, then loop it with a short crossfade.",
+        `Make the loop lengths different whole numbers of beats with no common factor (here ${D.loops.filter((l) => l.on).map((l) => l.beats).join(", ")}).`,
+        "Send them to a long reverb and let each drift slowly in level.",
+      ],
+    },
+    {
+      group: "The music", title: "Glitch layers", solo: () => 2,
+      kicker: () => "Two tiny step sequencers of different lengths, mutating one step at a time.",
+      draw({ g, w, h }) {
+        D.glitch.forEach((gl, i) => {
+          const cx = w / 4 + (i * w) / 2, cy = h / 2;
+          ring(g, cx, cy, Math.min(90, h / 2 - 30), gl.steps, L ? L[S.gstep + i] : -1, i ? C.cool : C.accent, `layer ${i + 1}`);
+          label(g, `${gl.steps} steps · ${fx(gl.step_s * 1000, 0)} ms each`, cx, h - 14, C.dim, "center");
+          if (L) label(g, `density ${fx(L[S.dens + i], 2)}`, cx, cy + 16, C.dim, "center");
+        });
+        return L ? `level ${fx(meter(2), 2)} / ${fx(meter(3), 2)}` : "";
+      },
+      how: () => [
+        `Two loops of ${D.glitch[0].steps} and ${D.glitch[1].steps} steps run side by side, so their patterns drift against each other. Each step may hold a tiny sound: crushed FM blips, noise ticks, grains cut from the drone, bell pings, square-wave clicks, bit-crushed bursts. After a few times round, one step changes.`,
+        `A slow cycle sets how dense each layer is: steps only sound while it is above their own threshold, so the loops thin out and fill back in. Layer 1: ${esc(D.glitch[0].summary)}. Layer 2: ${esc(D.glitch[1].summary)}.`,
+        `They share a ping-pong echo ${fx(D.echo.delay_s * 1000, 0)} ms long.`,
+      ],
+      recreate: () => [
+        `Make two step sequencers of ${D.glitch[0].steps} and ${D.glitch[1].steps} steps.`,
+        "Fill them with sounds a few milliseconds long; leave many steps empty.",
+        "Every few loops, change one step: a new sound, a rest, a new pitch.",
+        "Gate every step against a slow density control so the layers breathe.",
+      ],
+    },
+    {
+      group: "The music", title: "Drums", solo: () => 5,
+      kicker: () => (D.drums.on ? `${D.drums.kit}: ${D.drums.blurb}.` : "This version has no drums."),
+      draw({ g, w, h }) {
+        if (!D.drums.on) { label(g, "no drums (kit: off)", w / 2, h / 2, C.dim, "center"); return ""; }
+        const ov = D.drums.overview, x0 = 16, ww = w - 32, mid = 90, amp = 70;
+        g.fillStyle = C.accent; g.globalAlpha = 0.6;
+        ov.forEach((v, i) => g.fillRect(x0 + (i / ov.length) * ww, mid - v * amp, Math.max(1, ww / ov.length), 2 * v * amp));
+        g.globalAlpha = 1;
+        const cur = L ? (L[S.dbar] % 2) * 16 + L[S.step] : -1;
+        for (let s = 0; s < 32; s++) {
+          const x = x0 + (s / 32) * ww;
+          g.fillStyle = s === cur ? C.warm : C.line; g.fillRect(x, mid - amp - 6, s === cur ? 3 : 1, 2 * amp + 12);
+          label(g, D.drums.slices[s] || "·", x + ww / 64, mid + amp + 16, s === cur ? C.warm : C.dim, "center");
+        }
+        // The hits on the latest step.
+        const names = modeIx() === 3 ? ["sub kick", "click", "grain", "tick", "grain", "grain"] : modeIx() === 2 ? ["kick", "clap", "rim", "hat", "open hat", "ride"] : ["kick", "snare", "ghost", "hat", "open hat", "ride"];
+        names.forEach((n, i) => { const on = L && (L[S.hits] & (1 << i)); g.fillStyle = on ? C.warm : C.faint; g.fillRect(x0 + i * 90, h - 36, 80, 14); label(g, n, x0 + i * 90 + 40, h - 29, on ? "#0d0c10" : C.dim, "center"); });
+        const sec = L && L[S.section] >= 0 ? D.section_names[L[S.section]] : null;
+        return sec ? `section: ${sec}` : "the recorded loop, in 32 slices";
+      },
+      how() {
+        const m = modeIx();
+        if (!D.drums.on) return ["The kit is set to off."];
+        const out = [];
+        if (m <= 1) out.push(`A two-bar break (${esc(D.drums.pattern)}) is played once at start-up at ${fx(D.drums.source_bpm, 0)} BPM by synthesised drums, bussed and "sampled" at ${D.drums.bits} bits. It is then chopped into 32 slices and re-sequenced live at ${D.bpm} BPM: sped up ${fx(D.drums.semitones_up, 1)} semitones, the classic way.`);
+        if (m === 2) out.push(`The loop is built from the rules of 2-step: a kick on the one and a second that skips past beat three, claps on two and four, rimshots on the pushes, shuffled sixteenth hats. It is played at the track's own tempo, swung at ${D.garage.swing} %, and chopped into 32 slices.`);
+        if (m === 3) out.push(`The loop is dead straight: a sub-sine kick on every beat (${esc(D.micro.pulse)}), clicks one to three samples long, ticks and 2–8 ms grains on the sixteenths, each placed anywhere across the stereo field. It skips the sampler, so every click stays as sharp as it was made.`);
+        out.push(`Each bar's plan is worked out from seed 5 and the bar number: mostly the slices in order, with edits — ${m === 3 ? `steps dropping out, skipping back, ratcheting four times in a sixteenth (dropouts: ${esc(D.micro.dropouts)})` : m === 2 ? "hat stutters, reversed claps, dropped kicks" : "repeats, reversals, stutters, pitched-down slices"}.${m === 3 ? "" : ` The voices — kick: ${esc(D.drums.lines[0])}; snare: ${esc(D.drums.lines[1])}; cymbals: ${esc(D.drums.lines[2])}.`}`);
+        return out;
+      },
+      recreate: () => [
+        modeIx() === 3 ? "Draw a straight four-on-the-floor of short sine kicks (45–55 Hz, about 50 ms)." : `Program a two-bar break at ${fx(D.drums.source_bpm, 0)} BPM and bounce it to audio.`,
+        modeIx() === 3 ? "Add clicks (single samples through a short resonant band-pass) and 2–8 ms noise grains on sixteenths; pan them hard and precisely." : `Slice it into 32 sixteenths and trigger the slices from a sequencer at ${D.bpm} BPM.`,
+        "Each bar, replace a few steps: a repeat, a reversed slice, a stutter, a gap.",
+        `Space: ${esc(D.drums.space)} — ${esc(D.drums.space_blurb)}.`,
+      ],
+    },
+    {
+      group: "The music", title: "Bass", solo: () => 4,
+      kicker: () => ["A low FM bass and a pure sub, following the chords.", "A low FM bass and a pure sub, following the chords.", "A swung, syncopated bassline on the chord roots, octaves and fifths.", "A short sine pulse on the chord root, between the kicks."][modeIx()],
+      draw({ g, w, h }) {
+        // Three octaves of keyboard, C1 to C4: white keys, then black on top.
+        const lo = 24, hi = 60, x0 = 16, ww = w - 32;
+        const isBlack = (m) => [1, 3, 6, 8, 10].includes(((m % 12) + 12) % 12);
+        const whites = []; for (let m = lo; m <= hi; m++) if (!isBlack(m)) whites.push(m);
+        const kw = ww / whites.length, cur = L ? Math.round(L[S.bass]) : null;
+        const xOf = (m) => { const i = whites.indexOf(isBlack(m) ? m - 1 : m); return x0 + i * kw + (isBlack(m) ? kw * 0.7 : 0); };
+        whites.forEach((m, i) => { g.fillStyle = m === cur ? C.warm : "#d9d5df"; g.fillRect(x0 + i * kw + 1, 40, kw - 2, 140); if (m % 12 === 0) label(g, noteName(m), x0 + i * kw + kw / 2, 168, "#0d0c10", "center"); });
+        for (let m = lo; m < hi; m++) if (isBlack(m)) { g.fillStyle = m === cur ? C.warm : "#1b1922"; g.fillRect(xOf(m), 40, kw * 0.6, 85); }
+        D.chords.forEach((c) => { let m = c.bass; while (m > hi) m -= 12; while (m < lo) m += 12; label(g, "▲", xOf(m) + (isBlack(m) ? kw * 0.3 : kw / 2), 28, C.accent, "center"); });
+        return L ? `now: ${noteName(L[S.bass])} (${fx(hzOf(L[S.bass]), 1)} Hz) · ▲ the chords' roots` : "▲ the chords' roots";
+      },
+      how: () => [
+        [
+          `An FM bass and a sine an octave below it play the current chord's root, gliding to the next root during each crossfade. A low-pass between about 140 and 500 Hz and the bass's own swell follow two of the slow cycles.`,
+          `An FM bass and a sine an octave below it play the current chord's root, gliding to the next root during each crossfade. A low-pass between about 140 and 500 Hz and the bass's own swell follow two of the slow cycles.`,
+          `The bassline (${esc(D.garage.bass)}) is a plucked sub with a little FM bite. Each bar's notes come from seed 4: syncopated sixteenths around the kick, roots, octaves and the chord's own fifth, swung with the drums, walking into the top of the loop with a note a semitone under the next root. It dips under each kick.`,
+          `Microsound has no drone bass. With the pulse on (${esc(D.micro.pulse)}), a pure sine on the chord root sounds short on the off-beat eighths, so it rocks against the sub kick without ever overlapping it.`,
+        ][modeIx()],
+      ],
+      recreate: () => [
+        modeIx() === 3 ? "Use a plain sine, a 1 ms attack and a quick release, on the off-beat eighths only." : "Layer a simple FM bass with a sine an octave below; low-pass it around 300 Hz.",
+        `Follow the chord roots: ${D.chords.map((c) => noteName(c.bass)).join(", ")}.`,
+      ],
+    },
+    {
+      group: "The music", title: "Stabs and pips",
+      kicker: () => (modeIx() === 2 ? "Bright seventh-chord stabs on the pushes." : modeIx() === 3 ? "High sine pips: chord tones a few milliseconds long." : "Not part of this mode."),
+      draw({ g, w, h }) {
+        const m = modeIx();
+        if (m < 2) { label(g, "half-time and jungle leave the melody to the drone and loops", w / 2, h / 2, C.dim, "center"); return ""; }
+        const c = D.chords[Math.min(chordNow(), D.chords.length - 1)];
+        const tones = m === 3 ? c.notes.slice(0, 4).map((n) => { let x = n + 36; while (x > 112) x -= 12; while (x < 82) x += 12; return x; }) : c.tones.map((t) => 60 + t);
+        tones.forEach((n, i) => { const x = 60 + i * 120; g.fillStyle = C.accent; g.fillRect(x, 60, 90, 90); label(g, noteName(n), x + 45, 95, "#0d0c10", "center"); label(g, `${fx(hzOf(n), 0)} Hz`, x + 45, 120, "#0d0c10", "center"); });
+        return m === 3 ? `pips: ${D.micro.pips}` : `stabs: ${D.garage.stabs}, ${D.garage.tone}`;
+      },
+      how: () => (modeIx() === 2
+        ? [`Each stab is the current chord as a seventh, voice-led in close position around middle C, struck short on the pushes that make the groove skip, in a two-bar call and answer (${esc(D.garage.stabs)}, ${esc(D.garage.tone)} tone). A dotted-quarter echo keeps every repeat in the swing, and clears at each chord change.`]
+        : modeIx() === 3
+          ? [`Each pip is one tone of the current chord lifted three or four octaves (about 1.5–8 kHz): a pure sine 5–40 ms long under a smooth window, at an exact place in the stereo field, on the sixteenths and now and then a thirty-second between. Some come in pairs on opposite sides. A small ping-pong echo gives each a room.`]
+          : ["Not used in this mode."]),
+      recreate: () => (modeIx() === 3 ? ["Program single sine notes of 5–40 ms on chord tones three octaves up; pan each to its own fixed place."] : modeIx() === 2 ? ["Play seventh chords short on the a of 1, the and of 2 and around beat 3; echo them a dotted quarter later."] : ["—"]),
+    },
+    {
+      group: "The music", title: "Space", solo: () => 10,
+      kicker: () => `An echo of ${fx(D.echo.delay_s * 1000, 0)} ms and a reverb that takes ${secs(D.reverb.decay_s)} to fade.`,
+      draw({ g, w, h }) {
+        const x0 = 30, ww = w / 2 - 50, base = h - 40;
+        label(g, "echo", x0, 20);
+        for (let k = 0; k < 10; k++) { const v = Math.pow(D.echo.feedback, k); g.fillStyle = k % 2 ? C.cool : C.accent; g.fillRect(x0 + k * (ww / 10), base - v * (base - 40), 8, v * (base - 40)); }
+        label(g, `${fx(D.echo.delay_s * 1000, 0)} ms apart, ×${fx(D.echo.feedback, 2)} each time, alternating sides`, x0, base + 16, C.dim);
+        const r0 = w / 2 + 20, rw = w / 2 - 50;
+        label(g, "reverb", r0, 20);
+        g.beginPath();
+        for (let i = 0; i <= 100; i++) { const t = (i / 100) * D.reverb.decay_s * 1.2, v = Math.pow(10, (-3 * t) / D.reverb.decay_s); const x = r0 + (i / 100) * rw, y = base - v * (base - 40); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+        g.strokeStyle = C.accent; g.lineWidth = 2; g.stroke();
+        if (L) { const v = Math.min(1, meter(6) * 4); g.fillStyle = C.warm; g.fillRect(r0, base + 6, rw * v, 4); }
+        label(g, `−60 dB after ${secs(D.reverb.decay_s)}`, r0, base + 20, C.dim);
+        return "";
+      },
+      how: () => [
+        `The glitch layers feed a ping-pong echo: ${fx(D.echo.delay_s * 1000, 0)} ms, with ${fx(D.echo.feedback * 100, 0)} % fed back, darkening on each pass.`,
+        `Everything shares one reverb: the sound is diffused, then circulates through eight delay lines of different lengths (${D.reverb.lines.join(", ")} samples) that feed back into each other, losing a little each time, falling 60 dB in ${secs(D.reverb.decay_s)}.${modeIx() === 3 ? " (Microsound keeps it a small, close room.)" : ""}`,
+      ],
+      recreate: () => [`A ping-pong delay of ${fx(D.echo.delay_s * 1000, 0)} ms, about ${fx(D.echo.feedback * 100, 0)} % feedback, with a low-pass in the loop.`, `A ${D.reverb.decay_s > 5 ? "large reverb" : "small room"} with a decay of about ${secs(D.reverb.decay_s)}, on sends, not inserts.`],
+    },
+    {
+      group: "The music", title: "The mix",
+      kicker: () => "Everything you hear, and how the parts make room for each other.",
+      draw({ g, w, h }) {
+        const rows = METERS.length, rh = (h - 20) / rows;
+        METERS.forEach((n, i) => {
+          const v = Math.min(1, meter(i) * 1.6), y = 10 + i * rh;
+          label(g, n, 90, y + rh / 2, C.dim, "right");
+          g.fillStyle = C.faint; g.fillRect(100, y + 3, w - 130, rh - 6);
+          g.fillStyle = v > 0.9 ? C.rose : i >= 13 ? C.warm : C.accent; g.fillRect(100, y + 3, (w - 130) * v, rh - 6);
+        });
+        return L ? `the drone is at ${fx(L[S.duck] * 100, 0)} % to make room for the drums` : "press play to see the levels";
+      },
+      how: () => [
+        "While the drums play, the drone dips by about 5 dB, pumps a little with each hit and loses some of its top end, and the glitches step back a touch. With no drums, nothing moves.",
+        `The mix ends in a gentle soft clip.${D.master.length ? ` Master effects: ${D.master.join(", ")}.` : ""}`,
+      ],
+      recreate: () => ["Sidechain the drone and pads lightly to the drum bus: slow attack for the dip, fast for the pump.", "Keep the drone in mono below about 110 Hz; leave the low end to the bass."],
+    },
+    // ---------------- picture
+    {
+      group: "The picture", title: "The shrine",
+      kicker: () => `A ${D.shrine.size}×${D.shrine.size} shrine of stacked tiles, centred on a ${D.shrine.grid}×${D.shrine.grid} isometric grid.`,
+      draw({ g, w, h }) {
+        const n = D.shrine.grid, cell = Math.min((h - 20) / n, 14), x0 = (w - n * cell) / 2, y0 = 10;
+        const [ox, oy] = D.shrine.origin, sz = D.shrine.size, max = Math.max(1, ...D.shrine.heights);
+        for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+          const inside = x >= ox && x < ox + sz && y >= oy && y < oy + sz;
+          const hgt = inside ? D.shrine.heights[(y - oy) * sz + (x - ox)] : 0;
+          g.fillStyle = inside ? (hgt ? `rgba(150,220,180,${0.2 + 0.8 * (hgt / max)})` : "#1b1922") : D.palette.ground[0];
+          g.globalAlpha = inside ? 1 : 0.35;
+          g.fillRect(x0 + x * cell, y0 + y * cell, cell - 1, cell - 1);
+        }
+        g.globalAlpha = 1;
+        return `tallest stack: ${max} level${max > 1 ? "s" : ""}${D.shrine.authored ? " · drawn by hand" : " · grown from the seed"}`;
+      },
+      how: () => [
+        `The plan above is the shrine seen from directly above: brighter squares are taller stacks. ${D.shrine.authored ? "This one was drawn by hand in the setup's editor." : `It is grown from the seed (${D.seed}) as a field of solid columns: walls, pillars and the central dais are simply taller columns, filled from the ground up, so no tile can ever float.`}`,
+        "Each square is drawn as stacked isometric tiles, back to front, into a 300×300 picture that is then enlarged exactly four times with no smoothing — so every art pixel stays a crisp 4×4 block on screen.",
+        `Around it, plants are grown by code: each stem and leaf from the seed, swaying with the wind. ${D.arch !== "centred, upright" ? `The architecture is turned or moved: ${esc(D.arch)}.` : ""}`,
+      ],
+      recreate: () => ["Work on a square grid of tiles, and draw them back to front.", "Draw small and enlarge by a whole number with nearest-neighbour scaling, never smoothing."],
+    },
+    {
+      group: "The picture", title: "Biome and palette",
+      kicker: () => `${D.biome.name}: ${D.biome.blurb}.`,
+      draw({ g, w, h }) {
+        const roles = [["sky", D.palette.sky], ["ground", D.palette.ground], ["stone", D.palette.stone], ["foliage", D.palette.foliage], ["water", [D.palette.water]], ["accent", [D.palette.accent]], ["fog", [D.palette.fog]]];
+        const cw = (w - 40) / roles.length;
+        roles.forEach(([n, cols], i) => {
+          cols.forEach((c, k) => { g.fillStyle = c; g.fillRect(20 + i * cw, 30 + (k * (h - 90)) / cols.length, cw - 10, (h - 90) / cols.length - 2); });
+          label(g, n, 20 + i * cw + (cw - 10) / 2, h - 40, C.dim, "center");
+        });
+        return "the palette, light to dark within each role";
+      },
+      how: () => [
+        `The seed picks the palette's hues within the biome's character, so every shrine of the same biome belongs to the same family but none is quite the same. ${D.biome.roofed ? "This biome is roofed: rain and snow land on the glass above, and you hear them through it." : ""}`,
+        "Every surface is coloured from these few roles, then lit: a key light, a soft fill from the sky, and the weather's own grade.",
+      ],
+      recreate: () => ["Choose a handful of colour roles and keep to them.", "Vary hue a little per piece, not per object."],
+    },
+    {
+      group: "The picture", title: "Light and weather",
+      kicker: () => `${D.weather.name}: ${D.weather.blurb}.`,
+      draw({ g, w, h }) {
+        const lit = typeof shr.shrine_sky_colors === "function" ? shr.shrine_sky_colors(visual) : 0n;
+        const rgb = (v) => `rgb(${(v >> 16) & 0xff},${(v >> 8) & 0xff},${v & 0xff})`;
+        const grad = g.createLinearGradient(0, 20, 0, h - 40);
+        grad.addColorStop(0, rgb(Number(lit & 0xffffffn))); grad.addColorStop(1, rgb(Number((lit >> 24n) & 0xffffffn)));
+        g.fillStyle = grad; g.fillRect(20, 20, w - 40, h - 70);
+        label(g, "the lit sky right now", 30, h - 30, C.dim);
+        return "";
+      },
+      how: () => [
+        "The weather is a slow, endless simulation of its own: wind strength and gusts, rain, snow, fog and lightning, all on the same clock as the music.",
+        "It moves the plants, sets the streaks and splashes, darkens or brightens the light and fog — and plays its own sound: the wind, the rain's wash, thunder. Every particle drifts on one smooth sideways wind that turns round only every half-minute or more, so rain leans the way it travels.",
+      ],
+      recreate: () => ["Drive picture and sound from one weather state, so a gust that bends the grass is the gust you hear."],
+    },
+    {
+      group: "The picture", title: "How the music moves it",
+      kicker: () => "One clock runs everything: the music and the picture never drift apart.",
+      draw({ g, w, h }) {
+        const t = tNow(), pulse = Math.pow(2, -6 * (((t * D.bpm) / 60) % 1));
+        const wx = typeof shr.shrine_learn_weather === "function" ? new Float64Array(shr.memory.buffer, shr.shrine_learn_weather(visual, BigInt(Math.floor(clock))), 6) : [0, 0, 0];
+        const vals = { drone: L ? L[S.dronewin] * Math.min(1, meter(0) * 3) : 0, pulse, wind: Math.min(1, wx[0]), rain: Math.min(1, wx[2]) };
+        D.coupling.forEach(([a, b], i) => {
+          const y = 40 + i * 56, v = vals[a] ?? 0;
+          label(g, a, 20, y, C.text);
+          g.fillStyle = C.faint; g.fillRect(110, y - 7, 160, 14);
+          g.fillStyle = C.accent; g.fillRect(110, y - 7, 160 * v, 14);
+          label(g, `→ ${b}`, 290, y, C.dim);
+        });
+        return "";
+      },
+      how: () => [
+        "The picture is drawn from the audio clock that the music reports, so it is always exactly where the sound is.",
+        `The beat (${D.bpm} BPM) flickers small details; the drone's level lights the altar; the wind moves the plants and the rain's drift. ${D.camera_speed ? `The camera orbits at ${D.camera_speed}°/s.` : ""}`,
+      ],
+      recreate: () => ["Send the levels of your layers to the visuals as control signals, smoothed, rather than reacting to the final mix."],
+    },
+    {
+      group: "The picture", title: "One seed, same everywhere",
+      kicker: () => "This page is not a recording. It is a program composing the music and drawing the picture live — and it will do exactly this again.",
+      draw({ g, w, h }) {
+        const words = D.recipe, cols = 12, cw = (w - 40) / cols, rows = Math.ceil(words.length / cols), rh = Math.min(16, (h - 30) / rows);
+        g.font = "10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+        words.forEach((x, i) => label(g, String(x), 20 + (i % cols) * cw, 16 + Math.floor(i / cols) * rh, x ? C.accent : C.faint));
+        return `the recipe: ${words.length} numbers`;
+      },
+      how: () => [
+        `Everything comes from these numbers: the shrine's seed (${D.seed}), the music's seven seeds (${D.seeds.join(", ")}) and every setting, plus a sample counter. The same recipe gives the same music, sample for sample, on any computer — now or in twenty years.`,
+        "To make that true, the program never uses the system's own maths functions such as sine or exponent (they round differently between machines): it carries its own, built only from operations every machine performs exactly alike — add, multiply, divide, square root. The browser and a native build produce identical output, checked bit for bit.",
+        D.code.on ? "The text scrolling through the sky is this program's own source code." : "The whole program is published beside this page — use View Source.",
+      ],
+      recreate: () => ["Seed every random choice, and never draw randomness from the clock.", "Keep a list of every setting you chose. That list is the piece."],
+    },
+  ];
+
+  const titleOf = (l) => l.title;
+
+  function buildNav() {
+    lessonsEl.textContent = "";
+    let group = "";
+    LESSONS.forEach((l, i) => {
+      if (l.group !== group) {
+        group = l.group;
+        const h = document.createElement("h3");
+        h.textContent = group;
+        lessonsEl.appendChild(h);
+      }
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = titleOf(l);
+      b.addEventListener("click", () => show(i));
+      lessonsEl.appendChild(b);
+    });
+  }
+
+  function setSolo(n) {
+    soloOn = n;
+    if (node) node.port.postMessage({ solo: n });
+    lSolo.setAttribute("aria-pressed", n ? "true" : "false");
+    lSolo.textContent = n ? "Back to the full mix" : "Hear it alone";
+  }
+
+  function show(i) {
+    lesson = i;
+    const l = LESSONS[i];
+    [...lessonsEl.querySelectorAll("button")].forEach((b, k) => b.setAttribute("aria-current", k === i ? "true" : "false"));
+    if (soloOn) setSolo(0);
+    lTitle.textContent = titleOf(l);
+    lKicker.textContent = l.kicker();
+    lHow.innerHTML = l.how().filter(Boolean).map((p) => `<p>${p}</p>`).join("");
+    lRecreate.innerHTML = l.recreate().map((r) => `<li>${r}</li>`).join("");
+    lSolo.hidden = !l.solo || (l.title === "Drums" && !D.drums.on);
+  }
+
+  lSolo.addEventListener("click", async () => {
+    const l = LESSONS[lesson];
+    if (!l.solo) return;
+    if (!playing) await toggle();
+    setSolo(soloOn ? 0 : l.solo());
+  });
+
+  // The piece's description (for Learn and CyberPal) takes about a second
+  // to build, because it sets up the music engine once. It is built in a
+  // background worker, started as the page loads, so neither the picture
+  // nor the sound ever waits for it. The worker is written inline, so the
+  // page stays self-contained.
+  const DESCRIBE_WORKER = `self.onmessage = async (e) => {
+    try {
+      const { instance } = await WebAssembly.instantiate(e.data, {});
+      const x = instance.exports;
+      const p = x.shrine_new(0, 0, 2);
+      const len = x.shrine_learn_len(p), at = x.shrine_learn_ptr(p);
+      self.postMessage(new TextDecoder().decode(new Uint8Array(x.memory.buffer, at, len)));
+    } catch (err) {
+      self.postMessage(null);
+    }
+  };`;
+  let described = null;
+  function description() {
+    if (described) return described;
+    if (typeof shr.shrine_learn_ptr !== "function") return (described = Promise.resolve(null));
+    described = new Promise((resolve) => {
+      try {
+        const url = URL.createObjectURL(new Blob([DESCRIBE_WORKER], { type: "text/javascript" }));
+        const w = new Worker(url);
+        w.onmessage = (e) => {
+          w.terminate();
+          URL.revokeObjectURL(url);
+          try { resolve(e.data ? JSON.parse(e.data) : null); } catch { resolve(null); }
+        };
+        w.onerror = () => resolve(null);
+        w.postMessage(wasmBytes);
+      } catch {
+        resolve(null);
+      }
+    }).then((d) => {
+      if (d) D = d;
+      return d;
+    });
+    return described;
+  }
+
+  function openLearn() {
+    learning = true;
+    document.body.classList.add("learning");
+    if (node) node.port.postMessage({ live: true });
+    // CyberPal may have built the description already.
+    if (D && !lessonsEl.children.length) {
+      buildNav();
+      show(lesson);
+    }
+    if (!D) {
+      lTitle.textContent = "Preparing…";
+      lKicker.textContent = "Working out how this piece is made (a moment).";
+      description().then((d) => {
+        if (!d) {
+          lTitle.textContent = "Not available";
+          lKicker.textContent = "This build does not describe itself. Use the setup's Compile WASM to make one that does.";
+          return;
+        }
+        if (!lessonsEl.children.length) {
+          buildNav();
+          show(lesson);
+        }
+      });
+    }
+  }
+
+  function closeLearn() {
+    learning = false;
+    document.body.classList.remove("learning");
+    if (soloOn) setSolo(0);
+    if (node) node.port.postMessage({ live: false });
+  }
+
+  document.getElementById("learn-open").addEventListener("click", openLearn);
+  document.getElementById("learn-close").addEventListener("click", closeLearn);
+  window.addEventListener("keydown", (e) => {
+    if (!learning) return;
+    if (e.key === "Escape") closeLearn();
+    if (D && (e.key === "ArrowDown" || e.key === "ArrowUp") && e.target === document.body) {
+      e.preventDefault();
+      show((lesson + (e.key === "ArrowDown" ? 1 : LESSONS.length - 1)) % LESSONS.length);
+    }
+  });
+
+  // Called by the render loop each frame.
+  learnFrame = () => {
+    if (!learning || !D) return;
+    const note = LESSONS[lesson].draw(fit());
+    lLive.textContent = (note || "") + (soloOn && L ? ` · hearing ${D.solos[soloOn - 1].replace(/(\d)/, " $1").toLowerCase()} alone` : "");
+  };
+  learnState = (s) => { L = s; };
+  learnLive = () => learning;
+  // A link can open a lesson directly: #learn, or #learn-3 for the third.
+  const wanted = /^#learn(?:-(\d+))?$/.exec(location.hash);
+  if (wanted) {
+    lesson = Math.min(LESSONS.length, Math.max(1, Number(wanted[1] || 1))) - 1;
+    openLearn();
+  }
+
+  // ---------------------------------------------------------------- @ Orbs & CyberPal
+  // Now and then a glowing @ orb surfaces on a tile of the shrine. Click it and
+  // CyberPal, the page's digital guide, tells you one thing about how this
+  // piece is made. Page UI only: nothing here touches the music or the picture.
+  // Tweak these freely.
+  const orbTest = new URLSearchParams(location.search).get("orbs") === "test";
+  const ORB_EVERY_S = orbTest ? 1 : 6;     // how often an orb may appear
+  const ORB_CHANCE = orbTest ? 1 : 0.4;    // the chance it does, each time
+  const ORB_LIFE_S = 20;                   // how long an unclicked orb stays
+  const ORB_MAX = 4;                       // orbs at once
+  const ORB_RADIUS = 24;                   // in canvas pixels (1200 across)
+  const INSIGHT_HOLD_S = 15;               // how long a typed insight stays up
+  const INSIGHT_CPS = 40;                  // typing speed, characters per second
+  const UI_SOUND_LEVEL = 0.05;             // loudness of the orbs' hover and click sounds (0 = silent)
+
+  const orbs = [];       // { gx, gy, born, x, y, popped }
+  let orbClock = 0;      // seconds of playback counted towards the next roll
+  let hoverOrb = null;   // the orb under the pointer, if any
+  const insightEl = document.getElementById("insight");
+  const insightText = document.getElementById("insight-text");
+  const GLYPHS = "@#%&*+=<>/\\|{}[]01";
+
+  // Where a tile's top surface is on the 1200-pixel canvas now.
+  function tileOnCanvas(gx, gy) {
+    if (typeof shr.shrine_surface_point !== "function") return null;
+    const p = new Float64Array(shr.memory.buffer, shr.shrine_surface_point(visual, gx, gy, BigInt(Math.floor(clock))), 3);
+    return p[0] < 0 ? null : { x: p[0] * 4, y: p[1] * 4, level: p[2] };
+  }
+
+  function spawnOrb(now) {
+    if (orbs.filter((o) => !o.popped).length >= ORB_MAX) return;
+    // Mostly on the shrine itself, now and then out on the ground.
+    const onShrine = Math.random() < 0.7;
+    for (let tries = 0; tries < 24; tries++) {
+      const gx = Math.floor(Math.random() * 24), gy = Math.floor(Math.random() * 24);
+      if (orbs.some((o) => o.gx === gx && o.gy === gy)) continue;
+      const p = tileOnCanvas(gx, gy);
+      if (!p || p.x < 40 || p.x > 1160 || p.y < 60 || p.y > 1140) continue;
+      if (onShrine && p.level === 0 && tries < 20) continue;
+      orbs.push({ gx, gy, born: now, x: p.x, y: p.y, popped: 0, spin: Math.random() * 6 });
+      return;
+    }
+  }
+
+  function drawOrb(o, now) {
+    const age = (now - o.born) / 1000;
+    if (o.popped) {
+      // A burst of glyphs, scattering and fading.
+      const t = (now - o.popped) / 500;
+      screen.save();
+      screen.font = "bold 18px ui-monospace, SFMono-Regular, Menlo, monospace";
+      screen.textAlign = "center"; screen.textBaseline = "middle";
+      for (let k = 0; k < 10; k++) {
+        const a = (k / 10) * Math.PI * 2 + o.spin;
+        screen.globalAlpha = Math.max(0, 1 - t);
+        screen.fillStyle = k % 2 ? "#ff4fd8" : "#5ff7ff";
+        screen.fillText(GLYPHS[(k * 7 + o.gx) % GLYPHS.length], o.x + Math.cos(a) * t * 70, o.y - 26 + Math.sin(a) * t * 70);
+      }
+      screen.restore();
+      return t < 1;
+    }
+    const fadeIn = Math.min(1, age / 0.4);
+    const left = ORB_LIFE_S - age;
+    // Flicker out over the last two seconds.
+    const fadeOut = left > 2 ? 1 : Math.max(0, left / 2) * (Math.sin(now / 35) > -0.3 ? 1 : 0.25);
+    const alpha = fadeIn * fadeOut;
+    if (left <= 0) return false;
+    const bob = Math.sin(age * 2.2 + o.spin) * 5;
+    // Under the pointer it swells and flares, so it is plainly clickable.
+    o.hover = (o.hover || 0) + ((o === hoverOrb ? 1 : 0) - (o.hover || 0)) * 0.25;
+    const hv = o.hover;
+    const cx = o.x, cy = o.y - 38 + bob, r = ORB_RADIUS * (1 + 0.18 * hv);
+    screen.save();
+    screen.globalAlpha = alpha;
+    // Its tile, lit as a wireframe diamond, and a thin beam up to the orb.
+    const pulse = 0.5 + 0.5 * Math.sin(now / 300 + o.spin);
+    screen.strokeStyle = `rgba(95,247,255,${0.45 + 0.4 * pulse})`; screen.lineWidth = 1.5;
+    screen.beginPath(); screen.moveTo(o.x, o.y - 12); screen.lineTo(o.x + 25, o.y); screen.lineTo(o.x, o.y + 12); screen.lineTo(o.x - 25, o.y); screen.closePath(); screen.stroke();
+    screen.fillStyle = `rgba(95,247,255,${0.08 + 0.1 * pulse})`; screen.fill();
+    const beam = screen.createLinearGradient(0, o.y, 0, cy);
+    beam.addColorStop(0, "rgba(95,247,255,0.5)"); beam.addColorStop(1, "rgba(255,79,216,0)");
+    screen.fillStyle = beam; screen.fillRect(o.x - 1, cy + r, 2, o.y - cy - r);
+    // The halo and the glass body.
+    let g = screen.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 2.4);
+    g.addColorStop(0, `rgba(95,247,255,${0.35 + 0.45 * hv})`); g.addColorStop(0.5, `rgba(255,79,216,${0.12 + 0.25 * hv})`); g.addColorStop(1, "rgba(95,247,255,0)");
+    screen.fillStyle = g; screen.beginPath(); screen.arc(cx, cy, r * (2.4 + 0.8 * hv), 0, Math.PI * 2); screen.fill();
+    // A dark glass core, so the @ reads against it, rimmed in light.
+    g = screen.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, "rgba(6,18,36,0.55)"); g.addColorStop(0.7, "rgba(20,70,110,0.35)"); g.addColorStop(1, "rgba(255,79,216,0.35)");
+    screen.fillStyle = g; screen.beginPath(); screen.arc(cx, cy, r, 0, Math.PI * 2); screen.fill();
+    // A small specular glint, top left.
+    screen.fillStyle = "rgba(220,255,255,0.45)"; screen.beginPath(); screen.ellipse(cx - r * 0.45, cy - r * 0.5, r * 0.22, r * 0.12, -0.6, 0, Math.PI * 2); screen.fill();
+    screen.strokeStyle = "rgba(95,247,255,0.85)"; screen.lineWidth = 1.5; screen.stroke();
+    // A ring of scan dashes turning the other way.
+    screen.setLineDash([3, 5]); screen.lineDashOffset = -now / 40;
+    screen.strokeStyle = "rgba(255,79,216,0.6)"; screen.beginPath(); screen.arc(cx, cy, r + 6, 0, Math.PI * 2); screen.stroke();
+    screen.setLineDash([]);
+    if (hv > 0.02) {
+      // A bright outer ring, pulsing outwards, and a prompt.
+      const ping = (now / 700) % 1;
+      screen.strokeStyle = `rgba(95,247,255,${hv * (1 - ping)})`; screen.lineWidth = 2;
+      screen.beginPath(); screen.arc(cx, cy, r + 8 + ping * 18, 0, Math.PI * 2); screen.stroke();
+      screen.font = "bold 13px ui-monospace, SFMono-Regular, Menlo, monospace";
+      screen.textAlign = "center"; screen.textBaseline = "middle";
+      screen.fillStyle = `rgba(255,79,216,${hv})`; screen.shadowColor = "rgba(255,79,216,0.9)"; screen.shadowBlur = 6;
+      screen.fillText("[ CLICK ]", cx, cy - r - 22);
+      screen.shadowBlur = 0;
+    }
+    // The @, spinning on its vertical axis, split into cyan and magenta.
+    const spin = Math.cos(now / 900 + o.spin);
+    screen.translate(cx, cy);
+    screen.scale(0.35 + 0.65 * Math.abs(spin), 1);
+    screen.font = "bold 32px ui-monospace, SFMono-Regular, Menlo, monospace";
+    screen.textAlign = "center"; screen.textBaseline = "middle";
+    screen.fillStyle = "rgba(255,79,216,0.75)"; screen.fillText("@", -2, 1);
+    screen.fillStyle = "rgba(95,247,255,0.75)"; screen.fillText("@", 2, -1);
+    screen.shadowColor = "rgba(95,247,255,0.9)"; screen.shadowBlur = 8;
+    screen.fillStyle = spin < 0 ? "#bfefff" : "#ffffff"; screen.fillText("@", 0, 0);
+    screen.restore();
+    o.cx = cx; o.cy = cy;
+    return true;
+  }
+
+  // Called by the render loop each frame, after the picture is drawn.
+  orbFrame = (now, dt) => {
+    if (playing && !learnLive()) {
+      orbClock += dt;
+      if (orbClock >= ORB_EVERY_S) {
+        orbClock -= ORB_EVERY_S;
+        if (Math.random() < ORB_CHANCE) spawnOrb(now);
+      }
+    }
+    for (let i = orbs.length - 1; i >= 0; i--) {
+      const o = orbs[i];
+      if (!o.popped) {
+        const p = tileOnCanvas(o.gx, o.gy);
+        if (p) { o.x = p.x; o.y = p.y; }
+      }
+      if (learnLive() || !drawOrb(o, now)) orbs.splice(i, 1);
+    }
+  };
+
+  // The orbs' feedback sounds: tiny synthesised blips mixed straight to the
+  // output, panned to where the orb is. They never touch the music engine.
+  function uiSound(kind, x) {
+    if (!audio || audio.state !== "running" || UI_SOUND_LEVEL <= 0) return;
+    const t = audio.currentTime;
+    const out = new GainNode(audio, { gain: UI_SOUND_LEVEL });
+    const pan = new StereoPannerNode(audio, { pan: Math.max(-1, Math.min(1, ((x || 600) / 1200) * 2 - 1)) * 0.6 });
+    out.connect(pan).connect(audio.destination);
+    const pip = (freq, to, at, len, peak) => {
+      const o = new OscillatorNode(audio, { type: "sine", frequency: freq });
+      if (to) o.frequency.exponentialRampToValueAtTime(to, t + at + len * 0.6);
+      const g = new GainNode(audio, { gain: 0 });
+      g.gain.setValueAtTime(0, t + at);
+      g.gain.linearRampToValueAtTime(peak, t + at + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + at + len);
+      o.connect(g).connect(out);
+      o.start(t + at);
+      o.stop(t + at + len + 0.02);
+    };
+    if (kind === "hover") {
+      // A soft rising blip.
+      pip(1760, 2350, 0, 0.08, 0.5);
+    } else {
+      // Two quick pips a fifth apart, and a tiny bright tick.
+      pip(1320, 0, 0, 0.09, 0.6);
+      pip(1980, 0, 0.055, 0.12, 0.5);
+      const n = Math.floor(audio.sampleRate * 0.015);
+      const buf = new AudioBuffer({ length: n, sampleRate: audio.sampleRate });
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+      const src = new AudioBufferSourceNode(audio, { buffer: buf });
+      const bp = new BiquadFilterNode(audio, { type: "bandpass", frequency: 6000, Q: 1.5 });
+      const g = new GainNode(audio, { gain: 0.35 });
+      src.connect(bp).connect(g).connect(out);
+      src.start(t);
+    }
+    setTimeout(() => { out.disconnect(); pan.disconnect(); }, 600);
+  }
+
+  // Which orb (if any) is under a point of the page.
+  function orbAt(clientX, clientY) {
+    const r = canvas.getBoundingClientRect();
+    const x = ((clientX - r.left) / r.width) * 1200, y = ((clientY - r.top) / r.height) * 1200;
+    return orbs.find((o) => !o.popped && o.cx !== undefined && Math.hypot(x - o.cx, y - o.cy) < ORB_RADIUS * 1.8);
+  }
+  frameEl.addEventListener("mousemove", (e) => {
+    const was = hoverOrb;
+    hoverOrb = orbAt(e.clientX, e.clientY) || null;
+    if (hoverOrb && hoverOrb !== was) uiSound("hover", hoverOrb.cx);
+    canvas.style.cursor = hoverOrb ? "pointer" : "";
+  });
+  frameEl.addEventListener("mouseleave", () => { hoverOrb = null; });
+
+  // ---------------- CyberPal's insights
+  // Each is true for this piece (`when`) and filled with its own values.
+  // Topics: the music, the sound design, and the picture.
+  const s1 = (x, d = 1) => Number(x).toFixed(d).replace(/\.0+$/, "");
+  const on = (D) => D.loops.filter((l) => l.on);
+  const M = (D, ...ms) => ms.includes(D.mode.index);
+  // Short and practical: each line teaches one thing you could rebuild
+  // yourself, and fits the bar in two lines (at most INSIGHT_MAX characters).
+  const INSIGHT_MAX = 122;
+  const INSIGHTS = [
+    // ---- The software
+    ["music", () => true, () => "Plot twist: nothing here is recorded. I compute every sample live, 48,000 a second, and replay it exactly."],
+    ["music", () => true, (D) => `This whole piece is a recipe of ${D.recipe.length} numbers: seeds plus every setting. Keep them and you can rebuild it, note for note.`],
+    ["music", () => true, () => "House rule: seed every random choice from fixed numbers, never the clock. That's how a piece replays exactly."],
+    ["music", () => true, () => "Secret: your system's sin() rounds differently from mine, so I build my own from + − × ÷ and √. Every chip agrees."],
+    ["music", () => true, () => "The browser and the native build make the same audio, bit for bit. Every build hashes millions of samples to prove it."],
+    ["music", () => true, () => "Under the hood: one WebAssembly file with zero imports. An AudioWorklet asks it for 128 samples at a time and plays them."],
+    ["music", () => true, () => "The engine uses only Rust's standard library: no packages at all. The whole piece compiles from one readable source file."],
+    ["music", () => true, () => "Rendering never depends on block size: 128 samples at a time or 4096, every event lands on its exact sample number."],
+    ["music", (D) => D.start_s > 0, (D) => `This piece starts ${D.start_s} s in. I fast-forward the music exactly to that point, then fade in over a second and a half.`],
+    ["music", () => true, () => "Old recipes still open: each one carries a version number, and missing settings fall back to their defaults."],
+    ["music", () => true, () => "The music fades in over its first 10 seconds, so the first drone frame never starts with a jolt."],
+    // ---- Form and timing
+    ["music", () => true, () => "No written sections: seven slow LFOs of 41, 61, 97, 151, 233, 307 and 113 s automate the layers instead."],
+    ["music", () => true, () => "Those LFO lengths are primes on purpose: with no shared factors, they would take days to line up the same way again."],
+    ["music", () => true, (D) => `Drums run at ${D.bpm} BPM; every ambient layer moves at exactly half that, so the slow bed and the fast beat stay locked.`],
+    ["music", (D) => D.drums.on, (D) => `Drum phrases are four bars (${s1(D.phrase_s, 1)} s). A slow energy LFO, plus a little chance, picks each phrase's section ahead of time.`],
+    ["music", (D) => D.drums.on, () => "The first two phrases are always drum-free, and the third is hats only, so every piece opens as ambience before the beat."],
+    // ---- Harmony
+    ["music", () => true, (D) => `We're in ${D.key.name} ${D.scale.name}: ${D.scale.mood}. Every note I play is from it.`],
+    ["music", (D) => D.chords.length > 1, () => "Chord recipe: stack scale notes in thirds (root, 3rd, 5th, 7th, 9th…) over three octaves; leave one out for air."],
+    ["music", (D) => M(D, 0, 1), (D) => `${D.chords.length} chords share a ${s1(D.cycle_s / 60, 1)}-minute cycle unevenly (${D.chords.map((c) => c.bars).join("/")} bars). The first two carry it; the rest pass by.`],
+    ["music", (D) => M(D, 0, 1) && D.chords.length > 1, () => "Each chord change is a crossfade a whole bar long, blending the frozen spectra bin by bin, so there is never a seam."],
+    ["music", (D) => M(D, 0, 1), () => "Later chords prefer strong degrees (4th, 5th, 6th) and never repeat the one before, so the harmony keeps moving."],
+    ["music", (D) => M(D, 2), (D) => `2-step progression: ${D.garage.progression}. It changes every two bars on the downbeat, so the bass and pads always turn together.`],
+    ["music", (D) => M(D, 2), () => "Garage progressions borrow chords from outside the key (a secondary dominant, a borrowed iv, ♭VII) to lift."],
+    ["music", (D) => M(D, 2) && D.garage.lift !== "off", (D) => `Key lift (${D.garage.lift}): the whole loop steps up a whole tone for a while, then drops home. A classic menu-music move.`],
+    ["music", (D) => M(D, 3) && D.micro.chords !== "slow", (D) => `My microsound chords change ${D.micro.chords}, crossing over in a single beat: small sounds, quick, regular turns.`],
+    ["music", (D) => M(D, 3), () => "Microsound defaults to the minor pentatonic: five notes with no semitones between them, so no pip can ever clash."],
+    // ---- The drone
+    ["sound", (D) => !M(D, 3), () => "Drone recipe: play the chord on a three-operator FM synth, record about 8 s, then spectral-freeze the recording."],
+    ["sound", (D) => !M(D, 3) && D.recipes[0] && D.recipes[0][0], (D) => `This chord's first FM voice: modulators at ×${s1(D.recipes[0][0].r2, 2)} and ×${s1(D.recipes[0][0].r3, 2)}, wired as ${D.recipes[0][0].stack ? "a stack (3 → 2 → 1)" : "a pair (2 and 3 into 1)"}.`],
+    ["sound", (D) => !M(D, 3), () => "Near-whole-number FM ratios (½, 1, 2, 3, 4.003) keep the chord harmonic, with just a hint of shimmer from the odd one."],
+    ["sound", (D) => M(D, 3), () => "Microsound drone: the same chord, but every FM index set to zero, so each note is a pure sine. Thin, glassy, still."],
+    ["sound", () => true, (D) => `The freeze trick: keep each frequency bin's level, give it a new random phase every ${s1(D.hop_s * 1000, 0)} ms, and overlap the frames.`],
+    ["sound", () => true, (D) => `Freeze window: ${D.fft_size} samples, about 0.68 s. Long windows smear the chord into a cloud with no attack left in it.`],
+    ["sound", () => true, () => "Four squared-Hann frames a quarter apart sum to exactly 1.5, so the random-phase frames blend at a steady level."],
+    ["sound", () => true, () => "Freeze the chord twice and pan one left, one right. Independent random phases make it wide, yet it never cancels in mono."],
+    ["sound", () => true, (D) => `The drone's low-pass sweeps ${s1(D.drone_cutoff.min, 0)} Hz to ${s1((D.drone_cutoff.min * Math.pow(2, D.drone_cutoff.octaves)) / 1000, 1)} kHz, pushed by two LFOs that never agree.`],
+    ["sound", () => true, (D) => `Below ${M(D, 3) ? 220 : 110} Hz the frozen spectrum is left empty: the low end belongs to the bass, so the two never fight.`],
+    ["sound", (D) => D.drone_arc.cycle_s > 0, (D) => `The drone comes and goes on a ${D.drone_arc.cycle_s} s arc, in for ${D.drone_arc.hold_s} s, with slow raised-cosine fades at each end.`],
+    ["sound", (D) => D.drone_rhythm, () => "Drone rhythm is on: seed 7 picks an amplitude LFO that pulses the frozen chord in time with the beat."],
+    ["sound", (D) => M(D, 3) && D.micro.drone_fragments, (D) => `I gate the drone in strict rhythm: ${D.micro.drone_fragments[0]} sixteenths on, ${D.micro.drone_fragments[1]} off, 3 ms attack, 25 ms release, locked to the bar.`],
+    ["sound", (D) => M(D, 3) && D.micro.shift !== "off" && D.micro.shift_figure, (D) => `Each drone fragment hops to the next step of ${D.micro.shift_figure.map((x) => (x > 0 ? "+" : "") + x).join(", ")} semitones, via a two-head delay-line pitch shifter.`],
+    ["sound", (D) => M(D, 2), () => "Under 2-step chords my drone holds just an open fifth on the tonic, and ducks further when a chord rubs."],
+    // ---- Glitches
+    ["sound", () => true, (D) => `Two glitch loops of ${D.glitch[0].steps} and ${D.glitch[1].steps} steps run side by side. Co-prime lengths only realign every ${D.glitch[0].steps * D.glitch[1].steps} steps.`],
+    ["sound", () => true, () => "My glitch palette: crushed FM blips, noise ticks, drone grains, bell pings, square-wave clicks, bit-crushed bursts."],
+    ["sound", () => true, () => "Every few loops one glitch step mutates: new sound, rest, new pitch, or the loop rotates. Never quite repeating."],
+    ["sound", () => true, () => "Try this: give each step its own threshold and gate it with a slow density LFO. The layers thin out and fill back in."],
+    ["sound", () => true, () => "Stutter glitches use no samples: they grab a few ms of the drone itself and repeat it, so they always fit the chord."],
+    ["sound", () => true, () => "A glitch step can ratchet: retrigger two to eight times within its slot, for those tiny buzzing rolls."],
+    ["sound", () => true, (D) => `Glitch echo: ping-pong, ${s1(D.echo.delay_s * 1000, 0)} ms, ${s1(D.echo.feedback * 100, 0)} % feedback, with a low-pass in the loop so each bounce darkens.`],
+    ["sound", (D) => M(D, 2), () => "In 2-step the glitch pitches keep to the key's root and fifth only, so they sit under any chord in the progression."],
+    ["sound", (D) => M(D, 3), () => "In microsound, pings, blips and stutters last a quarter as long, and the glitch echo barely repeats."],
+    // ---- Drums
+    ["music", (D) => D.drums.on && M(D, 0, 1), (D) => `Break recipe: play 2 bars at ${s1(D.drums.source_bpm, 0)} BPM, cut into 32 slices, replay at ${D.bpm} BPM: ${s1(D.drums.semitones_up, 1)} semitones up, the jungle way.`],
+    ["music", (D) => D.drums.on && M(D, 0, 1), () => "Each bar I swap a few slices: repeat, reverse, stutter or pitch down. A seed and the bar number pick the edits."],
+    ["sound", (D) => D.drums.on && M(D, 0, 1), (D) => `The break goes through a sampler colour: saturation, sample-and-hold, ${D.drums.bits}-bit depth, a low-pass and a small room.`],
+    ["sound", (D) => D.drums.on && M(D, 0, 1, 2), () => "Before sampling, the break is bussed: transient boost, drive and bus compression, like running it through hardware."],
+    ["sound", (D) => D.drums.on, () => "Cymbal choke: each hat or ride stops the one before it, like a real drummer's hand. It keeps the top end tidy."],
+    ["sound", (D) => D.drums.on, (D) => `Drum space: ${D.drums.space} — ${D.drums.space_blurb}. The kick always stays in the centre.`],
+    ["music", (D) => D.drums.on && M(D, 0, 1), () => "Half-time sections play each slice at half speed across two steps: the classic drag, lower and lazier."],
+    ["music", (D) => D.drums.on && M(D, 0, 1), () => "Hats-only sections glide a 5 kHz high-pass over the break, so only the cymbals remain before the full beat drops back in."],
+    ["music", (D) => D.drums.on && M(D, 2), (D) => `2-step: kick on 1, a second kick skipping past beat 3, claps on 2 and 4, rimshots on the pushes, hats swung ${D.garage.swing} %.`],
+    ["music", (D) => D.drums.on && M(D, 2), () => "Swing tip: echo by an even number of 16ths (here 6). An odd number flips each repeat to the other side of the swing."],
+    ["music", (D) => D.drums.on && M(D, 2), () => "The garage breakdown filters the kick and low end away, so the claps and hats float on their own before the drop."],
+    ["music", (D) => D.drums.on && M(D, 2), () => "Open hats land on the off-beat eighths; the closed ones shuffle between them. That off-beat open hat is the 2-step bounce."],
+    ["music", (D) => D.drums.on && M(D, 3), () => "My micro pulse: 45–55 Hz sine kicks, clicks one to three samples long, 2–8 ms noise grains, dead straight on 16ths."],
+    ["sound", (D) => D.drums.on && M(D, 3), () => "Microsound clicks skip the sampler chain: no saturation, no bit-crush, no room. Every transient stays razor sharp."],
+    ["music", (D) => D.drums.on && M(D, 3) && D.micro.dropouts !== "off", () => "Those stumbles are edits: a step drops out, skips back to repeat the one before, or ratchets four times in a sixteenth."],
+    ["sound", (D) => D.drums.on, (D) => `Today's kit: ${D.drums.kit} (${D.drums.blurb}). Every voice is synthesised; seed 5 tunes each one.`],
+    ["sound", (D) => D.drums.on, () => "Making room: while the drums play, the drone dips about 5 dB, pumps a little on every hit and loses some of its top end."],
+    // ---- Bass
+    ["music", (D) => M(D, 0, 1), () => "Bass recipe: an FM bass plus a pure sine an octave below, low-passed near 300 Hz, gliding to each new chord root."],
+    ["music", (D) => M(D, 0, 1), () => "A hair of detune between the FM bass and its sub makes them beat slowly against each other: movement with no LFO at all."],
+    ["music", (D) => M(D, 2) && D.garage.bass === "rhythmic", () => "2-step bass: syncopated 16ths on root, octave and fifth, swung with the drums, sliding in a semitone under the next chord."],
+    ["music", (D) => M(D, 2), () => "The 2-step bassline and stabs both duck under every kick, a built-in sidechain that keeps the low end punchy."],
+    ["music", (D) => M(D, 3), () => "Microsound bass: one short sine on the chord root, on the off-beat eighths only, rocking against the sub kick."],
+    ["music", () => true, (D) => `The chord roots I follow: ${D.chords.map((c) => NOTE[Math.round(c.bass) % 12]).join(", ")}. The bass always lands on the root, never a passing tone.`],
+    // ---- Loops and melody
+    ["sound", (D) => on(D).length > 1, (D) => `My pad loops: ${on(D).map((l) => `${l.design.name} (${l.beats})`).join(", ")} beats. No shared factor, so they keep drifting apart.`],
+    ["sound", (D) => on(D).length > 0, () => "Each pad loop is a short recorded performance of the chord, crossfaded at its seam so you never hear the join."],
+    ["sound", (D) => D.transpose !== 0, (D) => `The atmosphere loops are transposed ${D.transpose > 0 ? "+" : ""}${D.transpose} semitones against the drone.`],
+    ["sound", (D) => M(D, 3), (D) => `Grain cloud (${D.micro.grains}): I replay 20–80 ms windowed slices of the last 1.5 s of pads, some an octave up or down.`],
+    ["sound", (D) => M(D, 3), () => "Each pad loop has its own fragment rhythm too, started on its own beat, so the layers interlock instead of doubling up."],
+    ["sound", (D) => M(D, 3) && D.micro.pips !== "off", () => "Hear the pips? Chord tones three or four octaves up, 5–40 ms sine blips, each pinned to its own spot in stereo."],
+    ["sound", (D) => M(D, 3) && D.micro.pips !== "off", () => "Some pips come in pairs, a thirty-second apart on opposite sides: a tiny stereo ping-pong with no delay effect."],
+    ["music", (D) => M(D, 2) && D.garage.stabs !== "off", (D) => `Stab recipe: short seventh chords on the off-beat pushes, voice-led so the top note steps, in a ${D.garage.tone} tone.`],
+    ["sound", (D) => M(D, 2) && D.garage.stabs !== "off", () => "At every chord change the stab echo empties itself in 20 ms, so the old chord never rings over the new one."],
+    ["sound", (D) => M(D, 2), () => "Just before each change the reverb send dips, so the old chord's tail fades before the new chord arrives."],
+    // ---- Space and the mix
+    ["sound", () => true, (D) => `My reverb: 8 delay lines feeding back into each other, falling 60 dB in ${s1(D.reverb.decay_s, 1)} s. Send to it; don't insert it.`],
+    ["sound", () => true, () => "The reverb's delay lines have unrelated lengths, so their echoes never pile up on one pitch: no metallic ring."],
+    ["sound", (D) => D.master.length > 0, (D) => `Master effects in the chain right now: ${D.master.join(", ")}.`],
+    ["sound", () => true, () => "The mix ends in a gentle tanh soft clip, which rounds off peaks instead of cutting them, plus a DC blocker."],
+    ["sound", () => true, () => "Soloing a layer in Learn changes only what you hear: the full mix keeps running underneath, sample for sample."],
+    // ---- Weather and sound design
+    ["sound", () => true, () => "The rain you hear is a wash: band-passed noise hiss over a low body, louder and darker as the rain thickens."],
+    ["sound", () => true, () => "Thunder arrives after the flash, delayed by the strike's distance. Count the seconds and you know how far away it was."],
+    ["sound", () => true, () => "The wind is filtered noise that swells with each gust, plus a whistle that only sings when a gust is strong."],
+    ["visual", () => true, () => "All weather particles drift on one smooth sideways wind that turns round only every half-minute or more."],
+    ["visual", () => true, () => "Rain streaks lean along their travel: across by the wind, down by their fall, so they point where they are going."],
+    ["visual", (D) => D.biome.roofed, () => "There's a roof up there: rain hits the glass above you, and I low-pass the weather so it sounds properly indoors."],
+    ["visual", (D) => !!D.wildlife, (D) => `Wildlife's on: ${D.wildlife}. Their calls thin out in storms and snow, as real ones would.`],
+    // ---- The picture
+    ["visual", () => true, () => "Pixel-art rule: draw at 300×300, scale ×4 with nearest-neighbour. Never smooth it, or the crisp pixels turn to mush."],
+    ["visual", () => true, () => "Isometric maths: screen x = (gx − gy)·w/2, y = (gx + gy)·h/2 − height. Paint the cells back to front."],
+    ["visual", () => true, () => "One grid cell is 12.5 art pixels wide, so 24 span the picture. Edges round in fixed point: 16 steps a pixel."],
+    ["visual", () => true, (D) => `The shrine is a ${D.shrine.size}×${D.shrine.size} height map of solid columns, filled from the ground up, so no tile can ever float.`],
+    ["visual", () => true, () => "Painter's order: columns sort by gx + gy, far to near. When the camera turns, they re-sort by their turned depth."],
+    ["visual", () => true, (D) => `Biome: ${D.biome.name}, ${D.biome.blurb}. The seed picks the palette's hues within it.`],
+    ["visual", () => true, () => "Palette trick: a handful of colour roles (sky, stone, foliage, water, accent), each a light, mid and dark shade."],
+    ["visual", () => true, () => "Every surface is lit three ways: a key light, a soft fill from the sky, then the weather's own colour grade on top."],
+    ["visual", () => true, (D) => `Weather: ${D.weather.name}, ${D.weather.blurb}. Same clock as the music.`],
+    ["visual", () => true, () => "Snow doesn't just fall: a cover value slowly whitens the tops of the stones the longer it snows."],
+    ["visual", () => true, () => "The plants grow from the seed: small stem and leaf shapes per biome, each swaying on its own phase with the wind."],
+    ["visual", () => true, () => "Sync the visuals to the audio clock (samples played), never the frame timer. Then they can't drift apart."],
+    ["visual", () => true, () => "Move your pointer: I shear x by depth and squash y a touch. A convincing camera move with no 3D maths at all."],
+    ["visual", (D) => D.camera_speed !== 0, (D) => `The camera orbits at ${D.camera_speed}°/s: the grid turns about the shrine's centre, and the plants stay upright.`],
+    ["visual", (D) => D.code.on, () => "That text in the sky? My own source code, scrolling behind the shrine. You're reading the piece while it plays."],
+    ["visual", () => true, () => "These @ orbs sit on a tile's top surface, placed with the same projection the rain splashes use, so they ride the camera."],
+  ];
+
+  // Shuffled draws: a random line you haven't seen yet, remembered for this
+  // tab's session (a reload continues the run). Once every line true for
+  // this piece has been seen, the run starts over, never with the last one.
+  const SEEN_KEY = "cyberpal-seen";
+  let seen = new Set();
+  try { seen = new Set(JSON.parse(sessionStorage.getItem(SEEN_KEY) || "[]")); } catch {}
+  let lastShown = -1;
+  function nextInsight() {
+    const pool = INSIGHTS.map((ins, i) => [ins, i]).filter(([[, when, text]]) => {
+      if (!D) return text.length === 0 && when.length === 0;
+      try { return when(D); } catch { return false; }
+    });
+    let fresh = pool.filter(([, i]) => !seen.has(i));
+    if (fresh.length === 0) {
+      seen = new Set();
+      fresh = pool.filter(([, i]) => i !== lastShown);
+    }
+    const [[, , text], i] = fresh[Math.floor(Math.random() * fresh.length)] || pool[0];
+    seen.add(i);
+    lastShown = i;
+    try { sessionStorage.setItem(SEEN_KEY, JSON.stringify([...seen])); } catch {}
+    try { return text(D); } catch { return "Signal lost. Catch another orb and I'll try again."; }
+  }
+
+  // CyberPal uses the description once it has arrived; until then, the
+  // lines that need no values.
+  function ensureDescription() {
+    description();
+  }
+
+  // The bar: rises, types, holds, slides away.
+  let typing = null;     // { text, shown, started }
+  let holdTimer = 0;
+  function showInsight() {
+    ensureDescription();
+    const text = nextInsight();
+    clearTimeout(holdTimer);
+    insightEl.classList.remove("open");
+    void insightEl.offsetWidth;          // restart the rise and the glitch
+    insightEl.classList.add("open");
+    typing = { text, started: performance.now(), done: false };
+  }
+  function hideInsight() {
+    clearTimeout(holdTimer);
+    insightEl.classList.remove("open");
+    typing = null;
+  }
+  function finishTyping() {
+    if (!typing || typing.done) return;
+    typing.done = true;
+    insightText.textContent = typing.text;
+    insightText.dataset.cursor = "1";
+    holdTimer = setTimeout(hideInsight, INSIGHT_HOLD_S * 1000);
+  }
+  // The typewriter, driven by the render loop: a few characters ahead still
+  // "decoding" from random glyphs before they settle.
+  insightFrame = (now) => {
+    if (!typing || typing.done) return;
+    const n = Math.floor(((now - typing.started) / 1000) * INSIGHT_CPS);
+    if (n >= typing.text.length) return finishTyping();
+    let noise = "";
+    for (let k = 0; k < 2 && n + k < typing.text.length; k++) noise += typing.text[n + k] === " " ? " " : GLYPHS[Math.floor(Math.random() * GLYPHS.length)];
+    insightText.textContent = typing.text.slice(0, n) + noise;
+    insightText.dataset.cursor = "1";
+  };
+  insightEl.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (typing && !typing.done) finishTyping();
+    else hideInsight();
+  });
+
+  // A click on an orb pops it and calls CyberPal. Anywhere else closes an open
+  // insight, or (with none open) plays or pauses.
+  function onStageClick(e) {
+    const o = orbAt(e.clientX, e.clientY);
+    if (!o && insightEl.classList.contains("open")) {
+      hideInsight();
+      return;
+    }
+    if (o) {
+      uiSound("pop", o.cx);
+      o.popped = performance.now();
+      showInsight();
+      return;
+    }
+    toggle();
+  }
+  // Start building the description now, in the background.
+  description();
+  if (orbTest) {
+    window.shrineOrbs = () => orbs.map((o) => ({ x: o.cx, y: o.cy, popped: !!o.popped }));
+    window.shrineDraw = async (n) => { await description(); return Array.from({ length: n }, () => nextInsight()); };
+    // Every line true for this piece: its length, and how many rows it takes in the bar.
+    window.shrineInsightRows = async () => {
+      await description();
+      insightEl.classList.add("open");
+      const lh = parseFloat(getComputedStyle(insightText).lineHeight);
+      const out = INSIGHTS.filter(([, when]) => { try { return when(D); } catch { return false; } }).map(([, , text]) => {
+        const t = text(D);
+        insightText.textContent = t;
+        insightText.dataset.cursor = "1";
+        return { len: t.length, rows: Math.round(insightText.scrollHeight / lh), t };
+      });
+      insightEl.classList.remove("open");
+      return out;
+    };
+  }
+
+  stage.addEventListener("click", onStageClick);
+
+  function aim(clientX, clientY) {
+    const r = canvas.getBoundingClientRect();
+    // Inverted: the view follows the pointer (up tilts the camera up).
+    targetYaw = -Math.max(-1, Math.min(1, ((clientX - r.left) / r.width) * 2 - 1));
+    targetPitch = -Math.max(-1, Math.min(1, ((clientY - r.top) / r.height) * 2 - 1));
+  }
+  // The camera follows the pointer only over the square visual itself (the
+  // frame shrink-wraps the canvas), and eases back to centre when it leaves.
+  const recentre = () => { targetYaw = 0; targetPitch = 0; camReturning = true; };
+  // Coming back in eases the follow up from soft to brisk.
+  const engage = () => { camReturning = false; camEngage = 0; };
+  frameEl.addEventListener("mouseenter", engage);
+  frameEl.addEventListener("touchstart", engage, { passive: true });
+  frameEl.addEventListener("mousemove", (e) => { camReturning = false; aim(e.clientX, e.clientY); });
+  frameEl.addEventListener("mouseleave", recentre);
+  frameEl.addEventListener("touchend", recentre);
+  frameEl.addEventListener("touchmove", (e) => {
+    const t = e.touches[0];
+    camReturning = false;
+    if (t) aim(t.clientX, t.clientY);
+  }, { passive: true });
+</script>
+</body>
+</html>
