@@ -251,22 +251,36 @@ settings are the **home**, at `0, 0`; every other spot `x, y` is a fixed
 shrine grown from the home.
 - **Every spot has its own architecture.** Every other group of settings in
   the Randomize menu changes only at the borders of its own square regions,
-  each group with its own size: biomes and modes in wide regions, glitches
-  and music seeds in small ones. A step to the next shrine usually changes
-  about two groups, and the rest carries over.
+  each group with its own size. A step to the next shrine usually changes
+  about four groups.
+- **The music belongs to the biome.** Its core (seeds, mode, scale and
+  chords, tempo, drums, the mode's own details, atmosphere and drone)
+  changes all at once at a biome's border, so each biome is a musical world
+  of its own. Within a biome, shrines differ only in their glitches and a
+  nudge of tempo (±3 BPM). Weather, architecture, wildlife and the code
+  overlay change more often.
 - **What stays the same:** the master effects are always the home's. Every
-  shrine away from home turns at −2°/s and starts at the beginning.
+  shrine away from home holds still (no camera turn, so the map's directions
+  always look the same) and starts at the beginning. The default Rotation
+  speed is 0 here too.
 - **Deterministic:** the same home and coordinates always give the same
   shrine, natively and in the browser (`engine/src/explore.rs`;
   `MAP_REGION_SCALE` makes the map gentler or livelier).
 
 **On the page:**
-- Hover near one of the shrine's four sides and a glowing arrow appears there,
-  turning with the shrine. Click it to travel to the next shrine in that
-  direction: the music fades out, the picture slides across, and the new
-  shrine's music fades in.
-- The readout at the top left shows where you are (`⌖ 3, −2`), and the
-  address bar follows (`#at=3,-2`), so a link opens that very shrine.
+- Hover near one of the island's four sides and a glowing arrow appears just
+  beyond its edge. Click it to travel to the next shrine in that direction:
+  1. the next island fades in beside this one, joined edge to edge as on a map;
+  2. the view pans across to it while the sky blends from one to the other;
+  3. the old island fades away;
+  4. the music fades out and the new shrine's fades in;
+  5. a banner names the zone (biome, weather, mode, coordinates), and marks a
+     biome you haven't been to yet.
+- The readout at the top left shows where you are (`⌖ 3, −2`). Under it, a
+  minimap shows the spots around you as diamonds coloured by biome, laid out
+  like the island, so its directions match the arrows. Places you've visited
+  are bright, the rest dimmed; `⌂` is home.
+- The address bar follows (`#at=3,-2`), so a link opens that very shrine.
 
 **In the setup** (Track section):
 - **Map position** takes `x, y` (or `←→` for x and `Shift+←→` for y). The

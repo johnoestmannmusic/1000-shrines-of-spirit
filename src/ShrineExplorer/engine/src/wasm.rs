@@ -237,6 +237,12 @@ pub extern "C" fn shrine_map_y() -> i32 {
     0
 }
 
+/// The spot `(x, y)` of this module's map at a glance (see `explore::glance`).
+#[no_mangle]
+pub extern "C" fn shrine_map_glance(x: i32, y: i32) -> u32 {
+    crate::explore::glance(&SimConfig::default(), x, y)
+}
+
 /// Hear one layer alone (1 drone, 2–3 glitch layers, 4 bass, 5 drums, 6–9
 /// atmosphere loops, 10 the echo and reverb), or 0 for the full mix.
 ///

@@ -19,10 +19,10 @@ const AUDIO_GOLDEN = 0x70545ad52e582d4cn; // re-locked in 0015: raindrops no lon
 // VISUAL_GOLDEN in engine/tests/parity_golden.rs.
 const VISUAL_GOLDEN = [
 	0x259177ba49068105n,
-	0x3f8b7f61cf5efa11n,
-	0x38cef5aedfc22271n,
-	0xd7e6abfcd43f53afn,
-	0x77670ffc29613ff0n,
+	0x52987831764b66c4n,
+	0x84639ce1ad388b20n,
+	0x12ada6233bf280a9n,
+	0x41e12eadda9c0629n,
 ];
 const SR = 48000;
 const LOGICAL = 300;

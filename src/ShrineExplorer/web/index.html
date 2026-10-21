@@ -64,7 +64,20 @@
     font: clamp(9px, 1.2cqw, 13px) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.08em;
     color: #5ff7ff; background: rgba(6, 12, 28, 0.6); border: 1px solid rgba(95, 247, 255, 0.45);
     text-shadow: 0 0 6px rgba(95, 247, 255, 0.6); pointer-events: none; }
-  body.learning .coords { display: none; }
+  body.learning .coords, body.learning .minimap, body.learning .banner { display: none; }
+  /* The map around you, in the same diamond layout as the island, so its
+     directions match the arrows. */
+  .minimap { position: absolute; top: calc(2% + 2.1em); left: 2%; z-index: 1; width: clamp(90px, 15cqw, 176px); height: auto;
+    image-rendering: auto; background: rgba(6, 12, 28, 0.55); border: 1px solid rgba(95, 247, 255, 0.35); pointer-events: none;
+    font-size: clamp(9px, 1.2cqw, 13px); }
+  /* Arriving somewhere: the place's name, like entering a new zone. */
+  .banner { position: absolute; left: 0; right: 0; top: 14%; z-index: 1; text-align: center; pointer-events: none;
+    opacity: 0; transform: translateY(-6px); transition: opacity 0.6s, transform 0.6s; line-height: 1.35; }
+  .banner.show { opacity: 1; transform: translateY(0); }
+  .banner .title { font: 700 clamp(14px, 3.4cqw, 34px) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.32em;
+    color: #e8ffff; text-shadow: 0 0 10px rgba(95, 247, 255, 0.9), 2px 0 0 rgba(255, 79, 216, 0.6), -2px 0 0 rgba(95, 247, 255, 0.6); }
+  .banner .sub { margin-top: 0.3em; font: clamp(9px, 1.5cqw, 15px) ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    letter-spacing: 0.18em; color: #ff4fd8; text-shadow: 0 0 6px rgba(255, 79, 216, 0.8); }
   .snap { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; pointer-events: none; }
   /* A small picture (phones): a tighter box and a slightly smaller floor, so
      a full insight still fits in two rows. */
@@ -156,6 +169,8 @@
         <span class="more" aria-hidden="true">▼</span>
       </div>
       <div class="coords" id="coords" title="Where you are on this shrine's map">⌖ 0, 0</div>
+      <canvas class="minimap" id="minimap" width="176" height="104" aria-label="The map around you"></canvas>
+      <div class="banner" id="banner" aria-live="polite"><div class="title" id="banner-title"></div><div class="sub" id="banner-sub"></div></div>
       <div class="overlay" id="overlay">
         <span class="icon" id="icon">▶</span>
         <small id="hint">click to begin</small>
@@ -388,6 +403,9 @@
   let clockBase = 0;        // last sample count reported by the worklet
   let clockBaseAt = 0;      // performance.now() when it arrived
   let haveClockBase = false;
+  // After a move, the picture started before the new music did: it stays
+  // this many samples ahead, so it never jumps back.
+  let clockShift = 0;
   let audioStartedAt = 0;
   let playing = false;
   let audio = null;
@@ -398,7 +416,7 @@
   // Learn mode's hooks (set up below).
   let learnFrame = null, learnState = null, learnLive = () => false;
   // The explorer's hooks (set up below).
-  let exploreFrame = null, onArrived = null, arrowsDraw = null;
+  let exploreFrame = null, onArrived = null, arrowsDraw = null, transDraw = null;
   // The orbs' and CyberPal's hooks (set up below).
   let orbFrame = null, insightFrame = null;
 
@@ -419,9 +437,9 @@
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     if (playing) {
-      clock = haveClockBase
+      clock = clockShift + (haveClockBase
         ? clockBase + ((now - clockBaseAt) * SAMPLE_RATE) / 1000
-        : ((now - audioStartedAt) * SAMPLE_RATE) / 1000;
+        : ((now - audioStartedAt) * SAMPLE_RATE) / 1000);
     }
     // Frame-rate independent easing; the return also starts gently.
     if (!camReturning) camEngage = Math.min(1, camEngage + dt / CAM_ENGAGE_S);
@@ -433,6 +451,9 @@
     if (typeof shr.shrine_set_camera === "function") {
       shr.shrine_set_camera(visual, camYaw, camPitch);
     }
+    if (transDraw && transDraw(now, dt)) {
+      // (A move between shrines draws both islands over a blended sky.)
+    } else {
     const ptr = shr.shrine_render_visual(visual, BigInt(Math.floor(clock)));
     const src = new Uint8ClampedArray(shr.memory.buffer, ptr, LOGICAL * LOGICAL * 4);
     image.data.set(src);
@@ -445,6 +466,7 @@
       screen.clearRect(0, 0, 1200, 1200);
     }
     screen.drawImage(off, 0, 0, LOGICAL, LOGICAL, 0, 0, 1200, 1200);
+    }
     if (exploreFrame) exploreFrame(now, dt);
     if (orbFrame) orbFrame(now, dt);
     if (arrowsDraw) arrowsDraw(now);
@@ -1715,7 +1737,8 @@
   }
 
   exploreFrame = (now, dt) => {
-    const active = playing && !learnLive() && !travelling && typeof shr.shrine_side_point === "function";
+    drawMinimap(now);
+    const active = playing && !learnLive() && !travelling && !trans && typeof shr.shrine_side_point === "function";
     arrows = SIDES.map((_, i) => {
       const p = active ? sideOnCanvas(i) : null;
       const prev = arrows[i] || { show: 0 };
@@ -1729,9 +1752,150 @@
   // Drawn after the orbs, on top.
   arrowsDraw = (now) => arrows.forEach((a, i) => drawArrow(a, i, now));
 
+  // ---- The move between islands.
+  const T_FADE_IN = 450, T_PAN_FROM = 300, T_PAN_TO = 1250, T_FADE_OUT_FROM = 1000, T_END = 1650;
+  const offOld = document.createElement("canvas");
+  offOld.width = LOGICAL; offOld.height = LOGICAL;
+  const offOldCtx = offOld.getContext("2d");
+  const imageOld = offOldCtx.createImageData(LOGICAL, LOGICAL);
+  let trans = null;
+  const ease = (t) => t * t * (3 - 2 * t);
+  const clamp01 = (t) => Math.max(0, Math.min(1, t));
+
+  // Where the next island over lies on screen, from the island's centre: the
+  // map's islands sit edge to edge, one grid (24 cells) apart.
+  function islandSpan(side) {
+    const a = sideOnCanvas(side), b = sideOnCanvas(side ^ 1);
+    if (!a || !b) return [SIDES[side][0] * 600, SIDES[side][1] * 300];
+    const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2;
+    const k = 24 / 26;                   // the arrows stand 13 cells out
+    return [(a.x - cx) * 2 * k, (a.y - cy) * 2 * k];
+  }
+
+  function blendSky(a, b, t) {
+    const out = [0, 24].map((shift) => {
+      const ca = Number((a >> BigInt(shift)) & 0xffffffn), cb = Number((b >> BigInt(shift)) & 0xffffffn);
+      let v = 0;
+      for (const c of [16, 8, 0]) {
+        const x = (ca >> c) & 0xff, y = (cb >> c) & 0xff;
+        v = (v << 8) | Math.round(x + (y - x) * t);
+      }
+      return BigInt(v) << BigInt(shift);
+    });
+    return out[0] | out[1];
+  }
+
+  function renderInto(player, clk, ctx, img) {
+    shr.shrine_set_camera(player, camYaw, camPitch);
+    const ptr = shr.shrine_render_visual(player, BigInt(Math.floor(clk)));
+    img.data.set(new Uint8ClampedArray(shr.memory.buffer, ptr, LOGICAL * LOGICAL * 4));
+    ctx.putImageData(img, 0, 0);
+    return typeof shr.shrine_sky_colors === "function" ? shr.shrine_sky_colors(player) : 0n;
+  }
+
+  transDraw = (now, dt) => {
+    if (!trans) return false;
+    const t = now - trans.start;
+    const newIn = ease(clamp01(t / T_FADE_IN));
+    const pan = ease(clamp01((t - T_PAN_FROM) / (T_PAN_TO - T_PAN_FROM)));
+    const oldOut = 1 - ease(clamp01((t - T_FADE_OUT_FROM) / (T_END - T_FADE_OUT_FROM)));
+    const litOld = renderInto(trans.old, trans.oldClock + (t * SAMPLE_RATE) / 1000, offOldCtx, imageOld);
+    const litNew = renderInto(visual, clock, offCtx, image);
+    codeScroll += CODE_PX_PER_S * dt;
+    drawSkyAndSource(blendSky(litOld, litNew, pan));
+    const [sx, sy] = trans.span;
+    screen.save();
+    screen.globalAlpha = oldOut;
+    screen.drawImage(offOld, 0, 0, LOGICAL, LOGICAL, -sx * pan, -sy * pan, 1200, 1200);
+    screen.globalAlpha = newIn;
+    screen.drawImage(off, 0, 0, LOGICAL, LOGICAL, sx * (1 - pan), sy * (1 - pan), 1200, 1200);
+    screen.restore();
+    if (t >= T_END) {
+      shr.shrine_free(trans.old);
+      if (!skyOverlayWanted) shr.shrine_set_sky_transparent(visual, 0);
+      trans = null;
+    }
+    return true;
+  };
+
+  // ---- The minimap: the spots around you, coloured by biome.
+  const BIOMES = ["Moss", "Verdant", "Fungal", "Near Future", "Research Lab", "Ecofuture", "Greenhouse"];
+  const BIOME_COLOURS = ["#6f9a55", "#3fbf6a", "#9a6fc8", "#f0a85a", "#5fc4e8", "#e8f2ee", "#a8e86a"];
+  const WEATHERS = ["Clear", "Rain", "Wind", "Fog", "Storm", "Snow", "Dusk"];
+  const MODES = ["half-time", "jungle", "2-step garage", "microsound"];
+  const MINIMAP_RADIUS = 4;
+  const minimap = document.getElementById("minimap");
+  const mm = minimap.getContext("2d");
+  const glanceCache = new Map();
+  function glance(x, y) {
+    const key = x + "," + y;
+    if (!glanceCache.has(key)) glanceCache.set(key, typeof shr.shrine_map_glance === "function" ? shr.shrine_map_glance(x, y) : 0);
+    return glanceCache.get(key);
+  }
+  const VISITED_KEY = "shrine-explorer-visited:" + location.pathname;
+  let visited = new Set();
+  try { visited = new Set(JSON.parse(localStorage.getItem(VISITED_KEY) || "[]")); } catch {}
+  function markVisited() {
+    visited.add(mapX + "," + mapY);
+    try { localStorage.setItem(VISITED_KEY, JSON.stringify([...visited].slice(-2000))); } catch {}
+  }
+  markVisited();
+  function drawMinimap(now) {
+    const w = minimap.width, h = minimap.height;
+    mm.clearRect(0, 0, w, h);
+    const cw = w / (2 * MINIMAP_RADIUS + 2), ch = cw / 2;
+    const ox = w / 2, oy = h / 2;
+    for (let s = -2 * MINIMAP_RADIUS; s <= 2 * MINIMAP_RADIUS; s++) {
+      // Back to front, so nearer diamonds overlap farther ones cleanly.
+      for (let dx = -MINIMAP_RADIUS; dx <= MINIMAP_RADIUS; dx++) {
+        const dy = s - dx;
+        if (Math.abs(dy) > MINIMAP_RADIUS) continue;
+        const x = mapX + dx, y = mapY + dy;
+        const g = glance(x, y);
+        const px = ox + ((dx - dy) * cw) / 2, py = oy + ((dx + dy) * ch) / 2;
+        const seen = visited.has(x + "," + y);
+        mm.globalAlpha = seen ? 1 : 0.38;
+        mm.fillStyle = BIOME_COLOURS[g & 15] || "#888";
+        mm.beginPath();
+        mm.moveTo(px, py - ch / 2 + 0.5); mm.lineTo(px + cw / 2 - 0.5, py); mm.lineTo(px, py + ch / 2 - 0.5); mm.lineTo(px - cw / 2 + 0.5, py);
+        mm.closePath(); mm.fill();
+        mm.globalAlpha = 1;
+        if (x === 0 && y === 0) {
+          mm.fillStyle = "#0d0c10"; mm.font = `${Math.round(ch * 1.1)}px ui-monospace, monospace`; mm.textAlign = "center"; mm.textBaseline = "middle";
+          mm.fillText("⌂", px, py + 0.5);
+        }
+        if (dx === 0 && dy === 0) {
+          const pulse = 0.6 + 0.4 * Math.sin(now / 250);
+          mm.strokeStyle = `rgba(255,79,216,${pulse})`; mm.lineWidth = 2;
+          mm.beginPath();
+          mm.moveTo(px, py - ch / 2 - 1.5); mm.lineTo(px + cw / 2 + 2, py); mm.lineTo(px, py + ch / 2 + 1.5); mm.lineTo(px - cw / 2 - 2, py);
+          mm.closePath(); mm.stroke();
+        }
+      }
+    }
+  }
+
+  // ---- Arriving: the place's name, like entering a new zone.
+  const bannerEl = document.getElementById("banner");
+  const seenBiomes = new Set();
+  let bannerTimer = 0;
+  function arrive() {
+    const g = glance(mapX, mapY);
+    const biome = BIOMES[g & 15] || "", weather = WEATHERS[(g >> 4) & 15] || "", mode = MODES[(g >> 8) & 3] || "";
+    const fresh = !seenBiomes.has(biome);
+    seenBiomes.add(biome);
+    document.getElementById("banner-title").textContent = biome.toUpperCase();
+    document.getElementById("banner-sub").textContent =
+      `${weather.toLowerCase()} · ${mode} · ${mapX}, ${mapY}${fresh && seenBiomes.size > 1 ? " · new biome" : ""}`;
+    bannerEl.classList.add("show");
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => bannerEl.classList.remove("show"), 3200);
+  }
+  seenBiomes.add(BIOMES[glance(mapX, mapY) & 15]);
+
   // Travel to the neighbour on side `side`.
   async function travel(side) {
-    if (travelling || !mapExports) return;
+    if (travelling || trans || !mapExports) return;
     travelling = true;
     const a = arrows[side];
     const [sx, sy] = SIDES[side];
@@ -1745,27 +1909,22 @@
       gain.gain.cancelScheduledValues(audio.currentTime);
       gain.gain.setTargetAtTime(0, audio.currentTime, TRAVEL_FADE_S / 4);
     }
-    // 2. The picture slides: a snapshot of this shrine slides out the way we
-    // came from, the new one in from where we're going.
-    const dir = a ? [a.dx, a.dy] : [sx, sy];
-    const snap = document.createElement("canvas");
-    snap.width = canvas.width; snap.height = canvas.height;
-    snap.className = "snap";
-    snap.getContext("2d").drawImage(canvas, 0, 0);
-    frameEl.insertBefore(snap, coordsEl);
+    // 2. The picture: the next island fades in beside this one, the view
+    // pans across to it, and this one fades away behind; the sky between
+    // them blends rather than moving.
     const old = visual;
+    const span = islandSpan(side);
     visual = newVisual(nx, ny);
-    shr.shrine_free(old);
+    shr.shrine_set_sky_transparent(old, 1);
+    shr.shrine_set_sky_transparent(visual, 1);
+    trans = { old, oldClock: clock, start: performance.now(), span, from: [mapX, mapY] };
     [mapX, mapY] = [nx, ny];
     cameraSpeed = mapX === 0 && mapY === 0 ? homeCameraSpeed : MAP_CAMERA_SPEED;
-    clock = 0; clockBase = 0; haveClockBase = false;
-    audioStartedAt = clockBaseAt = performance.now();
+    clock = 0; clockBase = 0; haveClockBase = false; clockShift = 0;
+    const movedAt = performance.now();
+    audioStartedAt = clockBaseAt = movedAt;
     showCoords();
-    const pct = (k) => `${(k * 100).toFixed(1)}%`;
-    const easing = "cubic-bezier(0.6, 0, 0.2, 1)";
-    snap.animate([{ transform: "translate(0, 0)" }, { transform: `translate(${pct(-dir[0])}, ${pct(-dir[1])})` }], { duration: SLIDE_MS, easing, fill: "forwards" });
-    canvas.animate([{ transform: `translate(${pct(dir[0])}, ${pct(dir[1])})` }, { transform: "translate(0, 0)" }], { duration: SLIDE_MS, easing });
-    setTimeout(() => snap.remove(), SLIDE_MS + 50);
+    markVisited();
     // 3. Learn and CyberPal describe the new shrine.
     // (CyberPal keeps its run: lines already read are not repeated.)
     D = null; described = null; lessonsEl.textContent = "";
@@ -1780,8 +1939,12 @@
         setTimeout(resolve, 8000);           // never wait forever
       });
       onArrived = null;
-      audioStartedAt = clockBaseAt = performance.now();
-      clock = 0; haveClockBase = false;
+      arrive();
+      // The music starts now; the picture carries on from where it is.
+      const arrivedAt = performance.now();
+      clockShift = ((arrivedAt - movedAt) * SAMPLE_RATE) / 1000;
+      audioStartedAt = clockBaseAt = arrivedAt;
+      haveClockBase = false;
       if (gain && audio) {
         gain.gain.cancelScheduledValues(audio.currentTime);
         gain.gain.setValueAtTime(0, audio.currentTime);

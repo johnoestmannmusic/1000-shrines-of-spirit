@@ -43,14 +43,41 @@ fn neighbours_differ_a_little_and_always_in_architecture() {
                 let changed = changed_groups(&a, &b);
                 assert!(changed.contains(&Group::Seed), "{x},{y}: the same architecture next door");
                 let others = changed.iter().filter(|g| **g != Group::Seed).count();
-                assert!(others <= 8, "{x},{y}: {others} groups changed in one step");
+                assert!(others <= 12, "{x},{y}: {others} groups changed in one step");
                 total += others;
                 steps += 1;
             }
         }
     }
     let mean = total as f64 / steps as f64;
-    assert!((1.0..=3.0).contains(&mean), "a step changes {mean:.2} groups on average");
+    assert!((2.5..=6.0).contains(&mean), "a step changes {mean:.2} groups on average");
+}
+
+#[test]
+fn the_music_changes_with_the_biome_not_between_its_shrines() {
+    // Within one biome region the core music is the same (bar a tempo nudge
+    // and the glitches); across a biome border it is rolled anew.
+    let h = home();
+    let core = |c: &SimConfig| {
+        let s = &c.settings;
+        format!("{:?}{:?}{:?}{}{:?}{:?}{:?}{:?}{:?}", c.seeds, s.pace, s.scale, s.chords, s.kit, s.loops, s.drone, s.garage, s.micro)
+    };
+    let (mut same_biome_same_music, mut same_biome, mut border_new_music, mut borders) = (0, 0, 0, 0);
+    for x in -40..40 {
+        let (a, b) = (at(&h, x, 5), at(&h, x + 1, 5));
+        let crossed = changed_groups(&a, &b).contains(&Group::Biome) || core(&a) != core(&b) && a.biome != b.biome;
+        if a.biome == b.biome && !crossed {
+            same_biome += 1;
+            same_biome_same_music += (core(&a) == core(&b)) as u32;
+        } else {
+            borders += 1;
+            border_new_music += (core(&a) != core(&b)) as u32;
+        }
+        assert!((a.settings.bpm as i32 - b.settings.bpm as i32).abs() <= 6 || core(&a) != core(&b), "a tempo jump inside a biome");
+    }
+    assert!(same_biome > 10 && borders > 3, "{same_biome} same-biome steps, {borders} borders");
+    assert!(same_biome_same_music as f64 >= same_biome as f64 * 0.8, "music changed inside a biome too often");
+    assert!(border_new_music as f64 >= borders as f64 * 0.6, "music stayed the same across biome borders");
 }
 
 #[test]
@@ -67,7 +94,7 @@ fn master_fx_and_camera_never_wander() {
 
 #[test]
 fn the_home_region_keeps_the_home_values() {
-    // The biome regions are twelve cells: right next to home, the biome is
+    // The biome regions are six cells: right next to home, the biome is
     // (almost always) the home's, while far away it varies.
     let h = home();
     let near = [(1, 0), (0, 1), (-1, 0), (0, -1)].iter().filter(|(x, y)| at(&h, *x, *y).biome == h.biome).count();

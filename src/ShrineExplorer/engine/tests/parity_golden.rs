@@ -51,18 +51,19 @@ const LOOP_RHYTHM_GOLDEN: u64 = 0x031b_5728_98c7_abfb;
 // path (BUG-11).
 // Re-locked (frames 1 and 2) when the default camera began turning at -2°/s.
 // Re-locked again in 0015 when the particles began drifting on the wind's integral.
-const ARCH_ROTATED_GOLDEN: [u64; 3] = [17908989690630947625, 16433218340908629111, 4621609053951884191];
+const ARCH_ROTATED_GOLDEN: [u64; 3] = [17908989690630947625, 12973562819805464214, 11769946843641759530];
 const VISUAL_GOLDEN: [u64; 5] = [
     // Re-locked when `raster::fill_face` was fixed (it drew side faces with x
     // and y swapped), for the weather rework (FEAT-40), for the textured, lit
     // architecture (FEAT-44), for its paler palette (FEAT-45), and when the
     // default camera began turning at -2°/s, and when the particles began
-    // drifting on the smooth sideways wind (rain leaning along its travel).
+    // drifting on the smooth sideways wind (rain leaning along its travel), and
+    // when ShrineExplorer's default camera stopped turning.
     2707076492999164165,
-    4578893504219904529,
-    4093479242753516145,
-    15557311065178985391,
-    8603863188815036400,
+    5951639061403494084,
+    9539640928788581152,
+    1345914533913460905,
+    4747126806457091625,
 ];
 
 #[test]
@@ -157,15 +158,15 @@ const FUTURE_GOLDEN: [(u64, [u64; 2]); 7] = [
     // faster. The second frames re-locked when the default camera began
     // turning at -2°/s. The storm, rain and microsound audio re-locked when
     // single raindrops stopped being heard.
-    (0x49f2_ebac_73cd_214c, [6579003113373532395, 17412602403879097409]),
-    (0xdde4_43af_eae0_af21, [7132316931383400372, 11513448211578082979]),
-    (0xb37b_73ba_d941_6b80, [3398551927623433174, 18153324263042612487]),
-    (0x2f23_fde2_de4e_a7b7, [5907740838678343107, 7288214402333182214]),
+    (0x49f2_ebac_73cd_214c, [6579003113373532395, 7410413762660609265]),
+    (0xdde4_43af_eae0_af21, [7132316931383400372, 8126553104016006186]),
+    (0xb37b_73ba_d941_6b80, [3398551927623433174, 9921433148641587418]),
+    (0x2f23_fde2_de4e_a7b7, [5907740838678343107, 4688576861515725671]),
     // 0015: microsound (locked after John's listen).
-    (0xe7d3_52bf_3bfb_6d78, [2707076492999164165, 15557311065178985391]),
+    (0xe7d3_52bf_3bfb_6d78, [2707076492999164165, 1345914533913460905]),
     // ShrineExplorer: two places on the map.
-    (0x727f_022d_4741_61b7, [8975066060329428222, 312660791243528184]),
-    (0xa6d5_a8d9_2569_6738, [7019705784899339802, 12634632265962727300]),
+    (0x548d_f7f5_04ec_6d78, [13919080986479252035, 17099393413621174909]),
+    (0x1eaa_a8cb_82f3_170e, [2536346570171508168, 4478966220302572998]),
 ];
 
 fn future_configs() -> Vec<(&'static str, SimConfig)> {

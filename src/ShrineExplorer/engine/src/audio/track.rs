@@ -328,7 +328,7 @@ pub const DEFAULT_SETTINGS: Settings =
         arch: crate::arch::ArchTransform::IDENTITY,
         glitch: crate::glitch_setup::GlitchSetup::DEFAULT,
         model: crate::shrine_model::ShrineModel::EMPTY,
-        camera_speed: -2,
+        camera_speed: 0,
         drone_rhythm: false,
         loop_rhythm: false,
         wildlife: false,

@@ -364,7 +364,8 @@ pub mod explore {
 //!   out of the home.
 //!
 //! The master effects are always the home's, and every shrine away from home
-//! turns at −2°/s and starts at the beginning.
+//! holds still (no camera turn, so the map keeps its directions on screen)
+//! and starts at the beginning.
 
 use crate::randomize::{apply, Group, GROUPS};
 use crate::rng::{hash3, Rng};
@@ -372,32 +373,29 @@ use crate::sim::SimConfig;
 
 /// How large every group's regions are, as a multiple of its own size: above
 /// 1 the map changes more gently from step to step, below 1 more busily.
-pub const MAP_REGION_SCALE: f64 = 1.0;
+pub const MAP_REGION_SCALE: f64 = 0.5;
 
-/// The camera turn of every shrine away from home, degrees per second.
-pub const MAP_CAMERA_SPEED: i16 = -2;
+/// The camera turn of every shrine away from home, degrees per second: none,
+/// so the map's directions always look the same way on screen.
+pub const MAP_CAMERA_SPEED: i16 = 0;
 
 /// A group's region size in cells (before [`MAP_REGION_SCALE`]): large for
 /// the settings that set a place's character, small for the details. A step
-/// crosses a group's border about once in its size, so these give about two
-/// changed groups per step, on top of the new architecture.
+/// crosses a group's border about once in its size; at the explorer's scale
+/// of 0.5 a step changes about four groups, on top of the new architecture.
 fn region_size(g: Group) -> f64 {
     match g {
         Group::Seed => 1.0,
-        Group::MusicSeeds => 4.0,
+        // The music changes with the biome (see `MUSIC`), so these four
+        // sizes are not used.
+        Group::MusicSeeds | Group::Mode | Group::Harmony | Group::Tempo => 12.0,
         Group::Biome => 12.0,
-        Group::Weather => 8.0,
-        Group::Mode => 14.0,
-        Group::Harmony => 8.0,
-        Group::Tempo => 6.0,
-        Group::Drums => 6.0,
-        Group::ModeDetails => 6.0,
-        Group::Atmosphere => 6.0,
-        Group::Drone => 6.0,
-        Group::Glitches => 4.0,
-        Group::Wildlife => 10.0,
-        Group::CodeOverlay => 10.0,
-        Group::Architecture => 8.0,
+        Group::Weather => 4.0,
+        Group::Drums | Group::ModeDetails | Group::Atmosphere | Group::Drone => 12.0,
+        Group::Glitches => 2.0,
+        Group::Wildlife => 6.0,
+        Group::CodeOverlay => 6.0,
+        Group::Architecture => 4.0,
     }
 }
 
@@ -405,6 +403,23 @@ fn region_size(g: Group) -> f64 {
 pub fn world(home: &SimConfig) -> u64 {
     hash3(home.seed, home.seeds.s1 ^ home.seeds.s5.rotate_left(17), home.seeds.s6 ^ 0x6D61_70)
 }
+
+/// The music's groups: they change together, at the biome's borders, so each
+/// biome is a musical world of its own; within one, a shrine's music differs
+/// only in its glitches and a nudge of tempo ([`TEMPO_NUDGE`]).
+const MUSIC: [Group; 8] = [
+    Group::MusicSeeds,
+    Group::Mode,
+    Group::Harmony,
+    Group::Tempo,
+    Group::Drums,
+    Group::ModeDetails,
+    Group::Atmosphere,
+    Group::Drone,
+];
+
+/// How far each shrine nudges its biome's tempo, either way, in BPM.
+const TEMPO_NUDGE: i64 = 3;
 
 fn pack(a: i64, b: i64) -> u64 {
     (a as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ (b as u64).rotate_left(29)
@@ -436,13 +451,24 @@ pub fn at(home: &SimConfig, x: i32, y: i32) -> SimConfig {
             c.seed = hash3(w, 0x5EED, pack(x as i64, y as i64)) % 100_000;
             continue;
         }
-        let ((rx, ry), home_region) = region(w, k, *g, x, y);
+        // The music follows the biome's regions (its offsets and size).
+        let ((rx, ry), home_region) = if MUSIC.contains(g) {
+            let biome = GROUPS.iter().position(|b| *b == Group::Biome).unwrap_or(k);
+            region(w, biome, Group::Biome, x, y)
+        } else {
+            region(w, k, *g, x, y)
+        };
         if home_region {
             continue;
         }
         let mut rng = Rng::new(hash3(w, 0x6E00 + k as u64, pack(rx, ry)));
         apply(&mut c, &[*g], &mut rng);
     }
+    // Each shrine nudges the tempo a little, so neighbours in one biome are
+    // close but never identical.
+    let mut n = Rng::new(hash3(w, 0x7E4E0, pack(x as i64, y as i64)));
+    let nudge = n.below((2 * TEMPO_NUDGE + 1) as usize) as i64 - TEMPO_NUDGE;
+    c.settings.bpm = (c.settings.bpm as i64 + nudge).clamp(70, 180) as u16;
     c.settings.camera_speed = MAP_CAMERA_SPEED;
     c.settings.master = home.settings.master;
     c.settings.start_s = 0;
@@ -485,6 +511,15 @@ pub fn changed_groups(a: &SimConfig, b: &SimConfig) -> Vec<Group> {
     check(Group::CodeOverlay, s.0.code != s.1.code);
     check(Group::Architecture, s.0.arch != s.1.arch);
     out
+}
+
+/// A spot at a glance, for the page's minimap: the biome index in bits 0–3,
+/// the weather index in bits 4–7, the mode in bits 8–9.
+pub fn glance(home: &SimConfig, x: i32, y: i32) -> u32 {
+    let c = at(home, x, y);
+    let biome = crate::plants::Biome::ALL.iter().position(|b| *b == c.biome).unwrap_or(0) as u32;
+    let weather = crate::weather::WeatherKind::ALL.iter().position(|w| *w == c.weather).unwrap_or(0) as u32;
+    biome | weather << 4 | c.settings.pace.index() << 8
 }
 
 }
@@ -7430,8 +7465,8 @@ impl Scene {
         Some((at.x as f64 / FP as f64, at.y as f64 / FP as f64, level))
     }
 
-    /// Where the middle of one side of the shrine's footprint is on screen,
-    /// at ground level and a cell and a half outside it, in logical pixels,
+    /// Where the middle of one side of the island is on screen, at ground
+    /// level and a cell beyond its edge, in logical pixels,
     /// and which way "outward" points there (a unit vector on screen). Sides:
     /// 0 = +x, 1 = −x, 2 = +y, 3 = −y, in the grid's own axes, so they turn
     /// with the camera's orbit. The explorer's arrows stand here.
@@ -7450,7 +7485,9 @@ impl Scene {
         };
         let (ox, oy) = self.shrine.origin();
         let (cx, cy) = (ox as f64 + (SHRINE_W as f64 - 1.0) / 2.0, oy as f64 + (SHRINE_H as f64 - 1.0) / 2.0);
-        let half = SHRINE_W as f64 / 2.0 + 1.5;
+        // Just beyond the island's own edge (the 24-cell plateau), well clear
+        // of the shrine.
+        let half = GRID_W as f64 / 2.0 + 1.0;
         let (ux, uy) = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)][(side % 4) as usize];
         let at = on_ground(cx + ux * half, cy + uy * half);
         let beyond = on_ground(cx + ux * (half + 1.0), cy + uy * (half + 1.0));
@@ -18663,7 +18700,7 @@ pub const DEFAULT_SETTINGS: Settings =
         arch: crate::arch::ArchTransform::IDENTITY,
         glitch: crate::glitch_setup::GlitchSetup::DEFAULT,
         model: crate::shrine_model::ShrineModel::EMPTY,
-        camera_speed: -2,
+        camera_speed: 0,
         drone_rhythm: false,
         loop_rhythm: false,
         wildlife: false,
@@ -19998,6 +20035,12 @@ pub extern "C" fn shrine_map_x() -> i32 {
 #[no_mangle]
 pub extern "C" fn shrine_map_y() -> i32 {
     crate::recipe::decode(&RECIPE).settings.map.1
+}
+
+/// The spot `(x, y)` of this artifact's map at a glance (see `explore::glance`).
+#[no_mangle]
+pub extern "C" fn shrine_map_glance(x: i32, y: i32) -> u32 {
+    crate::explore::glance(&crate::recipe::decode(&RECIPE), x, y)
 }
 
 /// Hear one layer alone (1 drone, 2–3 glitch layers, 4 bass, 5 drums, 6–9

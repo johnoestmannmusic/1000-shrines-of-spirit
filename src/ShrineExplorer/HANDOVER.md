@@ -47,6 +47,16 @@ At hand-off, `cargo test --workspace --release`, `./build-web.sh && node web/ver
 - `web/shrine.wasm` is the real artifact for the stored settings.
 - Gotcha: `scripts/check-wasm.sh` overwrites `web/shrine.wasm` with the dev engine build, so check an artifact's imports directly instead.
 
+### UX pass (2026-10-22)
+- No camera turn.
+- Twice the variation.
+- The music changes at biome borders.
+- Arrows further out.
+- The island-to-island transition (`transDraw`, timing constants `T_*`).
+- The minimap (`drawMinimap`, `shrine_map_glance`).
+- The arrival banner (`arrive()`).
+- The picture's clock carries across arrival via `clockShift`.
+
 ### Open ideas
 - The code overlay's look on the page comes from the home's baked exports, not each map shrine's own (mutated) overlay settings.
 - Orbs and arrows are drawn over everything, even when behind tall columns.

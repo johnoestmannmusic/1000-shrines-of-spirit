@@ -775,8 +775,8 @@ impl Scene {
         Some((at.x as f64 / FP as f64, at.y as f64 / FP as f64, level))
     }
 
-    /// Where the middle of one side of the shrine's footprint is on screen,
-    /// at ground level and a cell and a half outside it, in logical pixels,
+    /// Where the middle of one side of the island is on screen, at ground
+    /// level and a cell beyond its edge, in logical pixels,
     /// and which way "outward" points there (a unit vector on screen). Sides:
     /// 0 = +x, 1 = −x, 2 = +y, 3 = −y, in the grid's own axes, so they turn
     /// with the camera's orbit. The explorer's arrows stand here.
@@ -795,7 +795,9 @@ impl Scene {
         };
         let (ox, oy) = self.shrine.origin();
         let (cx, cy) = (ox as f64 + (SHRINE_W as f64 - 1.0) / 2.0, oy as f64 + (SHRINE_H as f64 - 1.0) / 2.0);
-        let half = SHRINE_W as f64 / 2.0 + 1.5;
+        // Just beyond the island's own edge (the 24-cell plateau), well clear
+        // of the shrine.
+        let half = GRID_W as f64 / 2.0 + 1.0;
         let (ux, uy) = [(1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)][(side % 4) as usize];
         let at = on_ground(cx + ux * half, cy + uy * half);
         let beyond = on_ground(cx + ux * (half + 1.0), cy + uy * (half + 1.0));
