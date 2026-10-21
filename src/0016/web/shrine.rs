@@ -16268,7 +16268,10 @@ impl Layer {
             pan: rng.bipolar() * cfg.pan_width,
             len: len.max(48),
             param,
-            ratchet: if rng.chance(0.25) { rng.int(2, cfg.max_ratchet) as u32 } else { 1 },
+            // A layer whose most is one retrigger never ratchets (asking for
+            // 2..=1 would be an empty range); the chance is still drawn, so
+            // every other layer's pattern is exactly as it was.
+            ratchet: if rng.chance(0.25) && cfg.max_ratchet >= 2 { rng.int(2, cfg.max_ratchet) as u32 } else { 1 },
             threshold: rng.unit(),
             noise_seed: rng.next_u64(),
         }

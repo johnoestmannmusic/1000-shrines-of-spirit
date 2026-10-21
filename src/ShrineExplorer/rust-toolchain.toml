@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned for reproducible builds. The emitted artifact does not depend on cargo
+# or this toolchain beyond a plain `rustc` that can target wasm32.
+channel = "1.98.1"
+targets = ["wasm32-unknown-unknown"]

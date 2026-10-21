@@ -1,0 +1,152 @@
+//! Microsound: the pulse sits exactly on the grid, every setting is heard,
+//! the output never depends on how it is rendered, and the other modes
+//! never hear any of it.
+
+use shrine_explorer::drums::{Drums, Voice};
+use shrine_explorer::harmony::{Harmony, Pace, Scale};
+use shrine_explorer::kits::{DrumSpace, Kit};
+use shrine_explorer::micro::{ChordRate, DroneShift, Dropouts, Grains, MicroSetup, Pips, Pulse};
+use shrine_explorer::rng::Rng;
+use shrine_explorer::tempo::Tempo;
+use shrine_explorer::{Settings, Track, DEFAULT_SEEDS, DEFAULT_SETTINGS, SAMPLE_RATE};
+
+fn harmony(tempo: Tempo) -> Harmony {
+    let (mut a, mut b) = (Rng::stream(1000, 0xD0), Rng::stream(1000, 0xD7));
+    Harmony::new(Scale::PentatonicMinor, 2, Pace::Micro, tempo.beat(), 2, &mut a, &mut b)
+}
+
+fn micro() -> Settings {
+    let mut s = DEFAULT_SETTINGS;
+    s.set_mode(Pace::Micro);
+    s
+}
+
+fn render(settings: Settings, seconds: usize, block: usize) -> Vec<f32> {
+    let mut t = Track::new(DEFAULT_SEEDS, settings);
+    let mut out = vec![0f32; seconds * SAMPLE_RATE as usize * 2];
+    for chunk in out.chunks_mut(block * 2) {
+        t.render(chunk);
+    }
+    out
+}
+
+#[test]
+fn the_pulse_is_four_on_the_floor_and_everything_is_on_the_grid() {
+    let tempo = Tempo::new(120);
+    let h = harmony(tempo);
+    let six = tempo.drum16 as usize;
+    for seed in 0..24u64 {
+        for kit in [Kit::SubClicks, Kit::MicroBlips, Kit::DataDust] {
+            let d = Drums::micro(seed, kit, DrumSpace::Wide, &h, tempo, MicroSetup::DEFAULT);
+            assert!(d.hits().iter().all(|(pos, _)| pos % six == 0), "seed {seed} {kit:?}: a hit off the grid");
+            let kicks: Vec<usize> = d.hits().iter().filter(|h| h.1 == Voice::Kick).map(|h| h.0 / six).collect();
+            // Bar A's four beats always; bar B may leave one out, never the one.
+            for step in [0, 4, 8, 12, 16] {
+                assert!(kicks.contains(&step), "seed {seed} {kit:?}: no kick on step {step}");
+            }
+            assert!(kicks.iter().all(|s| s % 4 == 0), "seed {seed} {kit:?}: a kick off the beat");
+            assert!(kicks.len() >= 7, "seed {seed} {kit:?}: more than one beat left out");
+        }
+        let off = MicroSetup { pulse: Pulse::Off, ..MicroSetup::DEFAULT };
+        let d = Drums::micro(seed, Kit::SubClicks, DrumSpace::Wide, &h, tempo, off);
+        assert!(d.hits().iter().all(|h| h.1 != Voice::Kick), "seed {seed}: a kick with the pulse off");
+    }
+}
+
+#[test]
+fn microsound_renders_the_same_however_it_is_cut() {
+    let s = micro();
+    let a = render(s, 30, 4096);
+    assert!(a.iter().all(|x| x.is_finite() && x.abs() <= 1.0));
+    assert!(a.iter().any(|x| x.abs() > 0.01), "microsound is silent");
+    assert_eq!(a, render(s, 30, 333), "the output depends on the block size");
+}
+
+#[test]
+fn every_microsound_setting_is_heard() {
+    let base = render(micro(), 40, 4096);
+    let changes = [
+        ("pulse", MicroSetup { pulse: Pulse::Off, ..MicroSetup::DEFAULT }),
+        ("grains", MicroSetup { grains: Grains::Dense, ..MicroSetup::DEFAULT }),
+        ("pips", MicroSetup { pips: Pips::Busy, ..MicroSetup::DEFAULT }),
+        ("dropouts", MicroSetup { dropouts: Dropouts::Many, ..MicroSetup::DEFAULT }),
+        ("chord rate", MicroSetup { chords: ChordRate::EveryBar, ..MicroSetup::DEFAULT }),
+        ("drone shift", MicroSetup { shift: DroneShift::Off, ..MicroSetup::DEFAULT }),
+    ];
+    for (name, m) in changes {
+        let s = Settings { micro: m, ..micro() };
+        assert_ne!(render(s, 40, 4096), base, "{name} changed nothing");
+    }
+}
+
+#[test]
+fn the_other_modes_never_hear_the_microsound_settings() {
+    let other = MicroSetup {
+        pulse: Pulse::Off,
+        grains: Grains::Dense,
+        pips: Pips::Busy,
+        dropouts: Dropouts::Many,
+        chords: ChordRate::EveryBar,
+        shift: DroneShift::Scale,
+    };
+    for pace in [Pace::HalfTime, Pace::Jungle, Pace::Garage] {
+        let mut s = DEFAULT_SETTINGS;
+        s.set_mode(pace);
+        assert_eq!(render(s, 6, 4096), render(Settings { micro: other, ..s }, 6, 4096), "{pace:?} heard the microsound settings");
+    }
+    assert_ne!(render(micro(), 6, 4096), render(DEFAULT_SETTINGS, 6, 4096), "microsound sounds like half-time");
+}
+
+#[test]
+fn the_chords_change_on_the_bar_count_asked() {
+    let tempo = Tempo::new(120);
+    for (rate, bars) in [(ChordRate::Every4, 4), (ChordRate::Every2, 2), (ChordRate::EveryBar, 1)] {
+        let step = bars * tempo.drum_bar();
+        let h = harmony(tempo).stepped(step, 4 * tempo.drum16);
+        for k in 0..8u64 {
+            // Each chord holds for exactly its step, then the next takes over.
+            assert_eq!(h.at(k * step).chord, (k as usize) % 2, "{rate:?}: step {k}");
+            assert_eq!(h.at(k * step + step - 1).chord, (k as usize) % 2, "{rate:?}: end of step {k}");
+        }
+    }
+}
+
+#[test]
+fn the_drone_fragments_keep_time_with_the_bar() {
+    use shrine_explorer::grains::Gate;
+    let six = Tempo::new(120).drum16;
+    for seed in 0..32u64 {
+        let mut g = Gate::new(seed, 0xD0, six, &[(8, 8), (4, 12), (12, 4), (16, 16), (8, 24), (4, 4)]);
+        let (on, off) = g.pattern();
+        assert!(matches!(on + off, 8 | 16 | 32), "seed {seed}: a pattern that does not fit the bar");
+        // Opens only ever on a beat, and the same length every time.
+        let mut opens = Vec::new();
+        let mut was = 0.0;
+        for clock in 0..(64 * six) {
+            let v = g.next(clock);
+            // (A piece may begin part-way through a fragment: that is not an opening.)
+            if was == 0.0 && v > 0.0 && clock > 0 {
+                opens.push(clock);
+            }
+            was = v;
+        }
+        assert!(opens.len() >= 2, "seed {seed}: never opened");
+        assert!(opens.iter().all(|c| c % (4 * six) == 0), "seed {seed}: opened off the beat");
+        assert!(opens.windows(2).all(|w| w[1] - w[0] == (on + off) * six), "seed {seed}: an uneven rhythm");
+    }
+}
+
+#[test]
+fn switching_modes_moves_only_untouched_defaults() {
+    let mut s = DEFAULT_SETTINGS;
+    s.set_mode(Pace::Micro);
+    assert_eq!((s.bpm, s.scale, s.chords), Settings::mode_defaults(Pace::Micro));
+    s.set_mode(Pace::Garage);
+    assert_eq!((s.bpm, s.scale, s.chords), Settings::mode_defaults(Pace::Garage));
+    s.set_mode(Pace::HalfTime);
+    assert_eq!((s.bpm, s.scale, s.chords), (DEFAULT_SETTINGS.bpm, DEFAULT_SETTINGS.scale, DEFAULT_SETTINGS.chords));
+    // A hand-picked tempo survives a change of mode.
+    s.bpm = 140;
+    s.set_mode(Pace::Micro);
+    assert_eq!(s.bpm, 140);
+}

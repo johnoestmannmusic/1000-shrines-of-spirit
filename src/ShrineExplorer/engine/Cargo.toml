@@ -1,0 +1,15 @@
+[package]
+name = "shrine-explorer-engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "ShrineExplorer - the artifact: a deterministic, zero-dependency isometric shrine (visuals + music)."
+publish = false
+
+# Deliberately zero dependencies: every generator, rasteriser and DSP block is
+# implemented here so the shrine renders and sounds identical for decades.
+[dependencies]
+
+[lib]
+name = "shrine_explorer"
+crate-type = ["rlib", "cdylib"]
